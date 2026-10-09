@@ -1,8 +1,8 @@
-import { Check, LogOut, Moon, Sun, TriangleAlert } from "lucide-react";
+import { Check, LogOut, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Session } from "../lib/api";
-import { api } from "../lib/api";
+import { api, isStale, UPDATE_EVENT } from "../lib/api";
 import { navigate, type Theme, useClickOutside } from "../lib/hooks";
 
 export function Wordmark({ to = "/" }: { to?: string }) {
@@ -126,5 +126,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 ))}
             </div>
         </ToastContext.Provider>
+    );
+}
+
+// Shown when the server has been updated since this tab loaded. Reloading is the
+// person's choice (they may be mid-thought), but old code and a new server can
+// disagree, so the notice stays until they do.
+export function UpdateNotice() {
+    const [show, setShow] = useState(isStale);
+    useEffect(() => {
+        const on = () => setShow(true);
+        window.addEventListener(UPDATE_EVENT, on);
+        return () => window.removeEventListener(UPDATE_EVENT, on);
+    }, []);
+    if (!show) return null;
+    return (
+        <div className="update-notice" role="status">
+            <span>Atelier has been updated.</span>
+            <button type="button" className="btn btn-sm" onClick={() => window.location.reload()}>
+                <RefreshCw /> Reload
+            </button>
+        </div>
     );
 }

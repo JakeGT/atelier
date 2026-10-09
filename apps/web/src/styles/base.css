@@ -555,3 +555,28 @@ textarea {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ---- "the app was updated" notice ---------------------------------------------- */
+
+.update-notice {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 8px 8px 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    font-size: 13.5px;
+    animation: rise 0.4s var(--ease-spring);
+}
+
+@media (max-width: 960px) {
+    .update-notice {
+        bottom: 72px;
+    }
+}

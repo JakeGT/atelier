@@ -6,7 +6,7 @@ import { Editor } from "./pages/Editor";
 import { Landing } from "./pages/Landing";
 import { Login, safeNext } from "./pages/Login";
 import { Studio } from "./pages/Studio";
-import { Dots, ToastProvider, Wordmark } from "./ui/kit";
+import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
 
 export function App() {
     const [theme, toggleTheme] = useTheme();
@@ -69,7 +69,12 @@ export function App() {
         page = <Studio session={session} theme={theme} onToggleTheme={toggleTheme} />;
     }
 
-    return <ToastProvider>{page}</ToastProvider>;
+    return (
+        <ToastProvider>
+            {page}
+            <UpdateNotice />
+        </ToastProvider>
+    );
 }
 
 function ProjectRoute(props: { slug: string; session: Session; canPublish: boolean; theme: "paper" | "night"; onToggleTheme: () => void }) {

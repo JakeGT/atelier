@@ -57,9 +57,17 @@ const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz)(\/|$)/;
 export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } {
     const app = new Hono();
 
+    // The built web app, when present (WEB_DIST_DIR in the image). Its entry script
+    // is fingerprinted, so that file name identifies the build being served.
+    const dist = deps.config.webDistDir;
+    const shell = dist && existsSync(join(dist, "index.html")) ? readFileSync(join(dist, "index.html"), "utf8") : null;
+    const build = shell?.match(/\/assets\/(index-[\w-]+\.js)/)?.[1];
+
     app.use("*", async (c, next) => {
         await next();
         for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+        // Lets a tab that has been open across a deploy notice it is running old code.
+        if (build && /^\/(api|auth)\//.test(c.req.path)) c.res.headers.set("x-atelier-build", build);
         // Every HTML document gets a CSP; previews set their own (sandboxing) one.
         const html = c.res.headers.get("content-type")?.startsWith("text/html");
         if (html && !c.res.headers.has("content-security-policy"))
@@ -72,16 +80,13 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
     const api = apiRoutes(deps.sessions, deps.store, deps.runtime, deps.config, deps.secretsKey);
     app.route("/", api.app);
 
-    // Serve the built web app when present (set WEB_DIST_DIR in the image).
-    const dist = deps.config.webDistDir;
-    if (dist && existsSync(join(dist, "index.html"))) {
+    if (dist && shell) {
         // Fingerprinted bundles are immutable; the shell itself is never cached.
         app.use("/assets/*", async (c, next) => {
             await next();
             if (c.res.ok) c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
         });
         app.use("*", serveStatic({ root: dist }));
-        const shell = readFileSync(join(dist, "index.html"), "utf8");
         // Client-side routes (/p/my-site, …) all load the shell.
         app.get("*", (c) => {
             if (NOT_APP.test(c.req.path)) return c.json({ error: "not found" }, 404);

@@ -120,7 +120,28 @@ export class ApiError extends Error {
 
 let csrfToken: string | null = null;
 
+// ---- noticing a deploy ---------------------------------------------------------------
+// A tab left open across a deploy keeps running the old bundle. The server names the
+// build it is serving on every API response; when that stops matching the script this
+// page loaded, the app offers a reload (see UpdateNotice).
+
+export const UPDATE_EVENT = "atelier:update";
+const myBuild = new URL(import.meta.url).pathname.split("/").pop() ?? "";
+let stale = false;
+
+export const isStale = (): boolean => stale;
+
+function noteBuild(res: Response): Response {
+    const serving = res.headers.get("x-atelier-build");
+    if (!stale && serving && /^index-.+\.js$/.test(myBuild) && serving !== myBuild) {
+        stale = true;
+        window.dispatchEvent(new Event(UPDATE_EVENT));
+    }
+    return res;
+}
+
 async function parse<T>(res: Response): Promise<T> {
+    noteBuild(res);
     if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         if (res.status === 401 && body?.error === "reauth_required") throw new ReauthRequired();
@@ -163,7 +184,7 @@ export function reauthenticate(): void {
 export const api = {
     config: () => get<PublicConfig>("/api/v1/config"),
     session: async (): Promise<Session | null> => {
-        const s = (await fetch("/auth/session").then((r) => r.json())) as Session | null;
+        const s = (await fetch("/auth/session").then((r) => noteBuild(r).json())) as Session | null;
         csrfToken = s?.csrfToken ?? null;
         return s;
     },

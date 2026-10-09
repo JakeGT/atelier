@@ -34,7 +34,10 @@ test("container runtime mode refuses to start without its secrets", async () => 
 
 test("the app shell is served for client routes, with a CSP and a fresh nonce each time", async () => {
     const dist = await mkdtemp(join(tmpdir(), "atelier-dist-"));
-    await writeFile(join(dist, "index.html"), "<!doctype html><title>Atelier</title>");
+    await writeFile(
+        join(dist, "index.html"),
+        '<!doctype html><title>Atelier</title><script type="module" src="/assets/index-AbC_12-x.js"></script>',
+    );
     const { app } = await makeApp({ WEB_DIST_DIR: dist });
     const csp = async (path: string) => {
         const res = await app.request(path);
@@ -47,6 +50,10 @@ test("the app shell is served for client routes, with a CSP and a fresh nonce ea
     assert.match(a, /script-src 'self' 'nonce-[A-Za-z0-9+/=]+'/);
     assert.match(a, /frame-ancestors 'self'/);
     assert.notEqual(a, b);
+    // API responses name the build, so an open tab can tell when it is out of date.
+    assert.equal((await app.request("/auth/session")).headers.get("x-atelier-build"), "index-AbC_12-x.js");
+    assert.equal((await app.request("/api/v1/config")).headers.get("x-atelier-build"), "index-AbC_12-x.js");
+    assert.equal((await app.request("/")).headers.get("x-atelier-build"), null);
     // API and asset misses are real 404s, not the shell.
     assert.equal((await app.request("/api/nope")).status, 404);
     assert.equal((await app.request("/assets/missing.js")).status, 404);
