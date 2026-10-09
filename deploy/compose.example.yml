@@ -1,0 +1,68 @@
+# Atelier with Docker Compose: the server and Postgres. A starting point, not a
+# finished deployment — put a reverse proxy with TLS in front of the server, and
+# keep the secrets somewhere safe. On the jaketalling platform the real stack
+# lives in the infra repo at apps/atelier/compose.yml (see docs/14).
+#
+#   mkdir -p secrets
+#   openssl rand -base64 24 > secrets/postgres_password
+#   printf 'postgres://atelier:%s@db:5432/atelier' "$(cat secrets/postgres_password)" > secrets/atelier_database_url
+#   printf 'the authentic oidc client secret' > secrets/atelier_oidc_client_secret
+#   chmod 0400 secrets/*
+#   docker compose -f deploy/compose.example.yml up -d --build
+
+name: atelier
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atelier
+      POSTGRES_DB: atelier
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atelier -d atelier"]
+      interval: 5s
+      retries: 20
+
+  server:
+    build: { context: .., target: server }
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PUBLIC_ORIGIN: https://atelier.example.com
+      DATABASE_URL_FILE: /run/secrets/atelier_database_url
+      AUTH_MODE: oidc
+      OIDC_ISSUER: https://auth.example.com/application/o/atelier/
+      OIDC_CLIENT_ID: atelier
+      OIDC_CLIENT_SECRET_FILE: /run/secrets/atelier_oidc_client_secret
+      OIDC_PROVIDER_NAME: example
+      OIDC_ADMIN_GROUP: platform-admin
+      SIGNUP_MODE: invite
+    secrets: [atelier_database_url, atelier_oidc_client_secret]
+    networks: [data, proxy]
+    # Published here for trying it out; behind a reverse proxy, remove this.
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+
+networks:
+  data:
+    internal: true
+  proxy: {}
+
+volumes:
+  db-data: {}
+
+secrets:
+  postgres_password: { file: ./secrets/postgres_password }
+  atelier_database_url: { file: ./secrets/atelier_database_url }
+  atelier_oidc_client_secret: { file: ./secrets/atelier_oidc_client_secret }

@@ -1,0 +1,125 @@
+import { createHash, randomBytes } from "node:crypto";
+import * as oauth from "openid-client";
+
+export interface OidcOptions {
+    issuer: string;
+    clientId: string;
+    clientSecret: string;
+    publicOrigin: string;
+    providerName: string;
+    adminGroup: string;
+    trustEmail: boolean;
+    scopes: string;
+}
+
+export interface VerifiedClaims {
+    issuer: string;
+    subject: string;
+    email: string;
+    verified: boolean;
+    name: string;
+    groups: string[];
+}
+
+const CALLBACK_PATH = "/auth/callback";
+
+// Authorization-code flow with PKCE (S256), following the pattern used by
+// triagent for Authentik. The browser gets a redirect; the callback verifies
+// state/nonce, exchanges the code, and validates the id_token signature.
+export class OidcService {
+    private readonly opts: OidcOptions;
+    private readonly client: Awaited<ReturnType<typeof oauth.discovery>>;
+
+    private constructor(opts: OidcOptions, client: Awaited<ReturnType<typeof oauth.discovery>>) {
+        this.opts = opts;
+        this.client = client;
+    }
+
+    static async discover(opts: OidcOptions): Promise<OidcService> {
+        const client = await oauth.discovery(new URL(opts.issuer), opts.clientId, opts.clientSecret);
+        return new OidcService(opts, client);
+    }
+
+    get providerName(): string {
+        return this.opts.providerName;
+    }
+
+    get adminGroup(): string {
+        return this.opts.adminGroup;
+    }
+
+    get trustEmail(): boolean {
+        return this.opts.trustEmail;
+    }
+
+    callbackUri(): string {
+        return new URL(CALLBACK_PATH, this.opts.publicOrigin).toString();
+    }
+
+    async buildLoginUrl(state: string, nonce: string, codeVerifier: string, maxAge?: number): Promise<string> {
+        const url = oauth.buildAuthorizationUrl(this.client, {
+            redirect_uri: this.callbackUri(),
+            scope: this.opts.scopes,
+            state,
+            nonce,
+            code_challenge: codeChallenge(codeVerifier),
+            code_challenge_method: "S256",
+            ...(maxAge !== undefined ? { max_age: String(maxAge) } : {}),
+        });
+        return url.toString();
+    }
+
+    async handleCallback(
+        returnUrl: string,
+        expectedState: string,
+        expectedNonce: string,
+        codeVerifier: string,
+        maxAge?: number,
+    ): Promise<VerifiedClaims> {
+        const tokens = await oauth.authorizationCodeGrant(this.client, new URL(returnUrl), {
+            expectedState,
+            expectedNonce,
+            pkceCodeVerifier: codeVerifier,
+            ...(maxAge !== undefined ? { max_age: maxAge } : {}),
+        });
+        const claims = tokens.claims();
+        if (!claims) throw new Error("The identity provider did not return an id token.");
+
+        const userinfo = await oauth.fetchUserInfo(this.client, tokens.access_token, claims.sub).catch(() => null);
+        const c = claims as unknown as Record<string, unknown>;
+        const u = (userinfo ?? {}) as Record<string, unknown>;
+
+        const email = (c.email as string | undefined) ?? (u.email as string | undefined) ?? "";
+        const verified = c.email_verified === true || u.email_verified === true;
+        const name =
+            (c.name as string | undefined) ?? (c.preferred_username as string | undefined) ?? (u.name as string | undefined) ?? email;
+        const groups = Array.isArray(c.groups) ? c.groups.map(String) : [];
+
+        return { issuer: claims.iss, subject: claims.sub, email, verified, name, groups };
+    }
+
+    async logoutUrl(idTokenHint?: string): Promise<string | undefined> {
+        const endSession = this.client.serverMetadata().end_session_endpoint;
+        if (!endSession) return undefined;
+        const url = new URL(endSession);
+        url.searchParams.set("post_logout_redirect_uri", this.opts.publicOrigin);
+        if (idTokenHint) url.searchParams.set("id_token_hint", idTokenHint);
+        return url.toString();
+    }
+}
+
+export function randomState(): string {
+    return randomBytes(16).toString("hex");
+}
+
+export function randomNonce(): string {
+    return randomBytes(16).toString("hex");
+}
+
+export function randomCodeVerifier(): string {
+    return randomBytes(64).toString("base64url");
+}
+
+function codeChallenge(verifier: string): string {
+    return createHash("sha256").update(verifier).digest("base64url");
+}

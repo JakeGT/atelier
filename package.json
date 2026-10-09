@@ -1,0 +1,25 @@
+{
+  "name": "atelier",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-tenant, multi-project AI-assisted website builder and editor",
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.26.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "test": "node --test --test-reporter=spec \"apps/*/test/**/*.test.ts\"",
+    "build:web": "pnpm --filter @atelier/web build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
+  }
+}
