@@ -201,6 +201,7 @@ test("with no tenant set, every tenant-scoped table reads as empty (fail closed)
         "agent_sessions",
         "agent_messages",
         "invitations",
+        "provider_keys",
         "usage_events",
     ]) {
         const [r] = await raw<{ n: number }[]>`SELECT count(*)::int AS n FROM ${raw(table)}`;
@@ -565,4 +566,23 @@ test("usage is recorded once per source, summed per tenant, and cannot be rewrit
         store.withTenant(a.tenantId, (tx) => tx`DELETE FROM usage_events`),
         /permission denied/,
     );
+});
+
+test("provider keys: one per provider per tenant, replaced in place, invisible to other tenants", { skip }, async () => {
+    const a = await seedTenant("tenant-keys-a");
+    const b = await seedTenant("tenant-keys-b");
+    const email = `keys-${suffix}@example.com`;
+    const who = await store.users.upsertIdentity({ issuer: "https://idp/", subject: email, email, name: "Keys", admin: false });
+    await store.providerKeys.put({ tenantId: a.tenantId, provider: "openai", sealed: "sealed-1", hint: "1111", createdBy: who.id });
+    await store.providerKeys.put({ tenantId: a.tenantId, provider: "openai", sealed: "sealed-2", hint: "2222", createdBy: who.id });
+    await store.providerKeys.put({ tenantId: b.tenantId, provider: "openai", sealed: "sealed-b", hint: "bbbb", createdBy: who.id });
+    assert.deepEqual(
+        (await store.providerKeys.list(a.tenantId)).map((k) => [k.provider, k.hint]),
+        [["openai", "2222"]],
+    );
+    assert.equal(await store.providerKeys.getSealed(a.tenantId, "openai"), "sealed-2");
+    assert.equal(await store.providerKeys.getSealed(b.tenantId, "openai"), "sealed-b");
+    await store.providerKeys.delete(a.tenantId, "openai");
+    assert.equal(await store.providerKeys.getSealed(a.tenantId, "openai"), null);
+    assert.equal(await store.providerKeys.getSealed(b.tenantId, "openai"), "sealed-b");
 });

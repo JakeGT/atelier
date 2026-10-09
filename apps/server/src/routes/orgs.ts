@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { INVITABLE_ROLES, ORG_ROLES, type OrgRole } from "@atelier/shared";
+import { validModelRef } from "../services/providers.ts";
 import { SlugTakenError } from "../store/types.ts";
 import { type Api, ORG, param, slugify, startOfUtcDay } from "./kit.ts";
 
@@ -55,7 +56,7 @@ export function orgRoutes(api: Api): void {
         }
         if (body?.defaultModel === null || typeof body?.defaultModel === "string") {
             const model = typeof body.defaultModel === "string" ? body.defaultModel.trim() : "";
-            if (model.length > 120) return c.json({ error: "that model name is too long" }, 400);
+            if (model && !validModelRef(model)) return c.json({ error: "choose a model from a supported provider" }, 400);
             patch.defaultModel = model || null;
         }
         const org = await store.organizations.update(c.get("org").id, patch);

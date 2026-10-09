@@ -63,10 +63,10 @@ test("organisation settings: admins can rename and set a default model, editors 
     const owner = await signIn(t);
     const editor = await signIn(t, { tenantId: owner.org.id, role: "editor" });
     assert.equal((await patch(t, editor, owner.api, { name: "Hacked" })).status, 404);
-    const res = await patch(t, owner, owner.api, { name: "  Okoro & Co  ", defaultModel: "provider/some-model" });
+    const res = await patch(t, owner, owner.api, { name: "  Okoro & Co  ", defaultModel: "anthropic/some-model" });
     const org = (await json<{ org: Organization }>(res)).org;
     assert.equal(org.name, "Okoro & Co");
-    assert.equal(org.defaultModel, "provider/some-model");
+    assert.equal(org.defaultModel, "anthropic/some-model");
     // The address (slug) never changes with the name.
     assert.equal(org.slug, owner.org.slug);
     assert.equal((await json<{ org: Organization }>(await patch(t, owner, owner.api, { defaultModel: "" }))).org.defaultModel, null);
@@ -222,12 +222,16 @@ test("the model: the project's own, else the organisation's, else the runtime's 
     const url = `${owner.api}/projects/${project.id}`;
     await runOnce(t, owner, project);
     assert.equal(t.agent.calls.at(-1)?.model, null);
-    await patch(t, owner, owner.api, { defaultModel: "org/model" });
+    // A chosen model runs on the studio's own key for that provider (see models.test.ts).
+    for (const provider of ["openai", "anthropic"]) {
+        await t.store.providerKeys.put({ tenantId: owner.org.id, provider, sealed: "sealed", hint: "0000", createdBy: owner.user.id });
+    }
+    await patch(t, owner, owner.api, { defaultModel: "openai/org-model" });
     await runOnce(t, owner, project);
-    assert.equal(t.agent.calls.at(-1)?.model, "org/model");
-    await patch(t, owner, url, { agentModel: "project/model" });
+    assert.equal(t.agent.calls.at(-1)?.model, "openai/org-model");
+    await patch(t, owner, url, { agentModel: "anthropic/project-model" });
     await runOnce(t, owner, project);
-    assert.equal(t.agent.calls.at(-1)?.model, "project/model");
+    assert.equal(t.agent.calls.at(-1)?.model, "anthropic/project-model");
 });
 
 test("archive hides and freezes a website; restore brings it back; delete is permanent and careful", async () => {

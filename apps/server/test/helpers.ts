@@ -7,6 +7,7 @@ import { createApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import type { AgentRunInput, AgentRuntime } from "../src/services/agent.ts";
 import { ensureUserOrg } from "../src/services/bootstrap.ts";
+import type { ModelCatalog } from "../src/services/catalog.ts";
 import { cookieName } from "../src/services/cookies.ts";
 import type { OidcService } from "../src/services/oidc.ts";
 import { LocalRuntime } from "../src/services/runtime.ts";
@@ -30,13 +31,17 @@ export function fakeAgent(): AgentRuntime & { calls: AgentRunInput[] } {
     };
 }
 
-export async function makeApp(env: Record<string, string> = {}, oidc?: OidcService) {
+export async function makeApp(
+    env: Record<string, string> = {},
+    oidc?: OidcService,
+    extra: { catalog?: ModelCatalog; providerFetch?: typeof fetch } = {},
+) {
     const config = loadConfig({ AUTH_MODE: "off", COOKIE_SECURE: "false", PUBLIC_ORIGIN: "http://localhost:8080", ...env });
     const store = new MemoryStore();
     const sessions = new SessionStore(store.loginSessions, store.users);
     const agent = fakeAgent();
     const runtime = new LocalRuntime(await mkdtemp(join(tmpdir(), "atelier-test-")), agent);
-    const { app, declared } = createApp({ config, store, sessions, runtime, oidc, secretsKey: SECRETS_KEY });
+    const { app, declared } = createApp({ config, store, sessions, runtime, oidc, secretsKey: SECRETS_KEY, ...extra });
     return { app, declared, store, sessions, agent, runtime, config };
 }
 

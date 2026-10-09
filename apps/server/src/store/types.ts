@@ -76,6 +76,20 @@ export interface ProjectStore {
     delete(tenantId: string, id: string): Promise<void>;
 }
 
+export interface ProviderKeyInfo {
+    provider: string;
+    hint: string;
+    updatedAt: string;
+}
+
+// A studio's sealed provider keys. `sealed` is opaque here: only SecretBox opens it.
+export interface ProviderKeyStore {
+    list(tenantId: string): Promise<ProviderKeyInfo[]>;
+    getSealed(tenantId: string, provider: string): Promise<string | null>;
+    put(input: { tenantId: string; provider: string; sealed: string; hint: string; createdBy: string }): Promise<void>;
+    delete(tenantId: string, provider: string): Promise<void>;
+}
+
 export interface UsageTotals {
     projectId: string | null;
     kind: string;
@@ -202,6 +216,7 @@ export interface Store {
     memberships: MembershipStore;
     invitations: InvitationStore;
     usage: UsageStore;
+    providerKeys: ProviderKeyStore;
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;

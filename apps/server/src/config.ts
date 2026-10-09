@@ -33,6 +33,8 @@ const envSchema = z.object({
     // Safety ceilings applied to organisations that have not been given their own.
     DEFAULT_MAX_PROJECTS: z.coerce.number().int().positive().default(25),
     DEFAULT_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().default(5_000_000),
+    // Point a provider at your own gateway: {"openai":"https://gateway.example/v1"} (ADR-0011).
+    PROVIDER_UPSTREAMS: z.string().optional(),
     INVITE_TTL_DAYS: z.coerce.number().positive().default(14),
     // Workspace containers idle for longer than this are stopped (their files stay).
     WORKSPACE_IDLE_MINUTES: z.coerce.number().positive().default(30),
@@ -83,6 +85,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
             throw new ConfigError("AUTH_MODE=dev is only allowed on http://localhost with COOKIE_SECURE=false");
         }
     }
+    let providerUpstreams: Record<string, string> = {};
+    if (e.PROVIDER_UPSTREAMS) {
+        try {
+            const parsed = JSON.parse(e.PROVIDER_UPSTREAMS) as Record<string, unknown>;
+            providerUpstreams = Object.fromEntries(
+                Object.entries(parsed).filter((kv): kv is [string, string] => typeof kv[1] === "string"),
+            );
+            for (const url of Object.values(providerUpstreams)) new URL(url);
+        } catch {
+            throw new ConfigError("PROVIDER_UPSTREAMS must be a JSON object of provider id to URL");
+        }
+    }
     const oidcClientSecret = e.OIDC_CLIENT_SECRET ?? (e.OIDC_CLIENT_SECRET_FILE ? readSecret(e.OIDC_CLIENT_SECRET_FILE) : undefined);
 
     const oidc =
@@ -109,6 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         defaultMaxProjects: e.DEFAULT_MAX_PROJECTS,
         defaultDailyTokenLimit: e.DEFAULT_DAILY_TOKEN_LIMIT,
         inviteTtlDays: e.INVITE_TTL_DAYS,
+        providerUpstreams,
         workspaceIdleMinutes: e.WORKSPACE_IDLE_MINUTES,
         runtimeMode: e.RUNTIME_MODE,
         provisionerUrl: e.PROVISIONER_URL,

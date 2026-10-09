@@ -27,6 +27,7 @@ import type {
     MessageStore,
     OrganizationStore,
     ProjectStore,
+    ProviderKeyStore,
     ReleaseStore,
     Store,
     UsageStore,
@@ -49,6 +50,7 @@ export class MemoryStore implements Store {
     private readonly invitationMap = new Map<string, Invitation & { acceptedAt: string | null }>();
     private readonly usageLog: { tenantId: string; projectId: string | null; kind: string; units: number; at: number }[] = [];
     private readonly usageSeen = new Set<string>();
+    private readonly providerKeyMap = new Map<string, { sealed: string; hint: string; updatedAt: string }>();
 
     private live(): (Invitation & { acceptedAt: string | null })[] {
         return [...this.invitationMap.values()].filter((i) => i.acceptedAt === null && new Date(i.expiresAt).getTime() > Date.now());
@@ -197,6 +199,21 @@ export class MemoryStore implements Store {
                 joined.push(i.tenantId);
             }
             return joined;
+        },
+    };
+
+    providerKeys: ProviderKeyStore = {
+        list: async (tenantId) =>
+            [...this.providerKeyMap.entries()]
+                .filter(([k]) => k.startsWith(`${tenantId}\0`))
+                .map(([k, v]) => ({ provider: k.split("\0")[1] ?? "", hint: v.hint, updatedAt: v.updatedAt }))
+                .sort((a, b) => a.provider.localeCompare(b.provider)),
+        getSealed: async (tenantId, provider) => this.providerKeyMap.get(key(tenantId, provider))?.sealed ?? null,
+        put: async (input) => {
+            this.providerKeyMap.set(key(input.tenantId, input.provider), { sealed: input.sealed, hint: input.hint, updatedAt: now() });
+        },
+        delete: async (tenantId, provider) => {
+            this.providerKeyMap.delete(key(tenantId, provider));
         },
     };
 
