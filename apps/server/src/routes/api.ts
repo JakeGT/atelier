@@ -58,8 +58,8 @@ export function apiRoutes(
     const previewKey = `${secretsKey}:preview`;
     const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
 
-    app.use("/api/v1/*", requireAuth(sessions, store));
-    const csrf = requireCsrf(sessions, config.publicOrigin);
+    app.use("/api/v1/*", requireAuth(sessions, store, config.cookieSecure));
+    const csrf = requireCsrf(sessions, config.publicOrigin, config.cookieSecure);
     app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" ? next() : csrf(c, next)));
 
     function route(method: "get" | "post" | "put", path: string, permission: Permission, ...rest: [...MiddlewareHandler<Env>[], Handler]) {

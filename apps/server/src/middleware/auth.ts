@@ -1,9 +1,9 @@
 import type { Organization, OrgRole, Permission, Project } from "@atelier/shared";
 import { hasOperatorPermission, hasPermission } from "@atelier/shared";
 import type { Context, Next } from "hono";
-import { getCookie } from "hono/cookie";
 import { sameOrigin } from "../security.ts";
-import { SESSION_COOKIE, type SessionStore, type SessionUser } from "../services/sessions.ts";
+import { readCookie } from "../services/cookies.ts";
+import type { SessionStore, SessionUser } from "../services/sessions.ts";
 import type { Store } from "../store/types.ts";
 
 export interface ApiVariables {
@@ -20,9 +20,9 @@ type ApiContext = Context<{ Variables: ApiVariables }>;
 // Resolves the session cookie to a user, their (first) organization, and their
 // role in it. P1 is a single-tenant slice, so "the tenant" is the user's first
 // org; tenant selection from the URL (/orgs/{org}/...) arrives with P2.
-export function requireAuth(sessions: SessionStore, store: Store) {
+export function requireAuth(sessions: SessionStore, store: Store, secureCookies: boolean) {
     return async (c: ApiContext, next: Next) => {
-        const sid = getCookie(c, SESSION_COOKIE);
+        const sid = readCookie(c, "session", secureCookies);
         const session = sid ? await sessions.get(sid) : undefined;
         if (!sid || !session) return c.json({ error: "unauthorized" }, 401);
         const orgs = await store.organizations.listForUser(session.user.id);
@@ -40,11 +40,11 @@ export function requireAuth(sessions: SessionStore, store: Store) {
 // CSRF guard for browser-origin state-changing requests: same-origin + the
 // per-session CSRF token (issued via /auth/session). The agent routes are token-
 // authenticated and do not use this.
-export function requireCsrf(sessions: SessionStore, publicOrigin: string) {
+export function requireCsrf(sessions: SessionStore, publicOrigin: string, secureCookies: boolean) {
     return async (c: Context, next: Next) => {
         const origin = c.req.header("origin");
         if (origin && !sameOrigin(origin, publicOrigin)) return c.json({ error: "origin mismatch" }, 403);
-        const sid = getCookie(c, SESSION_COOKIE);
+        const sid = readCookie(c, "session", secureCookies);
         const token = c.req.header("x-atelier-csrf");
         if (!sid || !token || !(await sessions.verifyCsrf(sid, token))) return c.json({ error: "csrf" }, 403);
         await next();

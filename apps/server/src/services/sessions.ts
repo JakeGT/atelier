@@ -22,9 +22,6 @@ export interface ActiveSession {
     authTime: number;
 }
 
-export const SESSION_COOKIE = "__Host-atelier_sid";
-export const OIDC_COOKIE = "__Host-atelier_oidc";
-
 export interface SessionLimits {
     idleMinutes: number;
     maxHours: number;
