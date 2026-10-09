@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+    AgentMessage,
     AgentSession,
     AuditEntry,
     ContentDocument,
@@ -20,6 +21,7 @@ import type {
     LoginSession,
     LoginSessionStore,
     MembershipStore,
+    MessageStore,
     OrganizationStore,
     ProjectStore,
     ReleaseStore,
@@ -42,6 +44,7 @@ export class MemoryStore implements Store {
     private readonly contentIndex = new Map<string, string>();
     private readonly revisionMap = new Map<string, ContentRevision[]>();
     private readonly agentSessionMap = new Map<string, AgentSession>();
+    private readonly messageLog: (AgentMessage & { tenantId: string })[] = [];
     private readonly releaseMap = new Map<string, Release>();
     private readonly manifestMap = new Map<string, ReleaseDocument[]>();
     private readonly deploymentMap = new Map<string, Deployment>();
@@ -213,6 +216,28 @@ export class MemoryStore implements Store {
             this.agentSessionMap.set(id, updated);
             return updated;
         },
+    };
+
+    messages: MessageStore = {
+        add: async (input) => {
+            const isUser = input.role === "user";
+            if (input.runId && this.messageLog.some((m) => m.runId === input.runId && (m.role === "user") === isUser)) return;
+            this.messageLog.push({
+                id: randomUUID(),
+                tenantId: input.tenantId,
+                projectId: input.projectId,
+                role: input.role,
+                text: input.text,
+                tools: input.tools ?? null,
+                runId: input.runId,
+                createdAt: now(),
+            });
+        },
+        list: async (tenantId, projectId, limit = 200) =>
+            this.messageLog
+                .filter((m) => m.tenantId === tenantId && m.projectId === projectId)
+                .slice(-limit)
+                .map(({ tenantId: _t, ...m }) => m),
     };
 
     releases: ReleaseStore = {

@@ -19,11 +19,30 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
 
     const notConfigured = () => new Response("OIDC is not configured.", { status: 503 });
 
+    const safeNext = (requested: string | undefined): string => {
+        // After signing in, people go to their studio unless they were heading somewhere.
+        const next = requested ?? "/studio";
+        return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/studio";
+    };
+
     app.get("/auth/login", async (c) => {
+        // Local development only (config refuses AUTH_MODE=dev off localhost).
+        if (config.authMode === "dev") {
+            const user = await store.users.upsertIdentity({
+                issuer: "dev",
+                subject: "local",
+                email: "you@localhost",
+                name: "Local Developer",
+                admin: true,
+            });
+            await ensureUserOrg(store, user.id, user.email, user.name);
+            const { id } = await sessions.createSession(user.id);
+            writeCookie(c, "session", secure, id);
+            return c.redirect(safeNext(c.req.query("next")));
+        }
         if (!oidc) return notConfigured();
         if (!loginLimiter.allow(clientIp(c))) return c.json({ error: "too many requests" }, 429);
-        const requested = c.req.query("next") ?? "/";
-        const next = requested.startsWith("/") && !requested.startsWith("//") && !requested.startsWith("/\\") ? requested : "/";
+        const next = safeNext(c.req.query("next"));
         const state = randomState();
         const nonce = randomNonce();
         const codeVerifier = randomCodeVerifier();
@@ -39,18 +58,18 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
         const flowId = readCookie(c, "oidc", secure);
         const flow = flowId ? sessions.takeFlow(flowId) : undefined;
         clearCookie(c, "oidc", secure);
-        if (!flow) return c.redirect("/?auth_error=expired");
+        if (!flow) return c.redirect("/login?auth_error=expired");
         try {
-            const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier, flow.maxAge);
+            const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier);
             const isAdmin = claims.groups.includes(oidc.adminGroup);
 
             // Sign-up is invite-gated: platform admins, or people who already have
             // an account. Org invitations (P2) will add a third way in.
-            if (!claims.email) return c.redirect("/?auth_error=failed");
-            if (oidc.trustEmail === false && !claims.verified) return c.redirect("/?auth_error=unverified");
+            if (!claims.email) return c.redirect("/login?auth_error=failed");
+            if (oidc.trustEmail === false && !claims.verified) return c.redirect("/login?auth_error=unverified");
             if (config.signupMode !== "open" && !isAdmin) {
                 const existing = await store.users.findByIdentity(claims.issuer, claims.subject);
-                if (!existing) return c.redirect("/?auth_error=denied");
+                if (!existing) return c.redirect("/login?auth_error=denied");
             }
 
             const user = await store.users.upsertIdentity({
@@ -66,19 +85,24 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             // A fresh session id on every sign-in (no fixation); replace any old one.
             const old = readCookie(c, "session", secure);
             if (old) await sessions.destroySession(old);
-            const { id } = await sessions.createSession(user.id, claims.authTime);
+            // Step-up is measured from *this* moment: the person has just completed a
+            // round trip through the identity provider in this browser, which a stolen
+            // Atelier cookie alone cannot do. (The provider's own auth_time is not used:
+            // it can be hours old under single sign-on, and a provider that declines to
+            // re-prompt would then make privileged actions impossible.)
+            const { id } = await sessions.createSession(user.id);
             writeCookie(c, "session", secure, id);
             await store.audit.record({
                 tenantId: null,
                 actorId: user.id,
                 action: "auth.sign_in",
                 target: `user:${user.id}`,
-                detail: { admin: isAdmin },
+                detail: { admin: isAdmin, stepUp: flow.maxAge !== undefined, providerAuthTime: new Date(claims.authTime).toISOString() },
             });
             return c.redirect(flow.next);
         } catch (err) {
             console.error(`OIDC callback failed: ${(err as Error).message}`);
-            return c.redirect("/?auth_error=failed");
+            return c.redirect("/login?auth_error=failed");
         }
     });
 

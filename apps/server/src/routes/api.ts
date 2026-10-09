@@ -5,12 +5,18 @@ import type { Config } from "../config.ts";
 import { type ApiVariables, loadProject, requireAuth, requireCsrf, requirePermission, requireRecentAuth } from "../middleware/auth.ts";
 import { type AgentTokenClaims, signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { ReleaseError, ReleaseService } from "../services/release.ts";
-import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
+import { type RunState, RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
 import type { SessionStore } from "../services/sessions.ts";
 import { SHA_RE } from "../services/workspace.ts";
 import type { Store } from "../store/types.ts";
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const slugify = (s: string): string =>
+    s
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
 const KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const AGENT_TOKEN_TTL_S = 60 * 60;
 const PREVIEW_TOKEN_TTL_S = 2 * 60 * 60;
@@ -88,18 +94,49 @@ export function apiRoutes(
 
     route("get", "/api/v1/projects", "project.read", async (c) => c.json({ projects: await store.projects.list(c.get("org").id) }));
 
+    // A project needs only a name; the slug is derived (and made unique) unless given.
     route("post", "/api/v1/projects", "project.create", async (c) => {
         const org = c.get("org");
         const body = await c.req.json().catch(() => null);
-        const slug = typeof body?.slug === "string" ? body.slug : "";
         const name = typeof body?.name === "string" ? body.name.trim() : "";
-        if (!name || name.length > 120 || !SLUG_RE.test(slug) || slug.length > 63) {
-            return c.json({ error: "project requires a name and a lowercase-hyphen slug" }, 400);
+        if (!name || name.length > 120) return c.json({ error: "give the project a name (up to 120 characters)" }, 400);
+        let slug: string;
+        if (typeof body?.slug === "string" && body.slug) {
+            slug = body.slug;
+            if (!SLUG_RE.test(slug) || slug.length > 63)
+                return c.json({ error: "slug must be lowercase letters, digits and hyphens" }, 400);
+            if (await store.projects.findBySlug(org.id, slug)) return c.json({ error: "slug already in use" }, 409);
+        } else {
+            const base = slugify(name).slice(0, 48) || "site";
+            slug = base;
+            for (let n = 2; await store.projects.findBySlug(org.id, slug); n++) slug = `${base}-${n}`;
         }
-        if (await store.projects.findBySlug(org.id, slug)) return c.json({ error: "slug already in use" }, 409);
         const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name });
         await audit(c, "project.create", `project:${created.id}`, { slug });
         return c.json({ project: created }, 201);
+    });
+
+    // What the editor needs to say "you have unpublished changes": the live
+    // release (if any) against the current code version and content drafts.
+    route("get", "/api/v1/projects/:projectId/overview", "project.read", async (c) => {
+        const org = c.get("org");
+        const p = c.get("project");
+        const [live, docs, head] = await Promise.all([
+            store.releases.findLive(org.id, p.id),
+            store.content.list(org.id, p.id),
+            runtime.head(p.id).catch(() => null),
+        ]);
+        const changedDocuments = docs.filter((d) => JSON.stringify(d.draft) !== JSON.stringify(d.published)).length;
+        const codeChanged = head !== null && head !== (live?.codeSha ?? null);
+        return c.json({
+            project: p,
+            liveRelease: live,
+            head,
+            documents: docs.length,
+            changedDocuments,
+            codeChanged,
+            hasChanges: codeChanged || changedDocuments > 0,
+        });
     });
 
     // ---- content (drafts only; publishing is the release workflow) ------------------
@@ -194,19 +231,73 @@ export function apiRoutes(
         // Runs take minutes: start a background job and let the client poll it.
         try {
             const run = await runtime.startRun(projectId, { prompt, model, apiUrl, agentToken });
+            await store.messages.add({
+                tenantId: org.id,
+                projectId,
+                sessionId: session.id,
+                role: "user",
+                text: prompt,
+                runId: run.id,
+                authorId: c.get("user").id,
+            });
             return c.json({ run }, 202);
         } catch (err) {
             return runtimeError(c, err);
         }
     });
 
+    // Stores a finished run's reply in the conversation. Safe to call on every
+    // poll: the store keeps one reply per run.
+    const settle = async (tenantId: string, projectId: string, run: RunState): Promise<void> => {
+        if (run.status === "running") return;
+        const base = { tenantId, projectId, sessionId: null, runId: run.id, authorId: null };
+        if (run.status === "done" && run.result) {
+            await store.messages.add({ ...base, role: "assistant", text: run.result.text, tools: run.result.toolEvents });
+        } else {
+            await store.messages.add({ ...base, role: "error", text: run.error ?? "The assistant stopped unexpectedly." });
+        }
+    };
+
     route("get", "/api/v1/projects/:projectId/runs/:runId", "project.read", async (c) => {
         try {
             const run = await runtime.getRun(c.get("project").id, param(c, "runId"));
-            return run ? c.json({ run }) : c.json({ error: "not found" }, 404);
+            if (!run) return c.json({ error: "not found" }, 404);
+            await settle(c.get("org").id, c.get("project").id, run);
+            return c.json({ run });
         } catch (err) {
             return runtimeError(c, err);
         }
+    });
+
+    // The project's conversation, plus the run still in progress (if any). A
+    // request whose reply was never collected (the tab was closed) is settled
+    // here, so the thread is complete whichever browser opens it next.
+    route("get", "/api/v1/projects/:projectId/messages", "project.read", async (c) => {
+        const tenantId = c.get("org").id;
+        const projectId = c.get("project").id;
+        let messages = await store.messages.list(tenantId, projectId);
+        const answered = new Set(messages.filter((m) => m.role !== "user").map((m) => m.runId));
+        const pending = messages.filter((m) => m.role === "user" && m.runId && !answered.has(m.runId)).at(-1);
+        let activeRun: RunState | null = null;
+        if (pending?.runId) {
+            const run = await runtime.getRun(projectId, pending.runId).catch(() => undefined);
+            if (run?.status === "running") activeRun = run;
+            else if (run) await settle(tenantId, projectId, run);
+            else if (run === null) {
+                // The workspace restarted mid-run and no longer knows it.
+                await store.messages.add({
+                    tenantId,
+                    projectId,
+                    sessionId: null,
+                    role: "error",
+                    text: "This request was interrupted before it finished. Check the preview, then ask again if needed.",
+                    runId: pending.runId,
+                    authorId: null,
+                });
+            }
+            if (!activeRun && run !== undefined) messages = await store.messages.list(tenantId, projectId);
+        }
+        return c.json({ messages, activeRun });
     });
 
     route("get", "/api/v1/projects/:projectId/checkpoints", "project.read", async (c) => {
@@ -267,7 +358,9 @@ export function apiRoutes(
         return c.json({ release, documents: await store.releases.manifest(c.get("org").id, release.id) });
     });
 
-    route("post", "/api/v1/projects/:projectId/releases", "release.publish", async (c) => {
+    // Creating a release is the first half of publishing, so it needs the same
+    // recent sign-in: otherwise a refused publish leaves a planned release behind.
+    route("post", "/api/v1/projects/:projectId/releases", "release.publish", stepUp, async (c) => {
         const release = await releases.create(c.get("org").id, c.get("project").id, c.get("user").id);
         await audit(c, "release.create", `release:${release.id}`, { number: release.number, codeSha: release.codeSha });
         return c.json({ release }, 201);

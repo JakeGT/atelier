@@ -9,13 +9,16 @@
 > fails CI if one isn't. Mutations need the CSRF token. Publish and rollback
 > also need a sign-in within `STEP_UP_MINUTES` (`401 reauth_required`).
 > Implemented:
-> - `GET /orgs`, `GET|POST /projects`
+> - `GET /orgs`, `GET|POST /projects` (a project needs only a name; the slug is
+>   derived and kept unique), `GET .../overview` (live release vs. current
+>   drafts, for "unpublished changes")
 > - content: `GET .../content`, `PUT .../content/:kind/:slug`,
 >   `GET .../content/:kind/:slug/revisions`,
 >   `POST .../revisions/:rev/restore`, `GET .../snapshot`
 > - sessions and runs: `GET|POST .../sessions`,
 >   `POST .../sessions/:sid/messages` (202, a background run),
->   `GET .../runs/:runId`
+>   `GET .../runs/:runId`, `GET .../messages` (the project's conversation,
+>   stored server-side, plus the run in progress)
 > - versions: `GET .../checkpoints`, `POST .../checkpoints/:sha/restore`
 > - preview: `GET .../preview-url` → `/preview/<signed>/…`
 > - releases: `GET|POST .../releases`, `GET .../releases/:n/manifest`,

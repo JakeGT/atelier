@@ -1,4 +1,5 @@
 import type {
+    AgentMessage,
     AgentSession,
     AuditEntry,
     ContentDocument,
@@ -62,6 +63,21 @@ export interface AgentSessionStore {
     get(tenantId: string, id: string): Promise<AgentSession | null>;
     listByProject(tenantId: string, projectId: string): Promise<AgentSession[]>;
     updateStatus(tenantId: string, id: string, status: AgentSession["status"], workspaceId?: string | null): Promise<AgentSession>;
+}
+
+export interface MessageStore {
+    // Idempotent per (runId, user-or-reply): a second reply for the same run is ignored.
+    add(input: {
+        tenantId: string;
+        projectId: string;
+        sessionId: string | null;
+        role: AgentMessage["role"];
+        text: string;
+        tools?: AgentMessage["tools"];
+        runId: string | null;
+        authorId: string | null;
+    }): Promise<void>;
+    list(tenantId: string, projectId: string, limit?: number): Promise<AgentMessage[]>;
 }
 
 export interface ReleaseStore {
@@ -137,6 +153,7 @@ export interface Store {
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;
+    messages: MessageStore;
     releases: ReleaseStore;
     deployments: DeploymentStore;
     audit: AuditStore;

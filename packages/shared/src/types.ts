@@ -176,3 +176,16 @@ export const agentSessionSchema = z.object({
 });
 
 export type AgentSession = z.infer<typeof agentSessionSchema>;
+
+// One entry in a project's conversation with the assistant.
+export const agentMessageSchema = z.object({
+    id: z.string().uuid(),
+    projectId: z.string().uuid(),
+    role: z.enum(["user", "assistant", "error"]),
+    text: z.string(),
+    tools: z.array(z.object({ name: z.string(), state: z.string() })).nullable(),
+    runId: z.string().uuid().nullable(),
+    createdAt: z.string().datetime(),
+});
+
+export type AgentMessage = z.infer<typeof agentMessageSchema>;

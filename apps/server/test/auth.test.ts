@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OidcService, VerifiedClaims } from "../src/services/oidc.ts";
+import { OidcService, type VerifiedClaims } from "../src/services/oidc.ts";
 import { makeApp } from "./helpers.ts";
 
 // A stand-in identity provider: the login URL carries the state back, and the
 // callback returns fixed claims. Everything else (cookies, flow state, account
 // creation, session, CSRF, logout) is the real code path.
-function stubOidc(claims: Partial<VerifiedClaims> = {}): OidcService {
+function stubOidc(claims: Partial<VerifiedClaims> = {}, seen: { maxAge?: number }[] = []): OidcService {
     return {
         adminGroup: "platform-admin",
         trustEmail: true,
         providerName: "stub",
-        buildLoginUrl: async (state: string) => `https://idp.example/authorize?state=${state}`,
+        buildLoginUrl: async (state: string, _nonce: string, _verifier: string, maxAge?: number) => {
+            seen.push({ maxAge });
+            return `https://idp.example/authorize?state=${state}`;
+        },
         handleCallback: async (): Promise<VerifiedClaims> => ({
             issuer: "https://idp.example/",
             subject: "user-1",
@@ -93,7 +96,7 @@ test("a callback without a login flow goes home with an error, not into a redire
     const t = await makeApp({ AUTH_MODE: "oidc" }, stubOidc());
     const res = await t.app.request("/auth/callback?code=abc&state=nope");
     assert.equal(res.status, 302);
-    assert.equal(res.headers.get("location"), "/?auth_error=expired");
+    assert.equal(res.headers.get("location"), "/login?auth_error=expired");
 });
 
 test("an uninvited, non-admin account is refused", async () => {
@@ -102,8 +105,16 @@ test("an uninvited, non-admin account is refused", async () => {
     const login = await t.app.request("/auth/login");
     cookies.absorb(login);
     const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
-    assert.equal(res.headers.get("location"), "/?auth_error=denied");
+    assert.equal(res.headers.get("location"), "/login?auth_error=denied");
     assert.equal(await t.store.users.count(), 0);
+});
+
+test("signing in with no destination lands in the studio", async () => {
+    const t = await makeApp({ AUTH_MODE: "oidc" }, stubOidc());
+    const cookies = jar();
+    cookies.absorb(await t.app.request("/auth/login"));
+    const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
+    assert.equal(res.headers.get("location"), "/studio");
 });
 
 test("the post-login redirect cannot leave the site", async () => {
@@ -112,6 +123,72 @@ test("the post-login redirect cannot leave the site", async () => {
         const cookies = jar();
         cookies.absorb(await t.app.request(`/auth/login?next=${encodeURIComponent(next)}`));
         const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
-        assert.equal(res.headers.get("location"), "/", next);
+        assert.equal(res.headers.get("location"), "/studio", next);
     }
+});
+
+test("a step-up sign-in asks the provider to re-authenticate with prompt=login", async () => {
+    const oidc = OidcService.fromMetadata(
+        {
+            issuer: "https://idp.example/",
+            clientId: "atelier",
+            clientSecret: "secret",
+            publicOrigin: "https://atelier.example",
+            providerName: "idp",
+            adminGroup: "platform-admin",
+            trustEmail: true,
+            scopes: "openid email profile",
+        },
+        { issuer: "https://idp.example/", authorization_endpoint: "https://idp.example/authorize" },
+    );
+    const ordinary = new URL(await oidc.buildLoginUrl("s", "n", "v"));
+    assert.equal(ordinary.searchParams.get("prompt"), null);
+    assert.equal(ordinary.searchParams.get("max_age"), null);
+    const stepUp = new URL(await oidc.buildLoginUrl("s", "n", "v", 0));
+    assert.equal(stepUp.searchParams.get("prompt"), "login");
+    assert.equal(stepUp.searchParams.get("max_age"), "0");
+    assert.equal(stepUp.searchParams.get("redirect_uri"), "https://atelier.example/auth/callback");
+});
+
+// The loop this guards against: single sign-on means the provider's auth_time can be
+// hours old, and a provider may return from a step-up without re-prompting. Either way
+// the person must come back able to publish, on the page they left.
+test("after a step-up round trip the person can publish, even if the provider reports an old auth_time", async () => {
+    const seen: { maxAge?: number }[] = [];
+    const t = await makeApp({ AUTH_MODE: "oidc", STEP_UP_MINUTES: "15" }, stubOidc({ authTime: Date.now() - 6 * 3_600_000 }, seen));
+    const cookies = jar();
+    const roundTrip = async (path: string) => {
+        cookies.absorb(await t.app.request(path, { headers: cookies.header() }));
+        const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
+        cookies.absorb(res);
+        return res.headers.get("location");
+    };
+    await roundTrip("/auth/login");
+    const session = async () =>
+        (await (await t.app.request("/auth/session", { headers: cookies.header() })).json()) as { id: string; csrfToken: string };
+    const write = async () => ({
+        ...cookies.header(),
+        "x-atelier-csrf": (await session()).csrfToken,
+        origin: "http://localhost:8080",
+        "content-type": "application/json",
+    });
+    const created = await t.app.request("/api/v1/projects", { method: "POST", headers: await write(), body: '{"name":"Site"}' });
+    const { project } = (await created.json()) as { project: { id: string; slug: string } };
+
+    // Time passes: the Atelier session is now older than the step-up window.
+    const user = await t.store.users.findById((await session()).id);
+    assert.ok(user);
+    await t.sessions.destroyUserSessions(user.id);
+    const old = await t.sessions.createSession(user.id, Date.now() - 60 * 60_000);
+    cookies.absorb(new Response(null, { headers: { "set-cookie": `atelier_sid=${old.id}; Path=/` } }));
+    const releases = `/api/v1/projects/${project.id}/releases`;
+    assert.equal((await t.app.request(releases, { method: "POST", headers: await write() })).status, 401);
+
+    // The step-up: back to the page they were on, and publishing now works.
+    assert.equal(await roundTrip(`/auth/login?prompt=login&next=${encodeURIComponent(`/p/${project.slug}`)}`), `/p/${project.slug}`);
+    assert.deepEqual(seen.at(-1), { maxAge: 0 });
+    const made = await t.app.request(releases, { method: "POST", headers: await write() });
+    assert.equal(made.status, 201);
+    const published = await t.app.request(`${releases}/1/publish`, { method: "POST", headers: await write() });
+    assert.equal(published.status, 200);
 });

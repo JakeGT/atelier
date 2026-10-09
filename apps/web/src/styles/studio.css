@@ -1,0 +1,216 @@
+.studio {
+    --gutter: clamp(20px, 5vw, 72px);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.studio-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px var(--gutter);
+}
+
+.studio-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.studio-main {
+    width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: clamp(32px, 7vh, 88px) var(--gutter) 96px;
+}
+
+/* ---- commission: the prompt-first composer ---------------------------------------- */
+
+.commission h1 {
+    margin-top: 14px;
+    font-size: clamp(52px, 7.4vw, 104px);
+    animation: reveal 0.8s var(--ease) both;
+}
+
+.brief {
+    margin-top: 36px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xl);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    transition:
+        border-color 0.25s var(--ease),
+        box-shadow 0.25s var(--ease);
+    animation: reveal 0.8s var(--ease) 0.08s both;
+}
+
+.brief:focus-within {
+    border-color: var(--ink);
+    box-shadow: var(--shadow-3);
+}
+
+.brief input,
+.brief textarea {
+    display: block;
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: none;
+    resize: none;
+}
+
+.brief-name {
+    padding: 22px 26px 6px;
+    font-family: var(--font-display);
+    font-size: 34px;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+}
+
+.brief-name::placeholder {
+    color: var(--ink-3);
+    font-style: italic;
+}
+
+.brief-text {
+    padding: 8px 26px 12px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--ink);
+}
+
+.brief-text::placeholder {
+    color: var(--ink-3);
+}
+
+.brief-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px 14px 22px;
+    border-top: 1px solid var(--line);
+}
+
+.starters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* ---- shelf: the project grid ------------------------------------------------------- */
+
+.shelf {
+    margin-top: clamp(56px, 9vh, 104px);
+}
+
+.shelf-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line-strong);
+}
+
+.shelf-head h2 {
+    font-weight: 500;
+}
+
+.shelf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 28px 24px;
+    margin-top: 28px;
+}
+
+.card {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    animation: reveal 0.7s var(--ease) both;
+}
+
+.cover {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border-radius: var(--radius-l);
+    border: 1px solid var(--line);
+    transition:
+        transform 0.5s var(--ease),
+        box-shadow 0.5s var(--ease);
+}
+
+.card:hover .cover {
+    transform: translateY(-6px) rotate(-0.6deg);
+    box-shadow: var(--shadow-3);
+}
+
+.card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 2px 0;
+}
+
+.card-meta strong {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+}
+
+.card-ghost {
+    aspect-ratio: 16 / 10;
+    border-radius: var(--radius-l);
+    background: linear-gradient(100deg, var(--line) 30%, transparent 50%, var(--line) 70%) 0 0 / 300% 100%;
+    animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes shimmer {
+    to {
+        background-position: -150% 0;
+    }
+}
+
+.shelf-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin-top: 28px;
+    padding: 64px 24px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-xl);
+    background:
+        radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0) 0 0 / 16px 16px,
+        transparent;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.shelf-empty:hover {
+    border-color: var(--ink);
+}
+
+.shelf-empty svg {
+    width: 28px;
+    height: 28px;
+    color: var(--seal);
+}
+
+.shelf-empty .display {
+    font-size: 34px;
+}
+
+@media (max-width: 640px) {
+    .brief-foot {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .brief-name {
+        font-size: 28px;
+    }
+}

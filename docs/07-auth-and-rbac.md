@@ -5,9 +5,10 @@
 > `platform-admin` group, and first-sign-in bootstrap (first org + owner).
 > Login sessions are stored in Postgres (SHA-256 of the cookie value) and
 > survive restarts. Roles are enforced on every route from `ROLE_PERMISSIONS`.
-> Forbidden and not-found both answer 404. Step-up uses the session's
-> `auth_time` (publish/rollback within `STEP_UP_MINUTES`, re-auth via
-> `prompt=login`). Agent tokens are minted per run (1 h). Invites, role
+> Forbidden and not-found both answer 404. Step-up (creating, publishing
+> or rolling back a release within `STEP_UP_MINUTES`) is measured from the last
+> completed sign-in into Atelier, re-requested with `prompt=login`; the editor
+> resumes the interrupted action afterwards (ADR-0007 §8–9). Agent tokens are minted per run (1 h). Invites, role
 > management and per-project roles are P2.
 
 Atelier authenticates through **Authentik** using OIDC, exactly as `triagent`
