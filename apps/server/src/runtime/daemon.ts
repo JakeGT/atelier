@@ -113,5 +113,9 @@ app.get("/files/*", async (c) => {
     return new Response(file.body, { headers: { "content-type": file.contentType } });
 });
 
+// As PID 1 in a container, Node ignores SIGTERM unless told otherwise, and Docker then
+// waits its full timeout before killing it. Stop at once when asked.
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
+
 await workspace.init();
 serve({ fetch: app.fetch, hostname: "0.0.0.0", port }, () => console.log(`workspace daemon listening on :${port}`));

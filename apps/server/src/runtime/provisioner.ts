@@ -17,6 +17,10 @@ export interface ProvisionerConfig {
     egressNetwork: string;
     // Optional OCI runtime for workspaces (e.g. "runsc" for gVisor) — ADR-0003.
     ociRuntime?: string;
+    // Which Atelier installation this provisioner belongs to. Two installations on
+    // one Docker host (production and a test stack, say) never see or touch each
+    // other's workspaces.
+    instance: string;
     // When set (e.g. "http://atelier-egress:8888"), workspaces get no route to the
     // internet of their own: they stay on the internal runtime network only and
     // reach out through this allow-listing proxy (ADR-0012).
@@ -29,6 +33,7 @@ export interface ProvisionerConfig {
 const MANAGED = "dev.atelier.managed";
 const PROJECT = "dev.atelier.project";
 const SPEC = "dev.atelier.spec";
+const INSTANCE = "dev.atelier.instance";
 
 interface ContainerInfo {
     Id: string;
@@ -50,7 +55,7 @@ export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtime
         ],
         Cmd: ["node", "apps/server/src/runtime/daemon.ts"],
         WorkingDir: "/app",
-        Labels: { [MANAGED]: "true", [PROJECT]: projectId },
+        Labels: { [MANAGED]: "true", [PROJECT]: projectId, [INSTANCE]: cfg.instance },
         HostConfig: {
             ReadonlyRootfs: true,
             CapDrop: ["ALL"],
@@ -60,7 +65,14 @@ export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtime
             MemorySwap: cfg.memoryBytes,
             NanoCpus: cfg.nanoCpus,
             Tmpfs: { "/tmp": "rw,nosuid,nodev,size=512m,mode=1777" },
-            Mounts: [{ Type: "volume", Source: name, Target: "/workspace" }],
+            Mounts: [
+                {
+                    Type: "volume",
+                    Source: name,
+                    Target: "/workspace",
+                    VolumeOptions: { Labels: { [MANAGED]: "true", [PROJECT]: projectId, [INSTANCE]: cfg.instance } },
+                },
+            ],
             NetworkMode: cfg.runtimeNetwork,
             RestartPolicy: { Name: "unless-stopped" },
             LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
@@ -103,6 +115,10 @@ export class Provisioner {
         const info = res.body as ContainerInfo;
         // Never act on a container this provisioner did not create.
         if (info.Config?.Labels?.[MANAGED] !== "true") throw new Error(`${name} exists but is not managed by Atelier`);
+        // Containers from before instances were labelled belong to the default one.
+        if ((info.Config?.Labels?.[INSTANCE] ?? "default") !== this.cfg.instance) {
+            throw new Error(`${name} belongs to another Atelier installation`);
+        }
         return info;
     }
 
@@ -187,6 +203,11 @@ export class Provisioner {
         const vol = await this.docker.call("GET", `/volumes/${name}`);
         if (vol.status === 404) return;
         if (vol.status !== 200) throw dockerError("inspect volume", vol);
+        // A volume created before labels existed has none; one with labels must be ours.
+        const labels = (vol.body as { Labels?: Record<string, string> | null }).Labels ?? {};
+        if (labels[INSTANCE] !== undefined && labels[INSTANCE] !== this.cfg.instance) {
+            throw new Error(`volume ${name} belongs to another Atelier installation`);
+        }
         const rmVol = await this.docker.call("DELETE", `/volumes/${name}`);
         if (rmVol.status !== 204 && rmVol.status !== 404) throw dockerError("remove volume", rmVol);
     }
@@ -197,6 +218,7 @@ export class Provisioner {
         const res = await this.docker.call("GET", `/containers/json?all=true&filters=${filters}`);
         if (res.status !== 200) throw dockerError("list", res);
         return (res.body as { Labels?: Record<string, string>; State?: string }[])
+            .filter((c) => (c.Labels?.[INSTANCE] ?? "default") === this.cfg.instance)
             .map((c) => ({ projectId: c.Labels?.[PROJECT] ?? "", running: c.State === "running" }))
             .filter((w) => w.projectId);
     }

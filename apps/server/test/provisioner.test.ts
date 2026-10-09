@@ -6,6 +6,7 @@ import { Provisioner, type ProvisionerConfig, provisionerApp } from "../src/runt
 
 const cfg: ProvisionerConfig = {
     image: "atelier-runtime:test",
+    instance: "default",
     runtimeNetwork: "atelier-runtime",
     egressNetwork: "atelier-egress",
     memoryBytes: 1024 ** 3,
@@ -76,7 +77,10 @@ test("ensure creates a hardened, labelled container with a per-project volume, t
     assert.deepEqual(spec.HostConfig.CapDrop, ["ALL"]);
     assert.deepEqual(spec.HostConfig.SecurityOpt, ["no-new-privileges:true"]);
     assert.equal(spec.HostConfig.NetworkMode, "atelier-runtime");
-    assert.deepEqual(spec.HostConfig.Mounts, [{ Type: "volume", Source: name, Target: "/workspace" }]);
+    assert.deepEqual(
+        spec.HostConfig.Mounts.map((m) => [m.Source, m.Target]),
+        [[name, "/workspace"]],
+    );
     assert.equal(spec.HostConfig.Privileged, undefined);
     // The only secret in the container is its own project's runtime secret.
     assert.deepEqual(
@@ -130,4 +134,19 @@ test("refuses a non-internal runtime network and creates a missing egress networ
     const { docker, calls } = fakeDocker({ egressExists: false });
     await new Provisioner(cfg, docker).ensure(randomUUID(), SECRET);
     assert.ok(calls.some((c) => c.path === "/networks/create" && (c.body as { Name: string }).Name === "atelier-egress"));
+});
+
+test("two installations on one host do not see or touch each other's workspaces", async () => {
+    const { docker, containers } = fakeDocker();
+    const prod = new Provisioner(cfg, docker);
+    const test2 = new Provisioner({ ...cfg, instance: "e2e" }, docker);
+    const mine = randomUUID();
+    const theirs = randomUUID();
+    await prod.ensure(mine, SECRET);
+    await test2.ensure(theirs, SECRET);
+    assert.equal(containers.get(`atelier-ws-${theirs}`)?.labels["dev.atelier.instance"], "e2e");
+    // Each refuses to stop, purge or adopt the other's.
+    await assert.rejects(prod.stop(theirs), /another Atelier installation/);
+    await assert.rejects(test2.purge(mine), /another Atelier installation/);
+    await assert.rejects(test2.ensure(mine, SECRET), /another Atelier installation/);
 });

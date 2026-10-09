@@ -1,0 +1,73 @@
+# The end-to-end stack used by scripts/e2e.sh (locally and in CI): the real images,
+# wired as in production, under its own instance name and network names so it can
+# run on a host that also runs a real Atelier. Not a deployment example: see
+# compose.example.yml for that.
+name: atelier-e2e
+
+x-hardening: &hardening
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+services:
+    db:
+        image: postgres:16-alpine
+        environment: { POSTGRES_PASSWORD: e2e }
+        networks: [database]
+        healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 2s, retries: 30 }
+
+    egress:
+        <<: *hardening
+        image: atelier-egress:e2e
+        environment:
+            # example.com stands in for "an allowed host"; the rest is what the assistant
+            # needs (learned by running it with EGRESS_MODE=observe; see ADR-0012).
+            EGRESS_ALLOW: ${E2E_EGRESS_ALLOW:-example.com,opencode.ai,models.dev,registry.npmjs.org,github.com,githubusercontent.com}
+            EGRESS_MODE: ${E2E_EGRESS_MODE:-enforce}
+        networks:
+            runtime: { aliases: [atelier-egress] }
+            outbound: {}
+
+    provisioner:
+        <<: *hardening
+        image: atelier-provisioner:e2e
+        environment:
+            PROVISIONER_SECRET: e2e-provisioner-secret-0123456789abcdef
+            ATELIER_INSTANCE: e2e
+            RUNTIME_IMAGE: atelier-runtime:e2e
+            RUNTIME_NETWORK: atelier-e2e-runtime
+            RUNTIME_EGRESS_PROXY: http://atelier-egress:8888
+        volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+        networks:
+            control: { aliases: [atelier-provisioner] }
+
+    server:
+        <<: *hardening
+        image: atelier-server:e2e
+        depends_on:
+            db: { condition: service_healthy }
+        environment:
+            PUBLIC_ORIGIN: http://localhost:18080
+            COOKIE_SECURE: "false"
+            AUTH_MODE: dev
+            DATABASE_URL: postgres://atelier_app:app@db:5432/atelier
+            MIGRATION_DATABASE_URL: postgres://atelier:owner@db:5432/atelier
+            ATELIER_SECRETS_KEY: e2e-secrets-key-0123456789abcdef0123456789
+            RUNTIME_MODE: container
+            PROVISIONER_URL: http://atelier-provisioner:8091
+            PROVISIONER_SECRET: e2e-provisioner-secret-0123456789abcdef
+            RUNTIME_API_URL: http://atelier-server:8080
+        ports: ["127.0.0.1:18080:8080"]
+        networks:
+            database: {}
+            control: {}
+            runtime: { aliases: [atelier-server] }
+            edge: {}
+        tmpfs: [/tmp]
+
+networks:
+    database: { internal: true }
+    control: { internal: true }
+    runtime: { name: atelier-e2e-runtime, internal: true }
+    outbound: {}
+    edge: {}

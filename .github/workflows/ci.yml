@@ -63,8 +63,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build the server, runtime and provisioner images
-        run: for t in server runtime provisioner; do docker build --target $t -t atelier-$t:ci .; done
+      - name: Build the server, runtime, provisioner and egress images
+        run: for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:ci .; done
       - name: The runtime image has its tools
         run: docker run --rm --entrypoint sh atelier-runtime:ci -c 'git --version && opencode --version'
       - name: The server image starts and answers health
@@ -73,6 +73,19 @@ jobs:
           for i in $(seq 1 30); do docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz && break; sleep 1; done
           docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'
           docker rm -f server-ci
+
+  # The real images, wired as in production (role split, provisioner, egress proxy), with
+  # a real workspace container: checks it is locked down and cannot reach what it should not.
+  e2e:
+    name: End to end (sandbox)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: scripts/e2e.sh
 
   secrets:
     name: Secret scan

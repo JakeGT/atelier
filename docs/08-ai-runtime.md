@@ -4,8 +4,12 @@
 > has its own runtime container, created on demand by the provisioner from a
 > fixed, hardened spec (`node` user, read-only rootfs, `cap_drop: ALL`,
 > `no-new-privileges`, limits, tmpfs). Its working tree is a per-project volume.
-> It sits on the internal `atelier-runtime` network (to reach the control plane)
-> and `atelier-egress` (the model provider), and holds no Atelier secrets.
+> It sits only on the internal `atelier-runtime` network and holds no Atelier
+> secrets. It has no route to the internet: outbound requests go through an
+> allow-listing egress proxy (ADR-0012). Idle workspaces are stopped and start
+> again on the next request. Each run receives the house rules plus the
+> project's own notes (`services/instructions.ts`), written outside the
+> workspace.
 > - **Runs:** the in-container daemon runs `opencode run --format json --auto`
 >   with stdin closed and a 15-minute kill timeout, as a background job (the
 >   client polls). It commits each completed run, and runs one job at a time.

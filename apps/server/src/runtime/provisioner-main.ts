@@ -21,6 +21,7 @@ const provisioner = new Provisioner(
         image: required("RUNTIME_IMAGE"),
         runtimeNetwork: process.env.RUNTIME_NETWORK ?? "atelier-runtime",
         egressNetwork: process.env.EGRESS_NETWORK ?? "atelier-egress",
+        instance: process.env.ATELIER_INSTANCE || "default",
         ociRuntime: process.env.RUNTIME_OCI_RUNTIME || undefined,
         egressProxy: process.env.RUNTIME_EGRESS_PROXY || undefined,
         memoryBytes: Number(process.env.RUNTIME_MEMORY_MB ?? 1536) * 1024 * 1024,
@@ -29,6 +30,10 @@ const provisioner = new Provisioner(
     },
     new DockerClient(process.env.DOCKER_SOCKET ?? "/var/run/docker.sock"),
 );
+
+// As PID 1 in a container, Node ignores SIGTERM unless told otherwise, and Docker then
+// waits its full timeout before killing it. Stop at once when asked.
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
 
 const port = Number(process.env.PORT ?? 8091);
 serve({ fetch: provisionerApp(provisioner, secret).fetch, hostname: "0.0.0.0", port }, () =>

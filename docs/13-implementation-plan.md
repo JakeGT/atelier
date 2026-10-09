@@ -10,7 +10,7 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | --- | --- | --- | --- |
 | P0 | Foundations & platform onboarding | Empty Atelier app live at `atelier.jaketalling.com` behind Authentik | ✅ done |
 | P1 | Single-tenant vertical slice (one project) | One tenant, one project, edit → preview → publish end-to-end | ✅ done |
-| P2 | Multi-tenant + multi-project | Many tenants, many projects, hard isolation, RBAC, quotas | pending |
+| P2 | Multi-tenant + multi-project | Many tenants, many projects, hard isolation, RBAC, quotas | ✅ done (gVisor spike and two items deferred, see P2) |
 | P3 | Hosting & domains | Per-project Cloudflare Pages + custom domains + rollback | pending |
 | P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | pending |
 | P5 | Direct content editor & hardening | First-party CMS, gVisor, retention, alerting, VPS go-live gates | pending |
@@ -153,6 +153,47 @@ Goal: the hard isolation boundary and the tenant/project management surface.
   releases.
 - A member with `editor` can edit but not publish or change billing.
 - A project's agent is confined to its own repo, content, and network.
+
+### P2 as built (branch `p2-multi-tenant`, 2026-10-10)
+
+All three acceptance criteria are met and tested: the first two by the unit and
+Postgres suites, the third by `scripts/e2e.sh`, which runs in CI against the real
+images.
+
+- **E2.1 Tenancy:** organisation-scoped routes moved under `/api/v1/orgs/:org`.
+  The URL names the organisation, membership authorises it, and a foreign or
+  unknown organisation is a 404. Every table with `tenant_id` forces RLS (a
+  Postgres test asserts it).
+- **E2.2 Organisations and membership:** people can create further
+  organisations. Members can be listed, re-roled, removed, or leave. Only owners
+  change ownership, an organisation always keeps one owner, and removing someone
+  needs a recent sign-in. Invitations are addressed to an e-mail and accepted at
+  the next sign-in with that provider-verified address (no mail is sent).
+- **E2.3 Project management:** rename, archive/restore, delete. An archived
+  website is frozen and read-only. Deletion needs archiving first, a recent
+  sign-in and the website's name, and removes the workspace volume.
+- **E2.4 Agent configuration:** house rules plus per-project notes, delivered to
+  the assistant outside the workspace so it cannot rewrite them. Model = the
+  project's, else the organisation's, else the runtime default.
+- **E2.5 Metering and limits:** each run is metered once (runs, seconds,
+  tokens). A daily token ceiling and a project limit are enforced with clear
+  messages, and shown on a usage page.
+- **E2.6 Sandbox hardening (ADR-0012):** workspaces have no route to the internet
+  and reach out only through an allow-listing proxy. Idle workspaces stop and
+  restart on demand. An end-to-end suite checks the container lockdown, the
+  network boundaries, cross-workspace isolation and the database role on every
+  PR.
+
+**Deferred, with reasons:**
+
+- **gVisor spike:** the current host is Docker Desktop, which has no `runsc`. The
+  provisioner hook exists; the spike moves to the VPS migration (ADR-0012).
+- **Per-project role overrides** (`project_members`): no one has needed a role
+  that differs per website yet. Organisation roles cover the plan's acceptance
+  criteria. Revisit with the agency use case.
+- **Build ceilings:** there are no builds until P3.
+- **Plan-then-build mode and the media library** (competitive backlog items
+  pencilled into P2): moved to P3/P4, as neither is needed for multi-tenancy.
 
 ---
 

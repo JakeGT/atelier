@@ -75,8 +75,8 @@ tmpfs, so every redeploy deleted every project's code and history.
   second the first time a project is opened. Workspace containers stay running
   until stopped (idle reaping is a P2 item).
 - **Residual risks:**
-  - Egress is not allow-listed yet: the agent can reach any internet host. An
-    egress proxy is P2 (and part of the BYOK proxy, ADR-0011).
+  - ~~Egress is not allow-listed.~~ Closed in P2 by ADR-0012: workspaces have no
+    route out except an allow-listing proxy.
   - The kernel is shared until gVisor is enabled. The provisioner already accepts
     `RUNTIME_OCI_RUNTIME=runsc`, and enabling it is the P2 spike (ADR-0003, R4).
   - The workspace volume is not in `scripts/backup.sh` (ADR-0009).

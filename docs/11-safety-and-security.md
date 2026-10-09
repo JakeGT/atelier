@@ -7,8 +7,8 @@
 > Previews are sandboxed (opaque origin). CSRF, role checks and step-up apply
 > to every mutation that needs them, and publish, rollback, restore, project
 > creation and sign-in are audited. Still open:
-> - an egress allow-list (P2);
-> - gVisor (P2 spike);
+> - gVisor: needs a host with `runsc`; the spike moves to the VPS migration
+>   (ADR-0012). Egress has been allow-listed since P2;
 > - retention and alerting (P5);
 > - workspace volumes are not yet in the platform backup (ADR-0009).
 
