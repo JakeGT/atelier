@@ -17,6 +17,20 @@ jobs:
     name: Lint, typecheck and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A real Postgres for the RLS suite (apps/server/test/postgres.test.ts); it
+    # creates its own NOSUPERUSER database + role, since superusers bypass RLS.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -49,10 +63,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: docker build --target server -t atelier-server:ci .
-      - name: The image starts and answers health
+      - name: Build the server, runtime and provisioner images
+        run: for t in server runtime provisioner; do docker build --target $t -t atelier-$t:ci .; done
+      - name: The runtime image has its tools
+        run: docker run --rm --entrypoint sh atelier-runtime:ci -c 'git --version && opencode --version'
+      - name: The server image starts and answers health
         run: |
-          docker run -d --name server-ci -e AUTH_MODE=off -e COOKIE_SECURE=false atelier-server:ci
+          docker run -d --name server-ci -e AUTH_MODE=off -e COOKIE_SECURE=false -e RUNTIME_MODE=local atelier-server:ci
           for i in $(seq 1 30); do docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz && break; sleep 1; done
           docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'
           docker rm -f server-ci

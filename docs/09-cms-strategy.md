@@ -1,12 +1,11 @@
 # 09 — Content strategy (per-project CMS)
 
-> **Implementation status (P1, deployed):** the embedded content store is
-> implemented — `content_documents` with `draft`/`published`/`rev`, scoped by
-> `tenant_id` + `project_id`, with `upsertDraft`/`get`/`list`/`publish`/`snapshot`
-> store methods and HTTP endpoints. One deviation to flag: the content MCP
-> exposes `content_publish` to the agent in P1 (this doc says the agent never
-> publishes); tightening that to browser-only publish is a P2 hardening item. The
-> first-party direct content editor remains future work (P5).
+> **Implementation status (P1 + hardening):** the embedded content store is
+> implemented: `content_documents` (draft/published/rev), `content_revisions`
+> (every draft write, restorable) and `release_documents` (per-release
+> manifests). The agent can only write drafts. `published` changes only when a
+> release goes live (ADR-0007). The first-party direct content editor remains
+> future work (P5).
 
 The current system uses a **single Strapi instance** as the source of truth. In a
 multi-tenant, multi-project platform this is the hardest piece to carry forward,

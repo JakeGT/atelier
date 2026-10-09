@@ -96,7 +96,9 @@ export const mediaAssetSchema = z.object({
     publishedRef: z.string().nullable(),
 });
 
-export const releaseStateSchema = z.enum(["planned", "building", "live", "failed", "rolled_back"]);
+// planned -> live (or failed). A live release that another release replaces
+// becomes "superseded"; "rolled_back" is kept for rows written before P1 hardening.
+export const releaseStateSchema = z.enum(["planned", "building", "live", "superseded", "failed", "rolled_back"]);
 
 export const releaseSchema = z.object({
     id: z.string().uuid(),
@@ -125,7 +127,37 @@ export const deploymentSchema = z.object({
     createdAt: z.string().datetime(),
 });
 
+export const contentRevisionSchema = z.object({
+    documentId: z.string().uuid(),
+    rev: z.number().int().nonnegative(),
+    draft: z.record(z.string(), z.unknown()).nullable(),
+    updatedBy: z.string().uuid().nullable(),
+    createdAt: z.string().datetime(),
+});
+
+// One document in a release's manifest: what the release ships, frozen at creation.
+export const releaseDocumentSchema = z.object({
+    documentId: z.string().uuid(),
+    kind: z.string(),
+    slug: z.string(),
+    rev: z.number().int().nonnegative(),
+    content: z.record(z.string(), z.unknown()),
+});
+
+export const auditEntrySchema = z.object({
+    id: z.number().int(),
+    tenantId: z.string().uuid().nullable(),
+    actorId: z.string().uuid().nullable(),
+    action: z.string(),
+    target: z.string().nullable(),
+    occurredAt: z.string().datetime(),
+    detail: z.record(z.string(), z.unknown()).nullable(),
+});
+
 export type ContentDocument = z.infer<typeof contentDocumentSchema>;
+export type ContentRevision = z.infer<typeof contentRevisionSchema>;
+export type ReleaseDocument = z.infer<typeof releaseDocumentSchema>;
+export type AuditEntry = z.infer<typeof auditEntrySchema>;
 export type MediaAsset = z.infer<typeof mediaAssetSchema>;
 export type Release = z.infer<typeof releaseSchema>;
 export type Deployment = z.infer<typeof deploymentSchema>;

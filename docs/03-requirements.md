@@ -83,7 +83,7 @@ Requirements are tagged with a phase (`P1`…`P5`) matching the roadmap in
   bandwidth, seats.
 - **FR-G2 (Must, P2)** Per-tenant quotas with soft/hard limits and overage
   handling.
-- **FR-G3 (Should, P3)** Invoice generation and payment provider integration.
+- **FR-G3 (Won't, v1)** Invoice generation and payment provider integration: out of scope while billing is BYOK (docs/12 §4).
 
 ### FR — Operator console
 
@@ -124,7 +124,7 @@ Requirements are tagged with a phase (`P1`…`P5`) matching the roadmap in
 ## 4. Acceptance criteria (high level)
 
 - A project can be created and opened in the editor end-to-end with no operator
-  intervention.
+  intervention (beyond the person's one-time admission at the identity provider).
 - A non-technical user can perform the edit → preview → publish loop unaided.
 - An automated isolation test asserts a tenant cannot read another tenant's
   project or content.

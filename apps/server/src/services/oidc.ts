@@ -19,6 +19,9 @@ export interface VerifiedClaims {
     verified: boolean;
     name: string;
     groups: string[];
+    // When the person actually authenticated at the provider (epoch ms). Used for
+    // step-up: privileged actions require a recent authentication.
+    authTime: number;
 }
 
 const CALLBACK_PATH = "/auth/callback";
@@ -104,7 +107,9 @@ export class OidcService {
             (c.name as string | undefined) ?? (c.preferred_username as string | undefined) ?? (u.name as string | undefined) ?? email;
         const groups = Array.isArray(c.groups) ? c.groups.map(String) : [];
 
-        return { issuer: claims.iss, subject: claims.sub, email, verified, name, groups };
+        const authTime = typeof claims.auth_time === "number" ? claims.auth_time * 1000 : Date.now();
+
+        return { issuer: claims.iss, subject: claims.sub, email, verified, name, groups, authTime };
     }
 
     async logoutUrl(idTokenHint?: string): Promise<string | undefined> {

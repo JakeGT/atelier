@@ -1,11 +1,11 @@
 # 10 — Build, deploy & hosting (per project)
 
-> **Implementation status (P1, deployed):** the build/deploy is a stub —
-> `ReleaseService.publish` marks the release `live` and records a `deployments`
-> row (`provider: static`) with no real Cloudflare Pages provisioning yet (that
-> is P3, ADR-0004). The release state machine (create → publish → supersede →
-> rollback) is implemented and tested. In-editor preview is a static file server
-> (`GET /projects/:id/preview/*`) serving the workspace dir.
+> **Implementation status (P1 + hardening):** the build/deploy is a stub.
+> Publishing a planned release records a `deployments` row (`provider: static`)
+> and then goes live atomically (ADR-0007). Real Cloudflare Pages is P3, and
+> the build is **split into an untrusted sandboxed build and a trusted upload**
+> (ADR-0010, which supersedes §4's single worker). The in-editor preview serves
+> the workspace's static files via a signed, sandboxed URL.
 
 Each project produces a website that needs preview and production hosting with
 per-project custom domains and TLS. This is the "one deploy target per project"

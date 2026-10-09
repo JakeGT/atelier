@@ -1,6 +1,20 @@
-import type { AgentSession, ContentDocument, Deployment, Membership, Organization, OrgRole, Project, Release, User } from "@atelier/shared";
+import type {
+    AgentSession,
+    AuditEntry,
+    ContentDocument,
+    ContentRevision,
+    Deployment,
+    Membership,
+    Organization,
+    OrgRole,
+    Project,
+    Release,
+    ReleaseDocument,
+    User,
+} from "@atelier/shared";
 
 export interface UserStore {
+    findById(id: string): Promise<User | null>;
     findByIdentity(issuer: string, subject: string): Promise<User | null>;
     upsertIdentity(input: { issuer: string; subject: string; email: string; name: string; admin: boolean }): Promise<User>;
     count(): Promise<number>;
@@ -24,6 +38,8 @@ export interface ProjectStore {
     list(tenantId: string): Promise<Project[]>;
 }
 
+// Content is written only as drafts. `published` changes only when a release
+// goes live (ReleaseStore.goLive), so it always mirrors the live site.
 export interface ContentStore {
     upsertDraft(input: {
         tenantId: string;
@@ -35,8 +51,10 @@ export interface ContentStore {
     }): Promise<ContentDocument>;
     get(tenantId: string, projectId: string, kind: string, slug: string): Promise<ContentDocument | null>;
     list(tenantId: string, projectId: string): Promise<ContentDocument[]>;
-    publish(input: { tenantId: string; projectId: string; kind: string; slug: string; actorId: string | null }): Promise<ContentDocument>;
+    // Published documents only: what the live release ships.
     snapshot(tenantId: string, projectId: string): Promise<ContentDocument[]>;
+    revisions(tenantId: string, documentId: string): Promise<ContentRevision[]>;
+    revision(tenantId: string, documentId: string, rev: number): Promise<ContentRevision | null>;
 }
 
 export interface AgentSessionStore {
@@ -47,21 +65,26 @@ export interface AgentSessionStore {
 }
 
 export interface ReleaseStore {
-    nextNumber(tenantId: string, projectId: string): Promise<number>;
+    // Creates a planned release with its manifest in one transaction. The release
+    // number is allocated inside that transaction.
     create(input: {
         id: string;
         tenantId: string;
         projectId: string;
-        number: number;
         codeSha: string | null;
-        contentRev: number | null;
         actorId: string | null;
         rollbackOf: string | null;
+        documents: ReleaseDocument[];
     }): Promise<Release>;
     get(tenantId: string, projectId: string, number: number): Promise<Release | null>;
     listByProject(tenantId: string, projectId: string): Promise<Release[]>;
     findLive(tenantId: string, projectId: string): Promise<Release | null>;
-    updateState(tenantId: string, id: string, state: Release["state"]): Promise<Release>;
+    manifest(tenantId: string, releaseId: string): Promise<ReleaseDocument[]>;
+    // Atomically: supersede the current live release, mark this one live, and set
+    // every document's `published` from this release's manifest (null for
+    // documents the release does not ship).
+    goLive(tenantId: string, projectId: string, releaseId: string): Promise<Release>;
+    markFailed(tenantId: string, releaseId: string): Promise<Release>;
 }
 
 export interface DeploymentStore {
@@ -78,6 +101,35 @@ export interface DeploymentStore {
     listByProject(tenantId: string, projectId: string): Promise<Deployment[]>;
 }
 
+// Append-only. Not tenant-scoped: entries outlive what they describe.
+export interface AuditStore {
+    record(entry: {
+        tenantId: string | null;
+        actorId: string | null;
+        action: string;
+        target: string | null;
+        detail?: Record<string, unknown> | null;
+    }): Promise<void>;
+    list(filter: { tenantId?: string; limit?: number }): Promise<AuditEntry[]>;
+}
+
+export interface LoginSession {
+    userId: string;
+    csrf: string;
+    createdAt: number;
+    lastSeenAt: number;
+    authTime: number;
+}
+
+// Server-side login sessions, keyed by a hash of the cookie value.
+export interface LoginSessionStore {
+    create(idHash: string, session: LoginSession): Promise<void>;
+    get(idHash: string): Promise<LoginSession | null>;
+    touch(idHash: string, lastSeenAt: number): Promise<void>;
+    delete(idHash: string): Promise<void>;
+    deleteForUser(userId: string): Promise<void>;
+}
+
 export interface Store {
     users: UserStore;
     organizations: OrganizationStore;
@@ -87,5 +139,7 @@ export interface Store {
     agentSessions: AgentSessionStore;
     releases: ReleaseStore;
     deployments: DeploymentStore;
+    audit: AuditStore;
+    loginSessions: LoginSessionStore;
     close(): Promise<void>;
 }

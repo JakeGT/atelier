@@ -1,14 +1,16 @@
 // Start the server: load configuration, open the store (migrating the database),
 // discover the OIDC provider, and listen.
 
+import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { ConfigError, loadConfig } from "./config.ts";
-import { migrate } from "./db/migrate.ts";
+import { connectedAsOwner, migrate } from "./db/migrate.ts";
 import { OpenCodeAgent } from "./services/agent.ts";
 import { OidcService } from "./services/oidc.ts";
+import { ContainerRuntime, LocalRuntime, type WorkspaceRuntime } from "./services/runtime.ts";
 import { SessionStore } from "./services/sessions.ts";
-import { WorkspaceService } from "./services/workspace.ts";
 import { MemoryStore } from "./store/memory.ts";
 import { PostgresStore } from "./store/postgres.ts";
 import type { Store } from "./store/types.ts";
@@ -26,14 +28,27 @@ try {
 
 let store: Store;
 if (config.databaseUrl) {
-    const pg = new PostgresStore(config.databaseUrl);
+    // Migrate as the table owner (MIGRATION_DATABASE_URL), then serve as the
+    // runtime role (DATABASE_URL), which owns nothing and cannot bypass RLS.
+    const migrationUrl = config.migrationDatabaseUrl ?? config.databaseUrl;
+    const owner = new PostgresStore(migrationUrl);
     try {
-        const applied = await migrate(pg.sql);
+        const applied = await migrate(owner.sql);
         if (applied.length) console.log(`Applied database migrations: ${applied.join(", ")}.`);
     } catch (err) {
         console.error(`Couldn't prepare the database: ${(err as Error).message}`);
-        await pg.close().catch(() => {});
+        await owner.close().catch(() => {});
         process.exit(1);
+    }
+    let pg = owner;
+    if (migrationUrl !== config.databaseUrl) {
+        await owner.close();
+        pg = new PostgresStore(config.databaseUrl);
+    }
+    if (await connectedAsOwner(pg.sql)) {
+        console.warn(
+            "The server is connected as the table owner: FORCE ROW LEVEL SECURITY is the only tenant boundary and the audit log is not append-only. Set DATABASE_URL to the atelier_runtime login and MIGRATION_DATABASE_URL to the owner (docs/14).",
+        );
     }
     store = pg;
 } else {
@@ -55,10 +70,36 @@ if (config.oidc) {
     console.warn("OIDC is not configured (set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET(_FILE)); sign-in is disabled.");
 }
 
-const sessions = new SessionStore({ idleMinutes: config.sessionIdleMinutes, maxHours: config.sessionMaxHours });
-const workspaces = new WorkspaceService(config.workspaceRoot, config.mcpServerEntry);
-const agent = new OpenCodeAgent();
-const { app } = createApp({ config, store, oidc, sessions, workspaces, agent });
+const sessions = new SessionStore(store.loginSessions, store.users, {
+    idleMinutes: config.sessionIdleMinutes,
+    maxHours: config.sessionMaxHours,
+});
+
+let secretsKey = config.secretsKey;
+if (!secretsKey) {
+    secretsKey = randomBytes(32).toString("base64url");
+    console.warn("ATELIER_SECRETS_KEY is not set: using an ephemeral key (agent tokens stop working when the server restarts).");
+}
+
+let runtime: WorkspaceRuntime;
+if (config.runtimeMode === "container") {
+    runtime = new ContainerRuntime({
+        provisionerUrl: config.provisionerUrl,
+        provisionerSecret: config.provisionerSecret ?? "",
+        secretsKey,
+    });
+    console.log(`Agent workspaces: per-project runtime containers via ${config.provisionerUrl}.`);
+} else {
+    runtime = new LocalRuntime(
+        config.workspaceRoot,
+        new OpenCodeAgent({ stateDir: join(config.workspaceRoot, ".agent"), mcpEntry: config.mcpServerEntry }),
+    );
+    console.warn(
+        "RUNTIME_MODE=local: the agent runs as a child of this server, with no sandbox. Use only for development; production must use RUNTIME_MODE=container (ADR-0006).",
+    );
+}
+
+const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey });
 
 const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
     const host = info.address.includes(":") ? `[${info.address}]` : info.address;

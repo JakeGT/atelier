@@ -25,6 +25,17 @@ const envSchema = z.object({
     COOKIE_SECURE: z.string().optional(),
     SESSION_IDLE_MINUTES: z.coerce.number().default(480),
     SESSION_MAX_HOURS: z.coerce.number().default(72),
+    MIGRATION_DATABASE_URL: z.string().optional(),
+    MIGRATION_DATABASE_URL_FILE: z.string().optional(),
+    STEP_UP_MINUTES: z.coerce.number().default(15),
+    // Where agent workspaces run: "container" (production: per-project runtime
+    // containers via the provisioner) or "local" (dev/tests: in-process).
+    RUNTIME_MODE: z.enum(["local", "container"]).default("local"),
+    PROVISIONER_URL: z.string().default("http://atelier-provisioner:8091"),
+    PROVISIONER_SECRET: z.string().optional(),
+    PROVISIONER_SECRET_FILE: z.string().optional(),
+    // The control-plane address runtime containers use for the agent content API.
+    RUNTIME_API_URL: z.string().default("http://atelier-server:8080"),
     WORKSPACE_ROOT: z.string().default("/tmp/atelier-workspaces"),
     MCP_SERVER_ENTRY: z.string().default("/app/apps/server/src/mcp/content.ts"),
     WEB_DIST_DIR: z.string().optional(),
@@ -50,6 +61,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
 
     const databaseUrl = e.DATABASE_URL ?? (e.DATABASE_URL_FILE ? readSecret(e.DATABASE_URL_FILE) : undefined);
     const secretsKey = e.ATELIER_SECRETS_KEY ?? (e.ATELIER_SECRETS_KEY_FILE ? readSecret(e.ATELIER_SECRETS_KEY_FILE) : undefined);
+    const migrationDatabaseUrl =
+        e.MIGRATION_DATABASE_URL ?? (e.MIGRATION_DATABASE_URL_FILE ? readSecret(e.MIGRATION_DATABASE_URL_FILE) : undefined);
+    const provisionerSecret = e.PROVISIONER_SECRET ?? (e.PROVISIONER_SECRET_FILE ? readSecret(e.PROVISIONER_SECRET_FILE) : undefined);
+    if (e.RUNTIME_MODE === "container") {
+        if (!secretsKey) throw new ConfigError("RUNTIME_MODE=container requires ATELIER_SECRETS_KEY(_FILE)");
+        if (!provisionerSecret) throw new ConfigError("RUNTIME_MODE=container requires PROVISIONER_SECRET(_FILE)");
+    }
     const oidcClientSecret = e.OIDC_CLIENT_SECRET ?? (e.OIDC_CLIENT_SECRET_FILE ? readSecret(e.OIDC_CLIENT_SECRET_FILE) : undefined);
 
     const oidc =
@@ -70,7 +88,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         port: e.PORT,
         publicOrigin: e.PUBLIC_ORIGIN ?? `http://localhost:${e.PORT}`,
         databaseUrl,
+        migrationDatabaseUrl,
         secretsKey,
+        stepUpMinutes: e.STEP_UP_MINUTES,
+        runtimeMode: e.RUNTIME_MODE,
+        provisionerUrl: e.PROVISIONER_URL,
+        provisionerSecret,
+        runtimeApiUrl: e.RUNTIME_API_URL,
         authMode: e.AUTH_MODE,
         oidc,
         signupMode: e.SIGNUP_MODE,

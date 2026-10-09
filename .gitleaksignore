@@ -1,0 +1,6 @@
+# Findings the secret scan may ignore, one fingerprint per line, each with a reason.
+# Only for values that were never real credentials; a real leak is rotated, not ignored.
+
+# A made-up key used only by the test suite ("test-secrets-key-0123…"). It was
+# replaced with a per-run random value, but the scan covers history.
+6960de34760fdcdd235db28e8da44dcdc8427150:apps/server/test/helpers.ts:generic-api-key:13

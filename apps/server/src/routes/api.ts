@@ -1,292 +1,343 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
-import type { Context } from "hono";
-import { Hono } from "hono";
-import { createMiddleware } from "hono/factory";
+import type { Permission } from "@atelier/shared";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import type { Config } from "../config.ts";
-import { type ApiVariables, requireAuth, requireCsrf } from "../middleware/auth.ts";
-import type { AgentRuntime } from "../services/agent.ts";
+import { type ApiVariables, loadProject, requireAuth, requireCsrf, requirePermission, requireRecentAuth } from "../middleware/auth.ts";
 import { type AgentTokenClaims, signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
-import { ReleaseService } from "../services/release.ts";
+import { ReleaseError, ReleaseService } from "../services/release.ts";
+import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
 import type { SessionStore } from "../services/sessions.ts";
-import type { WorkspaceService } from "../services/workspace.ts";
+import { SHA_RE } from "../services/workspace.ts";
 import type { Store } from "../store/types.ts";
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const AGENT_TOKEN_TTL_S = 60 * 60;
+const PREVIEW_TOKEN_TTL_S = 2 * 60 * 60;
 
-const MIME: Record<string, string> = {
-    ".html": "text/html; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".ico": "image/x-icon",
-    ".woff2": "font/woff2",
+export interface DeclaredRoute {
+    method: string;
+    path: string;
+    permission: Permission | "agent-token";
+}
+
+type Env = { Variables: ApiVariables };
+type Ctx = Context<Env>;
+type Handler = (c: Ctx) => Response | Promise<Response>;
+
+// Routes are registered through a helper, so params are not typed per path.
+const param = (c: Context, name: string): string => c.req.param(name) ?? "";
+
+// Preview documents are agent-written HTML served from the app's own origin. The
+// CSP `sandbox` directive gives them an opaque origin even when opened directly,
+// so their scripts cannot read the session, call the API with the user's
+// cookies, or touch the editor (ADR-0006).
+const PREVIEW_HEADERS = {
+    "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors 'self'",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cache-control": "no-store",
 };
 
-const mimeFor = (path: string): string => MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
-
-// Org / project / content API for the P1 single-tenant slice. All routes are
-// session-authenticated; the tenant is resolved from the session (requireAuth).
-// CSRF on mutating routes arrives with the editor UI (P1.6) — the session cookie
-// is already __Host- + SameSite=Lax, which blocks cross-site mutations.
+// Org / project / content / release API for the P1 single-tenant slice. Every
+// /api/v1 route is declared through `route()` with the permission it requires
+// (enforced from the shared ROLE_PERMISSIONS table); test/permissions.test.ts
+// fails if a route is mounted without one. Mutations require the CSRF token.
 export function apiRoutes(
     sessions: SessionStore,
     store: Store,
-    workspaces: WorkspaceService,
-    agent: AgentRuntime,
+    runtime: WorkspaceRuntime,
     config: Config,
-): Hono<{ Variables: ApiVariables }> {
-    const app = new Hono<{ Variables: ApiVariables }>();
-    const csrf = requireCsrf(sessions, config.publicOrigin);
-    const publisher = createMiddleware<{ Variables: ApiVariables }>(async (c, next) => {
-        const role = c.get("role");
-        if (role !== "owner" && role !== "admin") return c.json({ error: "forbidden" }, 403);
-        await next();
-    });
-    app.use("/api/v1/*", requireAuth(sessions, store));
+    secretsKey: string,
+): { app: Hono<Env>; declared: DeclaredRoute[] } {
+    const app = new Hono<Env>();
+    const declared: DeclaredRoute[] = [];
+    const releases = new ReleaseService(store, runtime);
+    const stepUp = requireRecentAuth(config.stepUpMinutes);
+    const project = loadProject(store);
+    const previewKey = `${secretsKey}:preview`;
+    const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
+
+    app.use("/api/v1/*", requireAuth(sessions, store, config.cookieSecure));
+    const csrf = requireCsrf(sessions, config.publicOrigin, config.cookieSecure);
     app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" ? next() : csrf(c, next)));
-    const releases = new ReleaseService(store, workspaces);
-    const secretsKey = config.secretsKey ?? "insecure-dev-secret";
-    const apiUrl = `http://127.0.0.1:${config.port}`;
 
-    const provisionWorkspace = (projectId: string, sessionId: string, tenantId: string) =>
-        workspaces.provision(projectId, {
-            ATELIER_API_URL: apiUrl,
-            ATELIER_AGENT_TOKEN: signAgentToken(
-                { tenantId, projectId, sessionId, exp: Math.floor(Date.now() / 1000) + 24 * 3600 },
-                secretsKey,
-            ),
-        });
+    function route(method: "get" | "post" | "put", path: string, permission: Permission, ...rest: [...MiddlewareHandler<Env>[], Handler]) {
+        declared.push({ method: method.toUpperCase(), path, permission });
+        const chain: MiddlewareHandler<Env>[] = [requirePermission(permission)];
+        if (path.includes(":projectId")) chain.push(project);
+        const on = app.on as unknown as (m: string, p: string, ...h: MiddlewareHandler<Env>[]) => void;
+        on(method.toUpperCase(), path, ...chain, ...(rest as MiddlewareHandler<Env>[]));
+    }
 
-    const authorizeAgent = (c: Context<{ Variables: ApiVariables }>): AgentTokenClaims | null => {
-        const auth = c.req.header("authorization");
-        const token = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
-        return token ? verifyAgentToken(token, secretsKey) : null;
+    const audit = (c: Ctx, action: string, target: string, detail?: Record<string, unknown>) =>
+        store.audit.record({ tenantId: c.get("org").id, actorId: c.get("user").id, action, target, detail: detail ?? null });
+
+    const runtimeError = (c: Ctx, err: unknown) => {
+        if (err instanceof RuntimeBusyError) return c.json({ error: err.message }, 409);
+        console.error(`workspace error: ${(err as Error).message}`);
+        return c.json({ error: (err as Error).message }, 502);
     };
 
-    app.get("/api/v1/orgs", async (c) => {
-        const user = c.get("user");
-        return c.json({ orgs: await store.organizations.listForUser(user.id) });
+    // ---- organizations & projects -------------------------------------------------
+
+    route("get", "/api/v1/orgs", "org.read", async (c) => {
+        const orgs = await store.organizations.listForUser(c.get("user").id);
+        return c.json({ orgs, current: c.get("org").id, role: c.get("role") });
     });
 
-    app.get("/api/v1/projects", async (c) => {
-        const org = c.get("org");
-        return c.json({ projects: await store.projects.list(org.id) });
-    });
+    route("get", "/api/v1/projects", "project.read", async (c) => c.json({ projects: await store.projects.list(c.get("org").id) }));
 
-    app.post("/api/v1/projects", async (c) => {
+    route("post", "/api/v1/projects", "project.create", async (c) => {
         const org = c.get("org");
         const body = await c.req.json().catch(() => null);
         const slug = typeof body?.slug === "string" ? body.slug : "";
-        const name = typeof body?.name === "string" ? body.name : "";
-        if (!name || !SLUG_RE.test(slug)) {
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        if (!name || name.length > 120 || !SLUG_RE.test(slug) || slug.length > 63) {
             return c.json({ error: "project requires a name and a lowercase-hyphen slug" }, 400);
         }
-        const existing = await store.projects.findBySlug(org.id, slug);
-        if (existing) return c.json({ error: "slug already in use" }, 409);
-        const project = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name });
-        return c.json({ project }, 201);
+        if (await store.projects.findBySlug(org.id, slug)) return c.json({ error: "slug already in use" }, 409);
+        const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name });
+        await audit(c, "project.create", `project:${created.id}`, { slug });
+        return c.json({ project: created }, 201);
     });
 
-    app.get("/api/v1/projects/:projectId/content", async (c) => {
-        const org = c.get("org");
-        const documents = await store.content.list(org.id, c.req.param("projectId"));
-        return c.json({ documents });
-    });
+    // ---- content (drafts only; publishing is the release workflow) ------------------
 
-    app.put("/api/v1/projects/:projectId/content/:kind/:slug", async (c) => {
-        const org = c.get("org");
-        const user = c.get("user");
+    route("get", "/api/v1/projects/:projectId/content", "content.read", async (c) =>
+        c.json({ documents: await store.content.list(c.get("org").id, c.get("project").id) }),
+    );
+
+    route("put", "/api/v1/projects/:projectId/content/:kind/:slug", "content.write", async (c) => {
+        const kind = param(c, "kind");
+        const slug = param(c, "slug");
+        if (!KEY_RE.test(kind) || !KEY_RE.test(slug)) return c.json({ error: "invalid kind or slug" }, 400);
         const body = await c.req.json().catch(() => null);
-        if (!body || typeof body !== "object" || Array.isArray(body)) {
-            return c.json({ error: "content draft must be a JSON object" }, 400);
-        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "content draft must be a JSON object" }, 400);
+        const document = await store.content.upsertDraft({
+            tenantId: c.get("org").id,
+            projectId: c.get("project").id,
+            kind,
+            slug,
+            draft: body as Record<string, unknown>,
+            updatedBy: c.get("user").id,
+        });
+        return c.json({ document });
+    });
+
+    route("get", "/api/v1/projects/:projectId/content/:kind/:slug/revisions", "content.read", async (c) => {
+        const doc = await store.content.get(c.get("org").id, c.get("project").id, param(c, "kind"), param(c, "slug"));
+        if (!doc) return c.json({ error: "not found" }, 404);
+        return c.json({ revisions: await store.content.revisions(c.get("org").id, doc.id) });
+    });
+
+    // Restoring a content revision writes it back as a new draft (so it is itself undoable).
+    route("post", "/api/v1/projects/:projectId/content/:kind/:slug/revisions/:rev/restore", "content.write", async (c) => {
+        const org = c.get("org");
+        const doc = await store.content.get(org.id, c.get("project").id, param(c, "kind"), param(c, "slug"));
+        const rev = Number(param(c, "rev"));
+        const revision = doc && Number.isInteger(rev) ? await store.content.revision(org.id, doc.id, rev) : null;
+        if (!doc || !revision?.draft) return c.json({ error: "not found" }, 404);
         const document = await store.content.upsertDraft({
             tenantId: org.id,
-            projectId: c.req.param("projectId"),
-            kind: c.req.param("kind"),
-            slug: c.req.param("slug"),
-            draft: body as Record<string, unknown>,
-            updatedBy: user.id,
+            projectId: doc.projectId,
+            kind: doc.kind,
+            slug: doc.slug,
+            draft: revision.draft,
+            updatedBy: c.get("user").id,
         });
+        await audit(c, "content.restore", `content:${doc.id}`, { rev });
         return c.json({ document });
     });
 
-    app.post("/api/v1/projects/:projectId/content/:kind/:slug/publish", publisher, async (c) => {
-        const org = c.get("org");
-        const user = c.get("user");
-        const document = await store.content.publish({
-            tenantId: org.id,
-            projectId: c.req.param("projectId"),
-            kind: c.req.param("kind"),
-            slug: c.req.param("slug"),
-            actorId: user.id,
-        });
-        return c.json({ document });
-    });
+    // What the live release ships (the build input).
+    route("get", "/api/v1/projects/:projectId/snapshot", "content.read", async (c) =>
+        c.json({ documents: await store.content.snapshot(c.get("org").id, c.get("project").id) }),
+    );
 
-    app.get("/api/v1/projects/:projectId/snapshot", async (c) => {
-        const org = c.get("org");
-        const documents = await store.content.snapshot(org.id, c.req.param("projectId"));
-        return c.json({ documents });
-    });
+    // ---- agent sessions & workspace -------------------------------------------------
 
-    app.post("/api/v1/projects/:projectId/sessions", async (c) => {
+    route("post", "/api/v1/projects/:projectId/sessions", "session.open", async (c) => {
         const org = c.get("org");
-        const projectId = c.req.param("projectId");
-        const project = await store.projects.findById(org.id, projectId);
-        if (!project) return c.json({ error: "project not found" }, 404);
+        const projectId = c.get("project").id;
         const body = await c.req.json().catch(() => null);
         const model = typeof body?.model === "string" ? body.model : null;
-        const sessionId = randomUUID();
-        let session = await store.agentSessions.create({ id: sessionId, tenantId: org.id, projectId, model });
+        let session = await store.agentSessions.create({ id: randomUUID(), tenantId: org.id, projectId, model });
         try {
-            const dir = await provisionWorkspace(projectId, sessionId, org.id);
-            session = await store.agentSessions.updateStatus(org.id, sessionId, "ready", dir);
+            const { workspaceId } = await runtime.ensure(projectId);
+            session = await store.agentSessions.updateStatus(org.id, session.id, "ready", workspaceId);
         } catch (err) {
             console.error(`workspace provisioning failed: ${(err as Error).message}`);
-            session = await store.agentSessions.updateStatus(org.id, sessionId, "failed");
+            session = await store.agentSessions.updateStatus(org.id, session.id, "failed");
         }
         return c.json({ session }, 201);
     });
 
-    app.get("/api/v1/projects/:projectId/sessions", async (c) => {
-        const org = c.get("org");
-        const sessions = await store.agentSessions.listByProject(org.id, c.req.param("projectId"));
-        return c.json({ sessions });
-    });
+    route("get", "/api/v1/projects/:projectId/sessions", "project.read", async (c) =>
+        c.json({ sessions: await store.agentSessions.listByProject(c.get("org").id, c.get("project").id) }),
+    );
 
-    app.post("/api/v1/projects/:projectId/sessions/:sessionId/messages", async (c) => {
+    route("post", "/api/v1/projects/:projectId/sessions/:sessionId/messages", "project.edit", async (c) => {
         const org = c.get("org");
-        const projectId = c.req.param("projectId");
-        const sessionId = c.req.param("sessionId");
-        const session = await store.agentSessions.get(org.id, sessionId);
-        if (!session || session.projectId !== projectId) return c.json({ error: "session not found" }, 404);
+        const projectId = c.get("project").id;
+        const session = await store.agentSessions.get(org.id, param(c, "sessionId"));
+        if (!session || session.projectId !== projectId) return c.json({ error: "not found" }, 404);
         const body = await c.req.json().catch(() => null);
-        const prompt = typeof body?.prompt === "string" ? body.prompt : "";
-        if (!prompt) return c.json({ error: "prompt required" }, 400);
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+        if (!prompt || prompt.length > 20_000) return c.json({ error: "prompt required (max 20000 characters)" }, 400);
         const model = typeof body?.model === "string" ? body.model : session.model;
-        const dir = session.workspaceId ?? (await provisionWorkspace(projectId, session.id, org.id));
+        // A fresh, short-lived token per run, scoped to this tenant + project + session.
+        const agentToken = signAgentToken(
+            { tenantId: org.id, projectId, sessionId: session.id, exp: Math.floor(Date.now() / 1000) + AGENT_TOKEN_TTL_S },
+            secretsKey,
+        );
+        // Runs take minutes: start a background job and let the client poll it.
         try {
-            const result = await agent.run({ workspaceDir: dir, prompt, model });
-            await workspaces.checkpoint(projectId, prompt.slice(0, 80)).catch(() => {});
-            return c.json({ result });
+            const run = await runtime.startRun(projectId, { prompt, model, apiUrl, agentToken });
+            return c.json({ run }, 202);
         } catch (err) {
-            return c.json({ error: (err as Error).message }, 500);
+            return runtimeError(c, err);
         }
     });
 
-    app.get("/api/v1/projects/:projectId/sessions/:sessionId/checkpoints", async (c) => {
-        const org = c.get("org");
-        const session = await store.agentSessions.get(org.id, c.req.param("sessionId"));
-        if (!session) return c.json({ error: "session not found" }, 404);
-        const checkpoints = await workspaces.listCheckpoints(c.req.param("projectId"));
-        return c.json({ checkpoints });
-    });
-
-    app.post("/api/v1/projects/:projectId/sessions/:sessionId/checkpoints/:sha/reset", async (c) => {
-        const org = c.get("org");
-        const session = await store.agentSessions.get(org.id, c.req.param("sessionId"));
-        if (!session) return c.json({ error: "session not found" }, 404);
-        const sha = c.req.param("sha");
-        if (!/^[0-9a-f]{40}$/.test(sha)) return c.json({ error: "invalid commit sha" }, 400);
-        await workspaces.reset(c.req.param("projectId"), sha);
-        return c.json({ ok: true });
-    });
-
-    app.get("/api/v1/projects/:projectId/preview/*", async (c) => {
-        const org = c.get("org");
-        const projectId = c.req.param("projectId");
-        const project = await store.projects.findById(org.id, projectId);
-        if (!project) return c.json({ error: "project not found" }, 404);
-        const rel = c.req.param("*") ?? "index.html";
-        const base = resolve(workspaces.dir(projectId));
-        const file = resolve(join(base, rel));
-        if (file !== base && !file.startsWith(`${base}/`)) return c.json({ error: "forbidden" }, 403);
+    route("get", "/api/v1/projects/:projectId/runs/:runId", "project.read", async (c) => {
         try {
-            const body = await readFile(file);
-            return new Response(body, { headers: { "content-type": mimeFor(file) } });
-        } catch {
-            return c.json({ error: "not found" }, 404);
+            const run = await runtime.getRun(c.get("project").id, param(c, "runId"));
+            return run ? c.json({ run }) : c.json({ error: "not found" }, 404);
+        } catch (err) {
+            return runtimeError(c, err);
         }
     });
 
-    app.post("/api/v1/projects/:projectId/releases", publisher, async (c) => {
-        const org = c.get("org");
-        const user = c.get("user");
-        const projectId = c.req.param("projectId");
-        const project = await store.projects.findById(org.id, projectId);
-        if (!project) return c.json({ error: "project not found" }, 404);
-        const release = await releases.create(org.id, projectId, user.id);
+    route("get", "/api/v1/projects/:projectId/checkpoints", "project.read", async (c) => {
+        try {
+            return c.json({ checkpoints: await runtime.listCheckpoints(c.get("project").id) });
+        } catch (err) {
+            return runtimeError(c, err);
+        }
+    });
+
+    route("post", "/api/v1/projects/:projectId/checkpoints/:sha/restore", "project.edit", async (c) => {
+        const sha = param(c, "sha");
+        if (!SHA_RE.test(sha)) return c.json({ error: "invalid commit sha" }, 400);
+        try {
+            const restored = await runtime.restore(c.get("project").id, sha);
+            await audit(c, "workspace.restore", `project:${c.get("project").id}`, { sha, newSha: restored });
+            return c.json({ ok: true, sha: restored });
+        } catch (err) {
+            return runtimeError(c, err);
+        }
+    });
+
+    // The preview is a sandboxed (opaque-origin) iframe, so the browser will not
+    // send it the session cookie for its CSS/JS. Instead the editor gets a
+    // short-lived capability URL, /preview/<token>/..., signed with a key that is
+    // distinct from the agent-token key so neither token works as the other.
+    route("get", "/api/v1/projects/:projectId/preview-url", "project.read", async (c) => {
+        const claims = {
+            tenantId: c.get("org").id,
+            projectId: c.get("project").id,
+            sessionId: "preview",
+            exp: Math.floor(Date.now() / 1000) + PREVIEW_TOKEN_TTL_S,
+        };
+        return c.json({ url: `/preview/${signAgentToken(claims, previewKey)}/` });
+    });
+
+    app.get("/preview/:token/*", async (c) => {
+        const claims = verifyAgentToken(param(c, "token"), previewKey);
+        if (claims?.sessionId !== "preview") return c.json({ error: "preview link expired" }, 403, PREVIEW_HEADERS);
+        const prefix = `/preview/${param(c, "token")}/`;
+        const rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
+        if (!(await store.projects.findById(claims.tenantId, claims.projectId)))
+            return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        const file = await runtime.readFile(claims.projectId, rel).catch(() => null);
+        if (!file) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        return new Response(file.body, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });
+    });
+
+    // ---- releases (the only path from draft to live) --------------------------------
+
+    route("get", "/api/v1/projects/:projectId/releases", "release.read", async (c) =>
+        c.json({ releases: await store.releases.listByProject(c.get("org").id, c.get("project").id) }),
+    );
+
+    route("get", "/api/v1/projects/:projectId/releases/:number/manifest", "release.read", async (c) => {
+        const release = await store.releases.get(c.get("org").id, c.get("project").id, Number(param(c, "number")));
+        if (!release) return c.json({ error: "not found" }, 404);
+        return c.json({ release, documents: await store.releases.manifest(c.get("org").id, release.id) });
+    });
+
+    route("post", "/api/v1/projects/:projectId/releases", "release.publish", async (c) => {
+        const release = await releases.create(c.get("org").id, c.get("project").id, c.get("user").id);
+        await audit(c, "release.create", `release:${release.id}`, { number: release.number, codeSha: release.codeSha });
         return c.json({ release }, 201);
     });
 
-    app.get("/api/v1/projects/:projectId/releases", async (c) => {
-        const org = c.get("org");
-        const list = await store.releases.listByProject(org.id, c.req.param("projectId"));
-        return c.json({ releases: list });
-    });
-
-    app.post("/api/v1/projects/:projectId/releases/:number/publish", publisher, async (c) => {
-        const org = c.get("org");
-        const number = Number(c.req.param("number"));
-        if (!Number.isInteger(number)) return c.json({ error: "invalid release number" }, 400);
+    const releaseAction = (action: "publish" | "rollback") => async (c: Ctx) => {
+        const number = Number(param(c, "number"));
+        if (!Number.isInteger(number) || number < 1) return c.json({ error: "invalid release number" }, 400);
+        const { id: tenantId } = c.get("org");
+        const projectId = c.get("project").id;
         try {
-            const release = await releases.publish(org.id, c.req.param("projectId"), number);
-            return c.json({ release });
+            const release =
+                action === "publish"
+                    ? await releases.publish(tenantId, projectId, number)
+                    : await releases.rollback(tenantId, projectId, number, c.get("user").id);
+            await audit(c, `release.${action}`, `release:${release.id}`, { number: release.number, from: number });
+            return c.json({ release }, action === "publish" ? 200 : 201);
         } catch (err) {
-            return c.json({ error: (err as Error).message }, 404);
+            if (err instanceof ReleaseError) return c.json({ error: err.message }, err.status);
+            throw err;
         }
-    });
+    };
+    route("post", "/api/v1/projects/:projectId/releases/:number/publish", "release.publish", stepUp, releaseAction("publish"));
+    route("post", "/api/v1/projects/:projectId/releases/:number/rollback", "release.rollback", stepUp, releaseAction("rollback"));
 
-    app.post("/api/v1/projects/:projectId/releases/:number/rollback", publisher, async (c) => {
-        const org = c.get("org");
-        const user = c.get("user");
-        const number = Number(c.req.param("number"));
-        if (!Number.isInteger(number)) return c.json({ error: "invalid release number" }, 400);
-        try {
-            const release = await releases.rollback(org.id, c.req.param("projectId"), number, user.id);
-            return c.json({ release }, 201);
-        } catch (err) {
-            return c.json({ error: (err as Error).message }, 404);
-        }
-    });
+    // ---- audit ------------------------------------------------------------------------
 
-    // Agent surface (draft-only content). Authenticated by a short-lived token
-    // scoped to one tenant + project + session; the agent never publishes.
-    app.get("/api/agent/content", async (c) => {
-        const claims = authorizeAgent(c);
-        if (!claims) return c.json({ error: "unauthorized" }, 401);
-        return c.json({ documents: await store.content.list(claims.tenantId, claims.projectId) });
-    });
+    route("get", "/api/v1/audit", "org.manage", async (c) => c.json({ entries: await store.audit.list({ tenantId: c.get("org").id }) }));
+    route("get", "/api/v1/admin/audit", "admin.audit", async (c) => c.json({ entries: await store.audit.list({ limit: 500 }) }));
 
-    app.get("/api/agent/content/:kind/:slug", async (c) => {
-        const claims = authorizeAgent(c);
-        if (!claims) return c.json({ error: "unauthorized" }, 401);
-        const doc = await store.content.get(claims.tenantId, claims.projectId, c.req.param("kind"), c.req.param("slug"));
-        return c.json({ document: doc });
-    });
+    // ---- agent surface (draft-only content) ---------------------------------------------
+    // Authenticated by a short-lived token scoped to one tenant + project + session;
+    // there is deliberately no publish, delete, or cross-project route here.
 
-    app.put("/api/agent/content/:kind/:slug", async (c) => {
-        const claims = authorizeAgent(c);
-        if (!claims) return c.json({ error: "unauthorized" }, 401);
+    const authorizeAgent = (c: Context): AgentTokenClaims | null => {
+        const auth = c.req.header("authorization");
+        const token = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
+        return token ? verifyAgentToken(token, secretsKey) : null;
+    };
+    const agentRoute = (method: "get" | "put", path: string, handler: (c: Context, claims: AgentTokenClaims) => Promise<Response>) => {
+        declared.push({ method: method.toUpperCase(), path, permission: "agent-token" });
+        app[method](path, async (c) => {
+            const claims = authorizeAgent(c);
+            if (!claims) return c.json({ error: "unauthorized" }, 401);
+            return handler(c, claims);
+        });
+    };
+
+    agentRoute("get", "/api/agent/content", async (c, claims) =>
+        c.json({ documents: await store.content.list(claims.tenantId, claims.projectId) }),
+    );
+    agentRoute("get", "/api/agent/content/:kind/:slug", async (c, claims) =>
+        c.json({ document: await store.content.get(claims.tenantId, claims.projectId, param(c, "kind"), param(c, "slug")) }),
+    );
+    agentRoute("put", "/api/agent/content/:kind/:slug", async (c, claims) => {
+        const kind = param(c, "kind");
+        const slug = param(c, "slug");
+        if (!KEY_RE.test(kind) || !KEY_RE.test(slug)) return c.json({ error: "invalid kind or slug" }, 400);
         const body = await c.req.json().catch(() => null);
         if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "draft must be a JSON object" }, 400);
         const doc = await store.content.upsertDraft({
             tenantId: claims.tenantId,
             projectId: claims.projectId,
-            kind: c.req.param("kind"),
-            slug: c.req.param("slug"),
+            kind,
+            slug,
             draft: body as Record<string, unknown>,
             updatedBy: null,
         });
         return c.json({ document: doc });
     });
 
-    return app;
+    return { app, declared };
 }
