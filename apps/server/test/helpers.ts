@@ -48,12 +48,15 @@ export async function signIn(t: TestApp, opts: { email?: string; role?: OrgRole;
     const user = await t.store.users.upsertIdentity({ issuer: "https://idp/", subject: email, email, name: email, admin: false });
     if (opts.tenantId) await t.store.memberships.add({ tenantId: opts.tenantId, userId: user.id, role: opts.role ?? "owner" });
     else await ensureUserOrg(t.store, user.id, user.email, user.name);
-    const org = (await t.store.organizations.listForUser(user.id))[0];
+    const orgs = await t.store.organizations.listForUser(user.id);
+    const org = opts.tenantId ? orgs.find((o) => o.id === opts.tenantId) : orgs[0];
     if (!org) throw new Error("no org");
+    // Everything organisation-scoped lives under this prefix.
+    const api = `/api/v1/orgs/${org.slug}`;
     const { id, csrf } = await t.sessions.createSession(user.id, opts.authTime);
     const read = { cookie: `${cookieName("session", t.config.cookieSecure)}=${id}` };
     const write = { ...read, "x-atelier-csrf": csrf, origin: "http://localhost:8080", "content-type": "application/json" };
-    return { user, org, read, write, csrf };
+    return { user, org, api, read, write, csrf };
 }
 
 export async function json<T>(res: Response): Promise<T> {

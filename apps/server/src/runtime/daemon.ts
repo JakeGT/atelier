@@ -27,6 +27,7 @@ const workspace = new Workspace(process.env.WORKSPACE_DIR ?? "/workspace");
 const agent = new OpenCodeAgent({
     stateDir: process.env.AGENT_STATE_DIR ?? "/tmp/agent",
     mcpEntry: process.env.MCP_SERVER_ENTRY ?? "/app/apps/server/src/mcp/content.ts",
+    egressProxy: process.env.EGRESS_PROXY || undefined,
 });
 const port = Number(process.env.PORT ?? 8090);
 
@@ -51,6 +52,7 @@ app.post("/runs", async (c) => {
     const body = (await c.req.json().catch(() => null)) as {
         prompt?: unknown;
         model?: unknown;
+        instructions?: unknown;
         apiUrl?: unknown;
         agentToken?: unknown;
     } | null;
@@ -64,10 +66,20 @@ app.post("/runs", async (c) => {
         return c.json({ error: "prompt, apiUrl and agentToken are required" }, 400);
     }
     const model = typeof body.model === "string" ? body.model : null;
-    const run = startAgentRun(runs, workspace, agent, { prompt: body.prompt, model, apiUrl: body.apiUrl, agentToken: body.agentToken });
+    const instructions = typeof body.instructions === "string" ? body.instructions : "";
+    const run = startAgentRun(runs, workspace, agent, {
+        prompt: body.prompt,
+        model,
+        instructions,
+        apiUrl: body.apiUrl,
+        agentToken: body.agentToken,
+    });
     if (run === "busy") return c.json({ error: "busy" }, 409);
     return c.json(run, 202);
 });
+
+// Whether a job is in progress (the control plane asks before stopping an idle workspace).
+app.get("/status", (c) => c.json({ busy: runs.busy }));
 
 app.get("/runs/:id", (c) => {
     const run = runs.get(c.req.param("id"));

@@ -30,6 +30,12 @@ const envSchema = z.object({
     MIGRATION_DATABASE_URL: z.string().optional(),
     MIGRATION_DATABASE_URL_FILE: z.string().optional(),
     STEP_UP_MINUTES: z.coerce.number().default(15),
+    // Safety ceilings applied to organisations that have not been given their own.
+    DEFAULT_MAX_PROJECTS: z.coerce.number().int().positive().default(25),
+    DEFAULT_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().default(5_000_000),
+    INVITE_TTL_DAYS: z.coerce.number().positive().default(14),
+    // Workspace containers idle for longer than this are stopped (their files stay).
+    WORKSPACE_IDLE_MINUTES: z.coerce.number().positive().default(30),
     // Where agent workspaces run: "container" (production: per-project runtime
     // containers via the provisioner) or "local" (dev/tests: in-process).
     RUNTIME_MODE: z.enum(["local", "container"]).default("local"),
@@ -100,6 +106,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         migrationDatabaseUrl,
         secretsKey,
         stepUpMinutes: e.STEP_UP_MINUTES,
+        defaultMaxProjects: e.DEFAULT_MAX_PROJECTS,
+        defaultDailyTokenLimit: e.DEFAULT_DAILY_TOKEN_LIMIT,
+        inviteTtlDays: e.INVITE_TTL_DAYS,
+        workspaceIdleMinutes: e.WORKSPACE_IDLE_MINUTES,
         runtimeMode: e.RUNTIME_MODE,
         provisionerUrl: e.PROVISIONER_URL,
         provisionerSecret,

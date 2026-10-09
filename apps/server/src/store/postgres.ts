@@ -6,8 +6,10 @@ import type {
     ContentDocument,
     ContentRevision,
     Deployment,
+    Invitation,
     Membership,
     Organization,
+    OrgRole,
     Project,
     Release,
     ReleaseDocument,
@@ -19,6 +21,7 @@ import type {
     AuditStore,
     ContentStore,
     DeploymentStore,
+    InvitationStore,
     LoginSessionStore,
     MembershipStore,
     MessageStore,
@@ -26,8 +29,10 @@ import type {
     ProjectStore,
     ReleaseStore,
     Store,
+    UsageStore,
     UserStore,
 } from "./types.ts";
+import { SlugTakenError } from "./types.ts";
 
 type Json = Record<string, unknown>;
 type Ts = Date | string;
@@ -47,6 +52,18 @@ interface OrgRow {
     slug: string;
     name: string;
     status: string;
+    default_model: string | null;
+    max_projects: number | null;
+    daily_token_limit: number | string | null;
+}
+
+interface InvitationRow {
+    id: string;
+    tenant_id: string;
+    email: string;
+    role: string;
+    created_at: Ts;
+    expires_at: Ts;
 }
 
 interface MembershipRow {
@@ -65,6 +82,9 @@ interface ProjectRow {
     agent_config_ref: string | null;
     preview_ref: string | null;
     production_ref: string | null;
+    agent_instructions: string | null;
+    agent_model: string | null;
+    archived_at: Ts | null;
     created_at: Ts;
 }
 
@@ -164,7 +184,10 @@ const firstRow = <T>(rows: readonly T[]): T => {
     return row;
 };
 
-const PROJECT_COLS = "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, created_at";
+const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit";
+const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
+const PROJECT_COLS =
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, agent_instructions, agent_model, archived_at, created_at";
 const CONTENT_COLS = "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
 const RELEASE_COLS = "id, project_id, tenant_id, number, state, code_sha, content_rev, actor_id, rollback_of, deployed_at, created_at";
@@ -180,7 +203,24 @@ const rowToUser = (r: UserRow): User => ({
     createdAt: isoNow(r.created_at),
 });
 
-const rowToOrg = (r: OrgRow): Organization => ({ id: r.id, slug: r.slug, name: r.name, status: r.status as Organization["status"] });
+const rowToOrg = (r: OrgRow): Organization => ({
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    status: r.status as Organization["status"],
+    defaultModel: r.default_model,
+    maxProjects: r.max_projects,
+    dailyTokenLimit: r.daily_token_limit === null ? null : Number(r.daily_token_limit),
+});
+
+const rowToInvitation = (r: InvitationRow): Invitation => ({
+    id: r.id,
+    tenantId: r.tenant_id,
+    email: r.email,
+    role: r.role as Invitation["role"],
+    createdAt: isoNow(r.created_at),
+    expiresAt: isoNow(r.expires_at),
+});
 
 const rowToProject = (r: ProjectRow): Project => ({
     id: r.id,
@@ -192,6 +232,9 @@ const rowToProject = (r: ProjectRow): Project => ({
     agentConfigRef: r.agent_config_ref,
     previewRef: r.preview_ref,
     productionRef: r.production_ref,
+    agentInstructions: r.agent_instructions,
+    agentModel: r.agent_model,
+    archivedAt: iso(r.archived_at),
     createdAt: isoNow(r.created_at),
 });
 
@@ -279,6 +322,8 @@ export class PostgresStore implements Store {
     users: UserStore;
     organizations: OrganizationStore;
     memberships: MembershipStore;
+    invitations: InvitationStore;
+    usage: UsageStore;
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;
@@ -323,14 +368,19 @@ export class PostgresStore implements Store {
         this.organizations = {
             create: async (input) =>
                 this.withTenant(input.id, async (tx) => {
+                    // Slugs are unique across organisations, which RLS hides from each
+                    // other: let the constraint decide, quietly.
                     const rows = await tx<OrgRow[]>`
-                        INSERT INTO organizations (id, slug, name) VALUES (${input.id}, ${input.slug}, ${input.name}) RETURNING id, slug, name, status`;
+                        INSERT INTO organizations (id, slug, name) VALUES (${input.id}, ${input.slug}, ${input.name})
+                        ON CONFLICT (slug) DO NOTHING RETURNING ${tx.unsafe(ORG_COLS)}`;
+                    const row = rows[0];
+                    if (!row) throw new SlugTakenError();
                     await tx`INSERT INTO control.tenants (id, slug, name) VALUES (${input.id}, ${input.slug}, ${input.name})`;
-                    return rowToOrg(firstRow(rows));
+                    return rowToOrg(row);
                 }),
             findById: async (id) =>
                 this.withTenant(id, async (tx) => {
-                    const rows = await tx<OrgRow[]>`SELECT id, slug, name, status FROM organizations WHERE id = ${id}`;
+                    const rows = await tx<OrgRow[]>`SELECT ${tx.unsafe(ORG_COLS)} FROM organizations WHERE id = ${id}`;
                     const r = rows[0];
                     return r ? rowToOrg(r) : null;
                 }),
@@ -339,15 +389,26 @@ export class PostgresStore implements Store {
                 // sign-in finds a user's tenants before any tenant is selected.
                 const rows = await this.withUser(
                     userId,
-                    (tx) => tx<{ tenant_id: string }[]>`SELECT tenant_id FROM memberships WHERE user_id = ${userId} ORDER BY created_at`,
+                    (tx) => tx<{ tenant_id: string; role: string }[]>`
+                        SELECT tenant_id, role FROM memberships WHERE user_id = ${userId} ORDER BY created_at`,
                 );
-                const orgs: Organization[] = [];
+                const orgs: (Organization & { role: OrgRole })[] = [];
                 for (const row of rows) {
                     const org = await this.organizations.findById(row.tenant_id);
-                    if (org) orgs.push(org);
+                    if (org) orgs.push({ ...org, role: row.role as OrgRole });
                 }
                 return orgs;
             },
+            update: async (id, patch) =>
+                this.withTenant(id, async (tx) => {
+                    const rows = await tx<OrgRow[]>`
+                        UPDATE organizations SET
+                            name = COALESCE(${patch.name ?? null}, name),
+                            default_model = CASE WHEN ${patch.defaultModel !== undefined} THEN ${patch.defaultModel ?? null} ELSE default_model END,
+                            updated_at = now()
+                        WHERE id = ${id} RETURNING ${tx.unsafe(ORG_COLS)}`;
+                    return rowToOrg(firstRow(rows));
+                }),
         };
 
         this.memberships = {
@@ -365,6 +426,101 @@ export class PostgresStore implements Store {
                         SELECT tenant_id, user_id, role FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
                     const r = rows[0];
                     return r ? (r.role as Membership["role"]) : null;
+                }),
+            list: async (tenantId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ user_id: string; email: string; name: string; role: string; created_at: Ts }[]>`
+                        SELECT m.user_id, u.email, u.name, m.role, m.created_at
+                        FROM memberships m JOIN users u ON u.id = m.user_id
+                        WHERE m.tenant_id = ${tenantId} ORDER BY m.created_at`;
+                    return rows.map((r) => ({
+                        userId: r.user_id,
+                        email: r.email,
+                        name: r.name,
+                        role: r.role as OrgRole,
+                        joinedAt: isoNow(r.created_at),
+                    }));
+                }),
+            setRole: async (tenantId, userId, role) => {
+                await this.withTenant(
+                    tenantId,
+                    (tx) => tx`UPDATE memberships SET role = ${role} WHERE tenant_id = ${tenantId} AND user_id = ${userId}`,
+                );
+            },
+            remove: async (tenantId, userId) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`);
+            },
+        };
+
+        this.invitations = {
+            create: async (input) =>
+                this.withTenant(input.tenantId, async (tx) => {
+                    const rows = await tx<InvitationRow[]>`
+                        INSERT INTO invitations (id, tenant_id, email, role, invited_by, expires_at)
+                        VALUES (${randomUUID()}, ${input.tenantId}, ${input.email.toLowerCase()}, ${input.role}, ${input.invitedBy}, ${input.expiresAt})
+                        ON CONFLICT (tenant_id, email) DO UPDATE SET
+                            role = EXCLUDED.role, invited_by = EXCLUDED.invited_by, expires_at = EXCLUDED.expires_at,
+                            created_at = now(), accepted_at = NULL
+                        RETURNING ${tx.unsafe(INVITATION_COLS)}`;
+                    return rowToInvitation(firstRow(rows));
+                }),
+            list: async (tenantId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<InvitationRow[]>`
+                        SELECT ${tx.unsafe(INVITATION_COLS)} FROM invitations
+                        WHERE tenant_id = ${tenantId} AND accepted_at IS NULL AND expires_at > now() ORDER BY created_at`;
+                    return rows.map(rowToInvitation);
+                }),
+            revoke: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM invitations WHERE tenant_id = ${tenantId} AND id = ${id}`);
+            },
+            pendingFor: async (email) =>
+                this.withSettings({ "app.current_email": email.toLowerCase() }, async (tx) => {
+                    const rows = await tx<InvitationRow[]>`
+                        SELECT ${tx.unsafe(INVITATION_COLS)} FROM invitations
+                        WHERE email = ${email.toLowerCase()} AND accepted_at IS NULL AND expires_at > now()`;
+                    return rows.map(rowToInvitation);
+                }),
+            // Runs as "this user, with this address": RLS lets them see the invitations
+            // sent to the address and add themselves to exactly those organisations.
+            acceptAll: async (userId, email) =>
+                this.withSettings({ "app.current_user": userId, "app.current_email": email.toLowerCase() }, async (tx) => {
+                    const pending = await tx<{ id: string; tenant_id: string; role: string }[]>`
+                        SELECT id, tenant_id, role FROM invitations
+                        WHERE email = ${email.toLowerCase()} AND accepted_at IS NULL AND expires_at > now() FOR UPDATE`;
+                    for (const i of pending) {
+                        await tx`
+                            INSERT INTO memberships (tenant_id, user_id, role) VALUES (${i.tenant_id}, ${userId}, ${i.role})
+                            ON CONFLICT (tenant_id, user_id) DO NOTHING`;
+                        await tx`UPDATE invitations SET accepted_at = now() WHERE id = ${i.id}`;
+                    }
+                    return pending.map((i) => i.tenant_id);
+                }),
+        };
+
+        this.usage = {
+            record: async (input) => {
+                await this.withTenant(
+                    input.tenantId,
+                    (tx) => tx`
+                        INSERT INTO usage_events (tenant_id, project_id, kind, units, source_id)
+                        VALUES (${input.tenantId}, ${input.projectId}, ${input.kind}, ${input.units}, ${input.sourceId})
+                        ON CONFLICT DO NOTHING`,
+                );
+            },
+            totals: async (tenantId, since) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ project_id: string | null; kind: string; units: string }[]>`
+                        SELECT project_id, kind, COALESCE(SUM(units), 0) AS units FROM usage_events
+                        WHERE occurred_at >= ${since} GROUP BY project_id, kind`;
+                    return rows.map((r) => ({ projectId: r.project_id, kind: r.kind, units: Number(r.units) }));
+                }),
+            total: async (tenantId, kinds, since) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ units: string }[]>`
+                        SELECT COALESCE(SUM(units), 0) AS units FROM usage_events
+                        WHERE occurred_at >= ${since} AND kind IN ${tx(kinds as string[])}`;
+                    return Number(rows[0]?.units ?? 0);
                 }),
         };
 
@@ -393,6 +549,23 @@ export class PostgresStore implements Store {
                     const rows = await tx<ProjectRow[]>`SELECT ${tx.unsafe(PROJECT_COLS)} FROM projects ORDER BY created_at`;
                     return rows.map(rowToProject);
                 }),
+            update: async (tenantId, id, patch) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const archive = patch.archived === undefined ? null : patch.archived;
+                    const rows = await tx<ProjectRow[]>`
+                        UPDATE projects SET
+                            name = COALESCE(${patch.name ?? null}, name),
+                            agent_instructions = CASE WHEN ${patch.agentInstructions !== undefined} THEN ${patch.agentInstructions ?? null} ELSE agent_instructions END,
+                            agent_model = CASE WHEN ${patch.agentModel !== undefined} THEN ${patch.agentModel ?? null} ELSE agent_model END,
+                            archived_at = CASE WHEN ${archive}::boolean IS NULL THEN archived_at WHEN ${archive}::boolean THEN now() ELSE NULL END,
+                            status = CASE WHEN ${archive}::boolean IS NULL THEN status WHEN ${archive}::boolean THEN 'archived' ELSE 'active' END,
+                            updated_at = now()
+                        WHERE id = ${id} RETURNING ${tx.unsafe(PROJECT_COLS)}`;
+                    return rowToProject(firstRow(rows));
+                }),
+            delete: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM projects WHERE id = ${id}`);
+            },
         };
 
         this.content = {
@@ -667,8 +840,13 @@ export class PostgresStore implements Store {
 
     // Like withTenant, but scoped to one user's own memberships (sign-in routing).
     async withUser<T>(userId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+        return this.withSettings({ "app.current_user": userId }, fn);
+    }
+
+    // A transaction with the given RLS settings (transaction-local).
+    async withSettings<T>(settings: Record<string, string>, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
         return (await this.sql.begin(async (tx) => {
-            await tx`SELECT set_config('app.current_user', ${userId}, true)`;
+            for (const [name, value] of Object.entries(settings)) await tx`SELECT set_config(${name}, ${value}, true)`;
             return fn(tx);
         })) as T;
     }

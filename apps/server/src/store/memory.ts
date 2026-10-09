@@ -6,8 +6,10 @@ import type {
     ContentDocument,
     ContentRevision,
     Deployment,
+    Invitation,
     Membership,
     Organization,
+    OrgRole,
     Project,
     Release,
     ReleaseDocument,
@@ -18,6 +20,7 @@ import type {
     AuditStore,
     ContentStore,
     DeploymentStore,
+    InvitationStore,
     LoginSession,
     LoginSessionStore,
     MembershipStore,
@@ -26,11 +29,15 @@ import type {
     ProjectStore,
     ReleaseStore,
     Store,
+    UsageStore,
+    UsageTotals,
     UserStore,
 } from "./types.ts";
+import { SlugTakenError } from "./types.ts";
 
 const key = (...parts: string[]) => parts.join("\0");
 const now = () => new Date().toISOString();
+const strip = ({ acceptedAt: _a, ...i }: Invitation & { acceptedAt: string | null }): Invitation => i;
 
 // In-memory store for development and tests. Tenant isolation is applied
 // explicitly (no RLS here); the RLS backstop lives in the Postgres store and is
@@ -38,6 +45,14 @@ const now = () => new Date().toISOString();
 export class MemoryStore implements Store {
     private readonly userMap = new Map<string, User>();
     private readonly orgMap = new Map<string, Organization>();
+    private readonly joinedAt = new Map<string, string>();
+    private readonly invitationMap = new Map<string, Invitation & { acceptedAt: string | null }>();
+    private readonly usageLog: { tenantId: string; projectId: string | null; kind: string; units: number; at: number }[] = [];
+    private readonly usageSeen = new Set<string>();
+
+    private live(): (Invitation & { acceptedAt: string | null })[] {
+        return [...this.invitationMap.values()].filter((i) => i.acceptedAt === null && new Date(i.expiresAt).getTime() > Date.now());
+    }
     private readonly membershipMap = new Map<string, Membership>();
     private readonly projectMap = new Map<string, Project>();
     private readonly contentMap = new Map<string, ContentDocument>();
@@ -76,29 +91,143 @@ export class MemoryStore implements Store {
 
     organizations: OrganizationStore = {
         create: async (input) => {
-            const org: Organization = { id: input.id, slug: input.slug, name: input.name, status: "active" };
+            if ([...this.orgMap.values()].some((o) => o.slug === input.slug)) throw new SlugTakenError();
+            const org: Organization = {
+                id: input.id,
+                slug: input.slug,
+                name: input.name,
+                status: "active",
+                defaultModel: null,
+                maxProjects: null,
+                dailyTokenLimit: null,
+            };
             this.orgMap.set(input.id, org);
             return org;
         },
         findById: async (id) => this.orgMap.get(id) ?? null,
         listForUser: async (userId) => {
-            const orgs: Organization[] = [];
+            const orgs: (Organization & { role: OrgRole })[] = [];
             for (const m of this.membershipMap.values()) {
                 if (m.userId !== userId) continue;
                 const org = this.orgMap.get(m.tenantId);
-                if (org) orgs.push(org);
+                if (org) orgs.push({ ...org, role: m.role });
             }
             return orgs;
+        },
+        update: async (id, patch) => {
+            const org = this.orgMap.get(id);
+            if (!org) throw new Error("organization not found");
+            const next: Organization = {
+                ...org,
+                name: patch.name ?? org.name,
+                defaultModel: patch.defaultModel === undefined ? org.defaultModel : patch.defaultModel,
+            };
+            this.orgMap.set(id, next);
+            return next;
         },
     };
 
     memberships: MembershipStore = {
         add: async (input) => {
             const m: Membership = { tenantId: input.tenantId, userId: input.userId, role: input.role };
+            if (!this.joinedAt.has(key(input.tenantId, input.userId))) this.joinedAt.set(key(input.tenantId, input.userId), now());
             this.membershipMap.set(key(input.tenantId, input.userId), m);
             return m;
         },
         roleOf: async (tenantId, userId) => this.membershipMap.get(key(tenantId, userId))?.role ?? null,
+        list: async (tenantId) => {
+            const users = new Map([...this.userMap.values()].map((u) => [u.id, u]));
+            return [...this.membershipMap.values()]
+                .filter((m) => m.tenantId === tenantId)
+                .map((m) => {
+                    const u = users.get(m.userId);
+                    return {
+                        userId: m.userId,
+                        email: u?.email ?? "",
+                        name: u?.name ?? "",
+                        role: m.role,
+                        joinedAt: this.joinedAt.get(key(m.tenantId, m.userId)) ?? now(),
+                    };
+                });
+        },
+        setRole: async (tenantId, userId, role) => {
+            const m = this.membershipMap.get(key(tenantId, userId));
+            if (!m) throw new Error("member not found");
+            this.membershipMap.set(key(tenantId, userId), { ...m, role });
+        },
+        remove: async (tenantId, userId) => {
+            this.membershipMap.delete(key(tenantId, userId));
+        },
+    };
+
+    invitations: InvitationStore = {
+        create: async (input) => {
+            const email = input.email.toLowerCase();
+            const inv: Invitation & { acceptedAt: string | null } = {
+                id: randomUUID(),
+                tenantId: input.tenantId,
+                email,
+                role: input.role,
+                createdAt: now(),
+                expiresAt: input.expiresAt.toISOString(),
+                acceptedAt: null,
+            };
+            // One invitation per address per organisation: re-inviting replaces it.
+            for (const [id, i] of this.invitationMap) if (i.tenantId === input.tenantId && i.email === email) this.invitationMap.delete(id);
+            this.invitationMap.set(inv.id, inv);
+            return strip(inv);
+        },
+        list: async (tenantId) =>
+            this.live()
+                .filter((i) => i.tenantId === tenantId)
+                .map(strip),
+        revoke: async (tenantId, id) => {
+            if (this.invitationMap.get(id)?.tenantId === tenantId) this.invitationMap.delete(id);
+        },
+        pendingFor: async (email) =>
+            this.live()
+                .filter((i) => i.email === email.toLowerCase())
+                .map(strip),
+        acceptAll: async (userId, email) => {
+            const joined: string[] = [];
+            for (const i of this.live().filter((x) => x.email === email.toLowerCase())) {
+                if (!this.membershipMap.has(key(i.tenantId, userId)))
+                    await this.memberships.add({ tenantId: i.tenantId, userId, role: i.role });
+                i.acceptedAt = now();
+                joined.push(i.tenantId);
+            }
+            return joined;
+        },
+    };
+
+    usage: UsageStore = {
+        record: async (input) => {
+            const k = key(input.tenantId, input.kind, input.sourceId);
+            if (this.usageSeen.has(k)) return;
+            this.usageSeen.add(k);
+            this.usageLog.push({
+                tenantId: input.tenantId,
+                projectId: input.projectId,
+                kind: input.kind,
+                units: input.units,
+                at: Date.now(),
+            });
+        },
+        totals: async (tenantId, since) => {
+            const sums = new Map<string, UsageTotals>();
+            for (const e of this.usageLog) {
+                if (e.tenantId !== tenantId || e.at < since.getTime()) continue;
+                const k = key(e.projectId ?? "", e.kind);
+                const row = sums.get(k) ?? { projectId: e.projectId, kind: e.kind, units: 0 };
+                row.units += e.units;
+                sums.set(k, row);
+            }
+            return [...sums.values()];
+        },
+        total: async (tenantId, kinds, since) =>
+            this.usageLog
+                .filter((e) => e.tenantId === tenantId && e.at >= since.getTime() && (kinds as string[]).includes(e.kind))
+                .reduce((n, e) => n + e.units, 0),
     };
 
     projects: ProjectStore = {
@@ -113,10 +242,48 @@ export class MemoryStore implements Store {
                 agentConfigRef: null,
                 previewRef: null,
                 productionRef: null,
+                agentInstructions: null,
+                agentModel: null,
+                archivedAt: null,
                 createdAt: now(),
             };
             this.projectMap.set(input.id, p);
             return p;
+        },
+        update: async (tenantId, id, patch) => {
+            const p = this.projectMap.get(id);
+            if (!p || p.tenantId !== tenantId) throw new Error("project not found");
+            const next: Project = {
+                ...p,
+                name: patch.name ?? p.name,
+                agentInstructions: patch.agentInstructions === undefined ? p.agentInstructions : patch.agentInstructions,
+                agentModel: patch.agentModel === undefined ? p.agentModel : patch.agentModel,
+                ...(patch.archived === undefined
+                    ? {}
+                    : { archivedAt: patch.archived ? now() : null, status: patch.archived ? ("archived" as const) : ("active" as const) }),
+            };
+            this.projectMap.set(id, next);
+            return next;
+        },
+        delete: async (tenantId, id) => {
+            const p = this.projectMap.get(id);
+            if (!p || p.tenantId !== tenantId) return;
+            this.projectMap.delete(id);
+            // Mirror ON DELETE CASCADE.
+            for (const [docId, d] of this.contentMap) {
+                if (d.projectId !== id) continue;
+                this.contentMap.delete(docId);
+                this.contentIndex.delete(key(d.projectId, d.kind, d.slug));
+                this.revisionMap.delete(docId);
+            }
+            for (const [rid, r] of this.releaseMap) {
+                if (r.projectId !== id) continue;
+                this.releaseMap.delete(rid);
+                this.manifestMap.delete(rid);
+            }
+            for (const [k, v] of this.agentSessionMap) if (v.projectId === id) this.agentSessionMap.delete(k);
+            for (const [k, v] of this.deploymentMap) if (v.projectId === id) this.deploymentMap.delete(k);
+            for (let i = this.messageLog.length - 1; i >= 0; i--) if (this.messageLog[i]?.projectId === id) this.messageLog.splice(i, 1);
         },
         findById: async (tenantId, id) => {
             const p = this.projectMap.get(id);

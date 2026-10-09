@@ -22,6 +22,7 @@ const provisioner = new Provisioner(
         runtimeNetwork: process.env.RUNTIME_NETWORK ?? "atelier-runtime",
         egressNetwork: process.env.EGRESS_NETWORK ?? "atelier-egress",
         ociRuntime: process.env.RUNTIME_OCI_RUNTIME || undefined,
+        egressProxy: process.env.RUNTIME_EGRESS_PROXY || undefined,
         memoryBytes: Number(process.env.RUNTIME_MEMORY_MB ?? 1536) * 1024 * 1024,
         nanoCpus: Math.round(Number(process.env.RUNTIME_CPUS ?? 1) * 1e9),
         pidsLimit: Number(process.env.RUNTIME_PIDS_LIMIT ?? 512),

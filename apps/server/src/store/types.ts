@@ -5,12 +5,15 @@ import type {
     ContentDocument,
     ContentRevision,
     Deployment,
+    Invitation,
+    Member,
     Membership,
     Organization,
     OrgRole,
     Project,
     Release,
     ReleaseDocument,
+    UsageKind,
     User,
 } from "@atelier/shared";
 
@@ -21,15 +24,46 @@ export interface UserStore {
     count(): Promise<number>;
 }
 
+export class SlugTakenError extends Error {
+    constructor() {
+        super("that address is already taken");
+    }
+}
+
 export interface OrganizationStore {
+    // Slugs are unique across all organisations; a clash throws SlugTakenError.
     create(input: { id: string; slug: string; name: string }): Promise<Organization>;
     findById(id: string): Promise<Organization | null>;
-    listForUser(userId: string): Promise<Organization[]>;
+    // With the caller's role in each, oldest membership first.
+    listForUser(userId: string): Promise<(Organization & { role: OrgRole })[]>;
+    update(id: string, patch: { name?: string; defaultModel?: string | null }): Promise<Organization>;
 }
 
 export interface MembershipStore {
     add(input: { tenantId: string; userId: string; role: OrgRole }): Promise<Membership>;
     roleOf(tenantId: string, userId: string): Promise<OrgRole | null>;
+    list(tenantId: string): Promise<Member[]>;
+    setRole(tenantId: string, userId: string, role: OrgRole): Promise<void>;
+    remove(tenantId: string, userId: string): Promise<void>;
+}
+
+// An invitation is addressed to an e-mail and accepted when someone signs in with
+// that provider-verified address.
+export interface InvitationStore {
+    create(input: { tenantId: string; email: string; role: Invitation["role"]; invitedBy: string; expiresAt: Date }): Promise<Invitation>;
+    list(tenantId: string): Promise<Invitation[]>;
+    revoke(tenantId: string, id: string): Promise<void>;
+    // Live invitations for this address, across organisations.
+    pendingFor(email: string): Promise<Invitation[]>;
+    // Turns every live invitation for this address into a membership; returns the organisations joined.
+    acceptAll(userId: string, email: string): Promise<string[]>;
+}
+
+export interface ProjectPatch {
+    name?: string;
+    agentInstructions?: string | null;
+    agentModel?: string | null;
+    archived?: boolean;
 }
 
 export interface ProjectStore {
@@ -37,6 +71,22 @@ export interface ProjectStore {
     findById(tenantId: string, id: string): Promise<Project | null>;
     findBySlug(tenantId: string, slug: string): Promise<Project | null>;
     list(tenantId: string): Promise<Project[]>;
+    update(tenantId: string, id: string, patch: ProjectPatch): Promise<Project>;
+    // Removes the project and everything that hangs off it (content, releases, conversation).
+    delete(tenantId: string, id: string): Promise<void>;
+}
+
+export interface UsageTotals {
+    projectId: string | null;
+    kind: string;
+    units: number;
+}
+
+// Append-only metering. `sourceId` makes a record idempotent per (kind, source).
+export interface UsageStore {
+    record(input: { tenantId: string; projectId: string | null; kind: UsageKind; units: number; sourceId: string }): Promise<void>;
+    totals(tenantId: string, since: Date): Promise<UsageTotals[]>;
+    total(tenantId: string, kinds: UsageKind[], since: Date): Promise<number>;
 }
 
 // Content is written only as drafts. `published` changes only when a release
@@ -150,6 +200,8 @@ export interface Store {
     users: UserStore;
     organizations: OrganizationStore;
     memberships: MembershipStore;
+    invitations: InvitationStore;
+    usage: UsageStore;
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;

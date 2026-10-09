@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentRuntime } from "./agent.ts";
 import { type RunState, RunTracker } from "./runs.ts";
@@ -9,6 +10,7 @@ export type { RunState } from "./runs.ts";
 export interface RunRequest {
     prompt: string;
     model: string | null;
+    instructions: string;
     apiUrl: string;
     agentToken: string;
 }
@@ -41,6 +43,12 @@ export interface WorkspaceRuntime {
     restore(projectId: string, sha: string): Promise<string | null>;
     head(projectId: string): Promise<string | null>;
     readFile(projectId: string, rel: string): Promise<PreviewFile | null>;
+    // Stops the workspace; its files and history stay, and it starts again on next use.
+    stop(projectId: string): Promise<void>;
+    // Removes the workspace and its files for good (project deletion).
+    destroy(projectId: string): Promise<void>;
+    // Stops workspaces nobody has used for `idleMs`; returns the projects stopped.
+    reapIdle(idleMs: number): Promise<string[]>;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -129,6 +137,17 @@ export class LocalRuntime implements WorkspaceRuntime {
     readFile(projectId: string, rel: string) {
         return this.ws(projectId).readFile(rel);
     }
+
+    async stop(): Promise<void> {}
+
+    async destroy(projectId: string): Promise<void> {
+        await rm(this.ws(projectId).dir, { recursive: true, force: true });
+        this.trackers.delete(projectId);
+    }
+
+    async reapIdle(): Promise<string[]> {
+        return [];
+    }
 }
 
 export interface ContainerRuntimeOptions {
@@ -185,8 +204,71 @@ export class ContainerRuntime implements WorkspaceRuntime {
         throw new Error("workspace did not become ready");
     }
 
-    private call(projectId: string, method: string, path: string, body?: unknown, timeoutMs = 30_000): Promise<Response> {
+    // When each workspace was last asked for anything, for idle reaping.
+    private readonly lastUsed = new Map<string, number>();
+
+    private provisioner(method: string, path: string, body?: unknown): Promise<Response> {
+        return this.fetch(`${this.opts.provisionerUrl}${path}`, {
+            method,
+            headers: {
+                authorization: `Bearer ${this.opts.provisionerSecret}`,
+                ...(body === undefined ? {} : { "content-type": "application/json" }),
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: AbortSignal.timeout(60_000),
+        });
+    }
+
+    async stop(projectId: string): Promise<void> {
         assertProjectId(projectId);
+        const res = await this.provisioner("DELETE", `/workspaces/${projectId}`);
+        if (!res.ok) throw new Error(`provisioner: ${res.status} ${await res.text().catch(() => "")}`.trim());
+        this.lastUsed.delete(projectId);
+    }
+
+    async destroy(projectId: string): Promise<void> {
+        assertProjectId(projectId);
+        const res = await this.provisioner("DELETE", `/workspaces/${projectId}?purge=1`);
+        if (!res.ok) throw new Error(`provisioner: ${res.status} ${await res.text().catch(() => "")}`.trim());
+        this.lastUsed.delete(projectId);
+    }
+
+    // Stops running workspaces that nothing has touched for `idleMs`, unless they
+    // are in the middle of a job. A workspace this process has not seen before
+    // (it was already running at start-up) starts its idle clock now.
+    async reapIdle(idleMs: number): Promise<string[]> {
+        const res = await this.provisioner("GET", "/workspaces");
+        if (!res.ok) throw new Error(`provisioner: ${res.status}`);
+        const { workspaces } = (await res.json()) as { workspaces: { projectId: string; running: boolean }[] };
+        const now = Date.now();
+        const stopped: string[] = [];
+        for (const w of workspaces) {
+            if (!w.running || !UUID_RE.test(w.projectId)) continue;
+            const last = this.lastUsed.get(w.projectId);
+            if (last === undefined) {
+                this.lastUsed.set(w.projectId, now);
+                continue;
+            }
+            if (now - last < idleMs) continue;
+            // `touch: false`: asking whether it is busy must not count as using it.
+            const status = await this.call(w.projectId, "GET", "/status", undefined, 5_000, false)
+                .then((r) => (r.ok ? (r.json() as Promise<{ busy: boolean }>) : null))
+                .catch(() => null);
+            if (status?.busy) {
+                this.lastUsed.set(w.projectId, now);
+                continue;
+            }
+            await this.stop(w.projectId).then(
+                () => stopped.push(w.projectId),
+                () => {},
+            );
+        }
+        return stopped;
+    }
+
+    private call(projectId: string, method: string, path: string, body?: unknown, timeoutMs = 30_000, touch = true): Promise<Response> {
+        assertProjectId(projectId);
+        if (touch) this.lastUsed.set(projectId, Date.now());
         return this.fetch(`http://${workspaceName(projectId)}:${this.opts.port ?? 8090}${path}`, {
             method,
             headers: {
