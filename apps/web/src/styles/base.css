@@ -580,3 +580,210 @@ textarea {
         bottom: 72px;
     }
 }
+
+/* ---- forms, rows, panels (studio settings, dialogs) ------------------------------ */
+
+.dialog-wide {
+    width: min(560px, 100%);
+}
+
+.dialog-actions-split {
+    justify-content: space-between;
+    align-items: center;
+}
+
+.dialog-actions-split > span {
+    display: flex;
+    gap: 8px;
+}
+
+.field-line {
+    display: block;
+    margin-top: 20px;
+}
+
+.field-line > .eyebrow {
+    display: block;
+    margin-bottom: 7px;
+}
+
+.field-line input,
+.field-line textarea,
+.invite input,
+.select {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    font-size: 15px;
+    line-height: 1.4;
+    outline: 0;
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+}
+
+.field-line textarea {
+    display: block;
+    resize: vertical;
+}
+
+.field-line input:focus,
+.field-line textarea:focus,
+.invite input:focus,
+.select:focus {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 3px var(--line);
+}
+
+.field-line input:disabled,
+.field-line textarea:disabled {
+    opacity: 0.6;
+}
+
+.field-line input::placeholder,
+.field-line textarea::placeholder,
+.invite input::placeholder {
+    color: var(--ink-3);
+}
+
+.field-static {
+    padding: 9px 0 0;
+    font-size: 13px;
+}
+
+.field-help {
+    display: block;
+    margin-top: 7px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--ink-3);
+}
+
+.select {
+    width: auto;
+    padding-right: 28px;
+    font-size: 13.5px;
+    cursor: pointer;
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+    background-position:
+        calc(100% - 15px) 55%,
+        calc(100% - 10px) 55%;
+    background-size:
+        5px 5px,
+        5px 5px;
+    background-repeat: no-repeat;
+}
+
+.btn-danger {
+    color: var(--seal);
+}
+
+.btn-danger:hover:not(:disabled) {
+    border-color: var(--seal);
+    background: var(--seal-wash);
+}
+
+.btn-danger-solid {
+    --btn-bg: var(--seal);
+    --btn-fg: var(--on-seal);
+    --btn-border: var(--seal);
+}
+
+.btn-ghost.on {
+    background: var(--line);
+    color: var(--ink);
+}
+
+.rows {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+    background: var(--surface-raised);
+    overflow: hidden;
+}
+
+.rows li {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 16px;
+}
+
+.rows li + li {
+    border-top: 1px solid var(--line);
+}
+
+.rows-quiet {
+    background: none;
+}
+
+.row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.row-main strong {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.row-main .mono {
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.row-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.avatar-static {
+    flex: none;
+    cursor: default;
+}
+
+.avatar-static:hover {
+    border-color: var(--line-strong);
+}
+
+.menu-left {
+    left: 0;
+    right: auto;
+    min-width: 260px;
+}
+
+.menu-label {
+    padding: 8px 10px 6px;
+}
+
+.menu-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.menu-main .mono {
+    font-size: 10.5px;
+}
+
+.menu-rule {
+    height: 1px;
+    margin: 6px 0;
+    background: var(--line);
+}

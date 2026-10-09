@@ -59,7 +59,7 @@ export function loadOrg(store: Store) {
         const slug = c.req.param("org") ?? "";
         const orgs = await store.organizations.listForUser(c.get("user").id);
         const org = orgs.find((o) => o.slug === slug);
-        if (!org || org.status !== "active") return c.json({ error: "not found" }, 404);
+        if (org?.status !== "active") return c.json({ error: "not found" }, 404);
         const { role, ...organization } = org;
         c.set("org", organization);
         c.set("role", role);

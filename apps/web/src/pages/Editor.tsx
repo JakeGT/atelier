@@ -1,10 +1,11 @@
-import { ArrowLeft, Eye, History, MessageSquare, PanelRight, Rocket } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, Eye, History, MessageSquare, PanelRight, Rocket, SlidersHorizontal } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chat, type Message } from "../editor/Chat";
 import { type Device, Preview } from "../editor/Preview";
+import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
-import type { AgentSession, Checkpoint, ContentDocument, Overview, Project, Release, Run, Session } from "../lib/api";
-import { ApiError, api, ReauthRequired, reauthenticate } from "../lib/api";
+import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Release, Run, Session } from "../lib/api";
+import { ApiError, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, useStored } from "../lib/hooks";
 import { Dialog, Dots, ThemeToggle, UserMenu, useToast } from "../ui/kit";
 import { FIRST_PROMPT_KEY } from "./Studio";
@@ -20,15 +21,23 @@ const newId = () => crypto.randomUUID();
 
 interface EditorProps {
     project: Project;
+    org: Org;
     session: Session;
-    canPublish: boolean;
+    onProjectChanged: (project: Project) => void;
     theme: Theme;
     onToggleTheme: () => void;
 }
 
-export function Editor({ project, session, canPublish, theme, onToggleTheme }: EditorProps) {
+export function Editor({ project, org, session, onProjectChanged, theme, onToggleTheme }: EditorProps) {
     const toast = useToast();
     const pid = project.id;
+    const a = useMemo(() => orgApi(org.slug), [org.slug]);
+    // An archived website is frozen for everyone; otherwise the role decides.
+    const archived = project.archivedAt !== null;
+    const mayEdit = can.edit(org.role) && !archived;
+    const canPublish = can.publish(org.role) && !archived;
+    const mayManage = can.manage(org.role);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     const [agent, setAgent] = useState<AgentSession | null>(null);
     const [starting, setStarting] = useState(true);
@@ -56,14 +65,14 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
 
     const loadThread = useCallback(async () => {
         try {
-            const thread = await api.thread(pid);
+            const thread = await a.thread(pid);
             setMessages(thread.messages);
             setPending([]);
             setActiveRun(thread.activeRun);
         } catch {
             setMessages((m) => m ?? []);
         }
-    }, [pid]);
+    }, [a, pid]);
 
     const note = useCallback((role: Message["role"], text: string) => {
         setPending((prev) => [...prev, { id: newId(), role, text, tools: null }]);
@@ -73,32 +82,37 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
 
     const refresh = useCallback(async () => {
         const [cps, rels, docs, ov] = await Promise.all([
-            api.listCheckpoints(pid).catch(() => [] as Checkpoint[]),
-            api.listReleases(pid).catch(() => [] as Release[]),
-            api.listContent(pid).catch(() => [] as ContentDocument[]),
-            api.overview(pid).catch(() => null),
+            a.listCheckpoints(pid).catch(() => [] as Checkpoint[]),
+            a.listReleases(pid).catch(() => [] as Release[]),
+            a.listContent(pid).catch(() => [] as ContentDocument[]),
+            a.overview(pid).catch(() => null),
         ]);
         setCheckpoints(cps);
         setReleases([...rels].reverse());
         setDocuments(docs);
         setOverview(ov);
-    }, [pid]);
+    }, [a, pid]);
 
     const reloadPreview = useCallback(() => {
         // A fresh signed link on every reload (they expire after two hours).
-        api.previewUrl(pid)
+        a.previewUrl(pid)
             .then((url) => {
                 setPreviewUrl(url);
                 setReloadKey((k) => k + 1);
             })
             .catch(() => setPreviewUrl(null));
-    }, [pid]);
+    }, [a, pid]);
 
     const openWorkspace = useCallback(async () => {
+        // An archived website has no running workspace: it can be read, not worked on.
+        if (archived) {
+            setStarting(false);
+            return;
+        }
         setStarting(true);
         try {
-            const sessions = await api.listSessions(pid);
-            const s = sessions.find((x) => x.status === "ready") ?? (await api.createSession(pid));
+            const sessions = await a.listSessions(pid);
+            const s = sessions.find((x) => x.status === "ready") ?? (await a.createSession(pid));
             setAgent(s.status === "ready" ? s : null);
             if (s.status !== "ready") toast("The workspace didn't start. Try again in a moment.", "error");
         } catch (err) {
@@ -106,7 +120,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
         } finally {
             setStarting(false);
         }
-    }, [pid, toast]);
+    }, [a, pid, toast, archived]);
 
     useEffect(() => {
         void loadThread();
@@ -123,12 +137,12 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
             if (!agent || activeRun) return;
             note("user", prompt);
             try {
-                setActiveRun(await api.startRun(pid, agent.id, prompt));
+                setActiveRun(await a.startRun(pid, agent.id, prompt));
             } catch (err) {
                 note("error", (err as Error).message);
             }
         },
-        [agent, activeRun, note, pid],
+        [a, agent, activeRun, note, pid],
     );
 
     const runId = activeRun?.id ?? null;
@@ -144,7 +158,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
         };
         const tick = async () => {
             try {
-                const run = await api.getRun(pid, runId);
+                const run = await a.getRun(pid, runId);
                 misses = 0;
                 if (!stopped && run.status !== "running") finish();
             } catch (err) {
@@ -158,7 +172,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
             stopped = true;
             clearInterval(timer);
         };
-    }, [runId, pid, loadThread, refresh, reloadPreview]);
+    }, [a, runId, pid, loadThread, refresh, reloadPreview]);
 
     // A brief typed on the dashboard becomes the first message, once the workspace is ready.
     const sentFirst = useRef(false);
@@ -202,7 +216,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
 
     const restore = (sha: string) =>
         act(async () => {
-            await api.restoreCheckpoint(pid, sha);
+            await a.restoreCheckpoint(pid, sha);
             reloadPreview();
             return "Restored. The version you left is still in the list.";
         });
@@ -210,7 +224,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
     const rollback = (number: number, resuming = false) =>
         act(
             async () => {
-                const r = await api.rollback(pid, number);
+                const r = await a.rollback(pid, number);
                 setTab("releases");
                 return `Rolled back. Release ${r.number} is live.`;
             },
@@ -222,7 +236,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
         setConfirmPublish(false);
         return act(
             async () => {
-                const r = await api.publish(pid);
+                const r = await a.publish(pid);
                 setTab("releases");
                 return `Release ${r.number} is live.`;
             },
@@ -253,10 +267,10 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
         } catch {
             // a malformed entry is simply dropped
         }
-    }, [pid]);
+    }, [a, pid]);
 
     const saveDocument = async (doc: ContentDocument, draft: Record<string, unknown>) => {
-        await api.saveContent(pid, doc.kind, doc.slug, draft);
+        await a.saveContent(pid, doc.kind, doc.slug, draft);
         toast("Draft saved.");
         await refresh();
     };
@@ -272,11 +286,18 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
         <div className={`editor pane-${pane} ${sideOpen ? "side-open" : ""}`}>
             <header className="editor-bar">
                 <div className="editor-bar-left">
-                    <button type="button" className="btn btn-ghost btn-icon" onClick={() => navigate("/studio")} title="All websites">
+                    <button
+                        type="button"
+                        className="btn btn-ghost btn-icon"
+                        onClick={() => navigate(`/o/${org.slug}`)}
+                        title={`${org.name}'s websites`}
+                    >
                         <ArrowLeft />
                     </button>
                     <h1 className="display">{project.name}</h1>
-                    {live ? (
+                    {archived ? (
+                        <span className="chip chip-plain">Archived</span>
+                    ) : live ? (
                         hasChanges ? (
                             <span className="chip chip-draft">Unpublished changes</span>
                         ) : (
@@ -288,6 +309,16 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
                 </div>
                 <div className="editor-bar-right">
                     <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+                    {mayManage && (
+                        <button
+                            type="button"
+                            className="btn btn-ghost btn-icon"
+                            onClick={() => setSettingsOpen(true)}
+                            title="Website settings"
+                        >
+                            <SlidersHorizontal />
+                        </button>
+                    )}
                     <button
                         type="button"
                         className={`btn btn-ghost btn-icon side-toggle ${sideOpen ? "on" : ""}`}
@@ -316,8 +347,15 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
                     messages={[...(messages ?? []), ...pending]}
                     loading={messages === null}
                     runningSince={activeRun?.startedAt ?? null}
-                    ready={agent !== null}
+                    ready={agent !== null && mayEdit}
                     starting={starting}
+                    locked={
+                        archived
+                            ? "This website is archived. Restore it from its settings to keep working on it."
+                            : !can.edit(org.role)
+                              ? "You're a viewer in this studio, so you can look but not change things."
+                              : null
+                    }
                     onSend={(p) => void send(p)}
                     onRetryWorkspace={() => void openWorkspace()}
                 />
@@ -339,6 +377,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
                     documents={documents}
                     busy={acting || running}
                     canPublish={canPublish}
+                    canEdit={mayEdit}
                     onRestore={(sha) => void restore(sha)}
                     onRollback={(n) => void rollback(n)}
                     onSaveDocument={saveDocument}
@@ -359,6 +398,19 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
                     </button>
                 ))}
             </nav>
+
+            {settingsOpen && (
+                <ProjectSettings
+                    project={project}
+                    org={org}
+                    api={a}
+                    onClose={() => setSettingsOpen(false)}
+                    onSaved={(next) => {
+                        onProjectChanged(next);
+                        setSettingsOpen(false);
+                    }}
+                />
+            )}
 
             {confirmPublish && (
                 <Dialog onClose={() => setConfirmPublish(false)}>
