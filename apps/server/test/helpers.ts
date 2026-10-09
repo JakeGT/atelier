@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,9 @@ import { LocalRuntime } from "../src/services/runtime.ts";
 import { SessionStore } from "../src/services/sessions.ts";
 import { MemoryStore } from "../src/store/memory.ts";
 
-export const SECRETS_KEY = "test-secrets-key-0123456789abcdef0123456789";
+// Generated per test run: a fixed, key-shaped literal here trips the secret scan
+// (and would be a bad habit to copy).
+export const SECRETS_KEY = randomBytes(32).toString("base64url");
 
 // A fake agent that writes the prompt to a file, and records what it was given.
 export function fakeAgent(): AgentRuntime & { calls: AgentRunInput[] } {
