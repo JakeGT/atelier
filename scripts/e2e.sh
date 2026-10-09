@@ -10,6 +10,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 COMPOSE=(docker compose -f deploy/compose.e2e.yml)
 
+# Throwaway secrets for this run (nothing key-shaped is committed, even for tests).
+E2E_SECRETS_KEY=$(openssl rand -hex 24)
+E2E_PROVISIONER_SECRET=$(openssl rand -hex 24)
+export E2E_SECRETS_KEY E2E_PROVISIONER_SECRET
+
 cleanup() {
     [ "${KEEP:-}" = "1" ] && return
     # Workspaces are created by the provisioner, not by compose: remove this instance's.
