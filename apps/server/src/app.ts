@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -32,19 +33,23 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 // The app shell loads only its own bundled scripts, styles and fonts. The one
 // frame it embeds is the (sandboxed) preview, served from this origin.
-const APP_CSP = [
-    "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "frame-src 'self'",
-    "frame-ancestors 'self'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "object-src 'none'",
-].join("; ");
+// The nonce is per response. Our own scripts are same-origin files and don't need
+// it; it is there for the edge (Cloudflare adds the page's nonce to the
+// bot-detection script it injects, which a bare 'self' policy would block).
+const appCsp = (nonce: string): string =>
+    [
+        "default-src 'self'",
+        `script-src 'self' 'nonce-${nonce}'`,
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "frame-src 'self'",
+        "frame-ancestors 'self'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "object-src 'none'",
+    ].join("; ");
 
 // Paths the single-page app never owns: a miss here is a real 404.
 const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz)(\/|$)/;
@@ -57,7 +62,8 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
         for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
         // Every HTML document gets a CSP; previews set their own (sandboxing) one.
         const html = c.res.headers.get("content-type")?.startsWith("text/html");
-        if (html && !c.res.headers.has("content-security-policy")) c.res.headers.set("content-security-policy", APP_CSP);
+        if (html && !c.res.headers.has("content-security-policy"))
+            c.res.headers.set("content-security-policy", appCsp(randomBytes(16).toString("base64")));
     });
 
     app.route("/", health);
