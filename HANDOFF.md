@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-09 (late). Status: **`p1.8` deployed**: P0 + P1, P1 hardening, and the interface redesign.
+> Last updated 2026-10-09 (late). Status: **`p1.9` deployed**: P0 + P1, P1 hardening, and the interface redesign.
 > Two stacked PRs are open and **not merged**:
 > [#1 `p1-hardening`](https://github.com/JakeGT/atelier/pull/1) → `main`, and
 > [#2 `ui-redesign`](https://github.com/JakeGT/atelier/pull/2) → `p1-hardening`.
@@ -34,7 +34,7 @@ infra `main` is ~11 commits ahead of origin and not pushed.
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server:p1.8`, `atelier-provisioner:p1.8`, `atelier-runtime:p1.8` (built locally from `ui-redesign`) |
+| Images | `atelier-server:p1.9`, `atelier-provisioner:p1.9`, `atelier-runtime:p1.9` (built locally from `ui-redesign`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), plus `atelier-ws-<projectId>` per project, created on demand |
 | Migrations | `0001`–`0006` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |

@@ -102,13 +102,14 @@
         radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0) 0 0 / 14px 14px,
         var(--paper-deep);
     box-shadow: var(--shadow-3);
-    transform: perspective(1800px) rotateY(-9deg) rotateX(3deg) rotate(1deg);
-    transform-origin: left center;
-    transition: transform 0.9s var(--ease);
+    /* The angles are driven from Landing.tsx (useTilt), eased frame by frame; the
+       fallbacks are the resting pose, which is also what reduced-motion and touch get. */
+    transform: rotateX(var(--rx, 3deg)) rotateY(var(--ry, -9deg)) rotate(var(--rz, 1deg));
+    will-change: transform;
 }
 
-.easel:hover {
-    transform: perspective(1800px) rotateY(-3deg) rotateX(1deg) rotate(0deg);
+.easel-stage {
+    perspective: 1800px;
 }
 
 .easel-chat,
@@ -312,9 +313,6 @@
         min-height: 0;
     }
     .easel {
-        transform: none;
-    }
-    .easel:hover {
         transform: none;
     }
 }

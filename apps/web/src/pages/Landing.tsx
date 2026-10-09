@@ -1,4 +1,5 @@
 import { ArrowRight, ArrowUpRight, History, Lock, MousePointerClick, Stamp } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { PublicConfig, Session } from "../lib/api";
 import { navigate, type Theme } from "../lib/hooks";
 import { Dots, ThemeToggle, UserMenu, Wordmark } from "../ui/kit";
@@ -173,51 +174,118 @@ export function Landing({ session, config, theme, onToggleTheme }: LandingProps)
 }
 
 // The product, drawn in HTML: a conversation on the left, the site it produced on the right.
+// Where the easel sits when nobody is pointing at it, and how far it may turn.
+const REST = { rx: 3, ry: -9, rz: 1 };
+const REACH = { rx: 5, ry: 7 };
+
+// Turns the easel a few degrees toward the pointer, easing every frame, and lets
+// it settle back to its resting angle when the pointer leaves. Skipped on touch
+// devices and for anyone who has asked their system for less motion.
+function useTilt() {
+    const stage = useRef<HTMLDivElement>(null);
+    const card = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const s = stage.current;
+        const c = card.current;
+        if (!s || !c) return;
+        const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+        const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (!finePointer || calm) return;
+
+        let target = { ...REST };
+        const now = { ...REST };
+        let frame = 0;
+
+        const step = () => {
+            let settled = true;
+            for (const k of ["rx", "ry", "rz"] as const) {
+                const gap = target[k] - now[k];
+                if (Math.abs(gap) > 0.01) settled = false;
+                now[k] += gap * 0.075;
+                c.style.setProperty(`--${k}`, `${now[k].toFixed(3)}deg`);
+            }
+            frame = settled ? 0 : requestAnimationFrame(step);
+        };
+        const wake = () => {
+            if (!frame) frame = requestAnimationFrame(step);
+        };
+        const onMove = (e: PointerEvent) => {
+            const r = s.getBoundingClientRect();
+            const x = ((e.clientX - r.left) / r.width) * 2 - 1;
+            const y = ((e.clientY - r.top) / r.height) * 2 - 1;
+            // Lean toward the pointer: the near edge dips, like a board on a pivot.
+            target = { rx: -y * REACH.rx, ry: x * REACH.ry, rz: 0 };
+            wake();
+        };
+        const onLeave = () => {
+            target = { ...REST };
+            wake();
+        };
+
+        s.addEventListener("pointermove", onMove);
+        s.addEventListener("pointerleave", onLeave);
+        return () => {
+            s.removeEventListener("pointermove", onMove);
+            s.removeEventListener("pointerleave", onLeave);
+            cancelAnimationFrame(frame);
+        };
+    }, []);
+
+    return { stage, card };
+}
+
 function Easel() {
+    const { stage, card } = useTilt();
     return (
-        <div className="easel reveal" style={{ animationDelay: "200ms" }} aria-hidden="true">
-            <div className="easel-chat">
-                <div className="easel-bar">
-                    <span className="wordmark">Atelier</span>
-                    <span className="chip chip-live">Live</span>
-                </div>
-                <div className="bubble bubble-you">A site for my ceramics studio. Calm, lots of space, a shop link up top.</div>
-                <div className="bubble bubble-them">
-                    Done. I built a home page with a quiet hero, three featured pieces and a shop link in the header.
-                </div>
-                <div className="bubble bubble-you">Warmer. And make the headline bigger.</div>
-                <div className="bubble bubble-them bubble-typing">
-                    <Dots />
-                </div>
-                <div className="easel-composer">
-                    <span>Describe a change…</span>
-                    <i />
-                </div>
-            </div>
-            <div className="easel-site">
-                <div className="site-chrome">
-                    <i />
-                    <i />
-                    <i />
-                    <span>okoro-ceramics</span>
-                </div>
-                <div className="site-body">
-                    <div className="site-nav">
-                        <b>Okoro</b>
-                        <span>Work</span>
-                        <span>Studio</span>
-                        <span className="site-shop">Shop</span>
+        // The stage carries the entrance animation and the perspective; the easel
+        // inside it carries the tilt. (One element doing both made the tilt snap:
+        // a finished animation keeps hold of `transform`.)
+        <div className="easel-stage reveal" style={{ animationDelay: "200ms" }} ref={stage} aria-hidden="true">
+            <div className="easel" ref={card}>
+                <div className="easel-chat">
+                    <div className="easel-bar">
+                        <span className="wordmark">Atelier</span>
+                        <span className="chip chip-live">Live</span>
                     </div>
-                    <p className="site-kicker">Hand-thrown in Lagos</p>
-                    <p className="site-title">
-                        Vessels for
-                        <br />
-                        slow mornings.
-                    </p>
-                    <div className="site-grid">
-                        <div className="pot pot-a" />
-                        <div className="pot pot-b" />
-                        <div className="pot pot-c" />
+                    <div className="bubble bubble-you">A site for my ceramics studio. Calm, lots of space, a shop link up top.</div>
+                    <div className="bubble bubble-them">
+                        Done. I built a home page with a quiet hero, three featured pieces and a shop link in the header.
+                    </div>
+                    <div className="bubble bubble-you">Warmer. And make the headline bigger.</div>
+                    <div className="bubble bubble-them bubble-typing">
+                        <Dots />
+                    </div>
+                    <div className="easel-composer">
+                        <span>Describe a change…</span>
+                        <i />
+                    </div>
+                </div>
+                <div className="easel-site">
+                    <div className="site-chrome">
+                        <i />
+                        <i />
+                        <i />
+                        <span>okoro-ceramics</span>
+                    </div>
+                    <div className="site-body">
+                        <div className="site-nav">
+                            <b>Okoro</b>
+                            <span>Work</span>
+                            <span>Studio</span>
+                            <span className="site-shop">Shop</span>
+                        </div>
+                        <p className="site-kicker">Hand-thrown in Lagos</p>
+                        <p className="site-title">
+                            Vessels for
+                            <br />
+                            slow mornings.
+                        </p>
+                        <div className="site-grid">
+                            <div className="pot pot-a" />
+                            <div className="pot pot-b" />
+                            <div className="pot pot-c" />
+                        </div>
                     </div>
                 </div>
             </div>
