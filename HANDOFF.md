@@ -1,8 +1,9 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-09. Status: **P0 + P1 + P1 hardening deployed** (`p1.2`).
-> The hardening is on branch `p1-hardening`, [PR #1](https://github.com/JakeGT/atelier/pull/1),
-> **not yet merged to `main`**.
+> Last updated 2026-10-09 (late). Status: **`p1.5` deployed**: P0 + P1, P1 hardening, and the interface redesign.
+> Two stacked PRs are open and **not merged**:
+> [#1 `p1-hardening`](https://github.com/JakeGT/atelier/pull/1) → `main`, and
+> [#2 `ui-redesign`](https://github.com/JakeGT/atelier/pull/2) → `p1-hardening`.
 
 ## TL;DR
 
@@ -33,14 +34,14 @@ infra `main` is ~11 commits ahead of origin and not pushed.
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server:p1.2`, `atelier-provisioner:p1.2`, `atelier-runtime:p1.2` (built locally from `ce403bb`) |
+| Images | `atelier-server:p1.5`, `atelier-provisioner:p1.5`, `atelier-runtime:p1.5` (built locally from `ui-redesign`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), plus `atelier-ws-<projectId>` per project, created on demand |
-| Migrations | `0001`–`0005` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0006` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-egress` |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backup before deploy | `backups/postgres-20261009T200517Z` (infra repo) |
+| Backups before deploys | `backups/postgres-20261009T200517Z` (before p1.2), `…T222908Z` (before p1.4) |
 
 Verified after deploy:
 - `/healthz` returns 200;
@@ -72,12 +73,28 @@ browser ─▶ Caddy ─▶ atelier-server ──(atelier-control)──▶ atel
 - Releases pin a manifest. `published` changes only on go-live, and there is no
   per-document publish (ADR-0007).
 
+## The interface (branch `ui-redesign`)
+
+- Design tokens: `apps/web/src/styles/tokens.css` (paper / night themes). Pages are in `apps/web/src/pages/`, the editor's parts in `apps/web/src/editor/`.
+- Fonts and icons are bundled. The app shell's CSP allows only same-origin scripts plus a per-response nonce, which Cloudflare reuses for the bot-detection script it injects.
+- The conversation is stored per project on the server (`agent_messages`). The browser keeps only UI preferences.
+- To work on the UI locally, with no Authentik and the real agent (opencode on your PATH):
+
+```sh
+pnpm build:web
+AUTH_MODE=dev COOKIE_SECURE=false PORT=18090 PUBLIC_ORIGIN=http://localhost:18090 \
+  WEB_DIST_DIR=$PWD/apps/web/dist RUNTIME_MODE=local WORKSPACE_ROOT=/tmp/atelier-ws \
+  MCP_SERVER_ENTRY=$PWD/apps/server/src/mcp/content.ts node apps/server/src/main.ts
+```
+
+`AUTH_MODE=dev` is refused unless the origin is http://localhost. The server reads the built shell at start-up, so restart it after `pnpm build:web`.
+
 ## Build / test / deploy
 
 ```sh
 pnpm check                                   # lint + typecheck + tests (Postgres suite skipped)
 docker run -d --rm --name atelier-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:16-alpine
-TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # all 52, incl. RLS/role suite
+TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # all tests, incl. RLS/role suite
 
 for t in server runtime provisioner; do docker build --target $t -t atelier-$t:<tag> .; done
 cd ~/Projects/jaketalling-com/jaketalling-platform-infrastructure && sh scripts/backup.sh
