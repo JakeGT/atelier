@@ -35,9 +35,22 @@ kept only their latest value, so Undo covered code (git) but not content.
    commit with the old tree (`read-tree`), rather than `reset --hard`.
 7. Publishing and rolling back need `release.publish` / `release.rollback`
    (owner/admin), a CSRF token, and a **sign-in within `STEP_UP_MINUTES`**
-   (default 15). Otherwise the API answers `401 reauth_required`, and the UI
-   sends the person through `/auth/login?prompt=login`. Every create, publish,
-   rollback and restore is written to the audit log.
+   (default 15). Otherwise the API answers `401 reauth_required`. Creating a
+   release needs it too, so a refused publish leaves nothing behind. Every
+   create, publish, rollback and restore is written to the audit log.
+8. **What "recent sign-in" means.** It is measured from the last time the person
+   completed a sign-in round trip through the identity provider *into Atelier*,
+   not from the provider's `auth_time`. Under single sign-on that claim can be
+   hours old, and a provider may return from a step-up request without
+   re-prompting; measuring from it made publishing impossible (a redirect
+   loop). The round trip is still meaningful: a stolen Atelier cookie alone
+   cannot complete it. For a step-up the server sends `prompt=login` and
+   `max_age=0`, so a provider that supports re-authentication will ask again.
+   The provider's `auth_time` is recorded in the audit entry.
+9. **The interrupted action is resumed.** The editor remembers what was asked for
+   (publish, or roll back to release N), sends the person to confirm, and on
+   return finishes it automatically (once, within ten minutes). If the server
+   still refuses, it says so instead of redirecting again.
 
 ## Consequences
 

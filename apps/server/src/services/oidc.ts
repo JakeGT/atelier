@@ -19,8 +19,9 @@ export interface VerifiedClaims {
     verified: boolean;
     name: string;
     groups: string[];
-    // When the person actually authenticated at the provider (epoch ms). Used for
-    // step-up: privileged actions require a recent authentication.
+    // When the person last authenticated at the provider (epoch ms), as the
+    // provider reports it. Recorded in the audit log; not what step-up is measured
+    // from (see routes/auth.ts).
     authTime: number;
 }
 
@@ -41,6 +42,11 @@ export class OidcService {
     static async discover(opts: OidcOptions): Promise<OidcService> {
         const client = await oauth.discovery(new URL(opts.issuer), opts.clientId, opts.clientSecret);
         return new OidcService(opts, client);
+    }
+
+    // Builds the service from known provider metadata, without the discovery request.
+    static fromMetadata(opts: OidcOptions, metadata: oauth.ServerMetadata): OidcService {
+        return new OidcService(opts, new oauth.Configuration(metadata, opts.clientId, opts.clientSecret));
     }
 
     get providerName(): string {
@@ -67,18 +73,15 @@ export class OidcService {
             nonce,
             code_challenge: codeChallenge(codeVerifier),
             code_challenge_method: "S256",
-            ...(maxAge !== undefined ? { max_age: String(maxAge) } : {}),
+            // Step-up: ask the provider to authenticate the person again. `prompt=login`
+            // is the standard way to say so; `max_age=0` alone is not enough (Authentik
+            // treats 0 as "no limit" and returns at once).
+            ...(maxAge !== undefined ? { max_age: String(maxAge), prompt: "login" } : {}),
         });
         return url.toString();
     }
 
-    async handleCallback(
-        returnUrl: string,
-        expectedState: string,
-        expectedNonce: string,
-        codeVerifier: string,
-        maxAge?: number,
-    ): Promise<VerifiedClaims> {
+    async handleCallback(returnUrl: string, expectedState: string, expectedNonce: string, codeVerifier: string): Promise<VerifiedClaims> {
         // The server is reached over HTTP behind Caddy, so `returnUrl` carries an
         // http scheme and possibly an internal host. openid-client derives the
         // token request's redirect_uri from that URL, which would not match the
@@ -92,7 +95,6 @@ export class OidcService {
             expectedState,
             expectedNonce,
             pkceCodeVerifier: codeVerifier,
-            ...(maxAge !== undefined ? { max_age: maxAge } : {}),
         });
         const claims = tokens.claims();
         if (!claims) throw new Error("The identity provider did not return an id token.");

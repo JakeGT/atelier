@@ -60,7 +60,7 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
         clearCookie(c, "oidc", secure);
         if (!flow) return c.redirect("/login?auth_error=expired");
         try {
-            const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier, flow.maxAge);
+            const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier);
             const isAdmin = claims.groups.includes(oidc.adminGroup);
 
             // Sign-up is invite-gated: platform admins, or people who already have
@@ -85,14 +85,19 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             // A fresh session id on every sign-in (no fixation); replace any old one.
             const old = readCookie(c, "session", secure);
             if (old) await sessions.destroySession(old);
-            const { id } = await sessions.createSession(user.id, claims.authTime);
+            // Step-up is measured from *this* moment: the person has just completed a
+            // round trip through the identity provider in this browser, which a stolen
+            // Atelier cookie alone cannot do. (The provider's own auth_time is not used:
+            // it can be hours old under single sign-on, and a provider that declines to
+            // re-prompt would then make privileged actions impossible.)
+            const { id } = await sessions.createSession(user.id);
             writeCookie(c, "session", secure, id);
             await store.audit.record({
                 tenantId: null,
                 actorId: user.id,
                 action: "auth.sign_in",
                 target: `user:${user.id}`,
-                detail: { admin: isAdmin },
+                detail: { admin: isAdmin, stepUp: flow.maxAge !== undefined, providerAuthTime: new Date(claims.authTime).toISOString() },
             });
             return c.redirect(flow.next);
         } catch (err) {

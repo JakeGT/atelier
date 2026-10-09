@@ -358,7 +358,9 @@ export function apiRoutes(
         return c.json({ release, documents: await store.releases.manifest(c.get("org").id, release.id) });
     });
 
-    route("post", "/api/v1/projects/:projectId/releases", "release.publish", async (c) => {
+    // Creating a release is the first half of publishing, so it needs the same
+    // recent sign-in: otherwise a refused publish leaves a planned release behind.
+    route("post", "/api/v1/projects/:projectId/releases", "release.publish", stepUp, async (c) => {
         const release = await releases.create(c.get("org").id, c.get("project").id, c.get("user").id);
         await audit(c, "release.create", `release:${release.id}`, { number: release.number, codeSha: release.codeSha });
         return c.json({ release }, 201);

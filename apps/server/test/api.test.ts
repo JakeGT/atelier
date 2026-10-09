@@ -219,16 +219,15 @@ test("publishing needs a recent sign-in, and is audited", async () => {
         headers: stale.write,
         body: '{"title":"Hi"}',
     });
-    const created = await t.app.request(`/api/v1/projects/${project.id}/releases`, { method: "POST", headers: stale.write });
-    const release = (await json<{ release: Release }>(created)).release;
-    const publish = await t.app.request(`/api/v1/projects/${project.id}/releases/${release.number}/publish`, {
-        method: "POST",
-        headers: stale.write,
-    });
-    assert.equal(publish.status, 401);
-    assert.deepEqual(await publish.json(), { error: "reauth_required" });
+    // Refused before anything is created: a failed attempt must not leave a planned release behind.
+    const refused = await t.app.request(`/api/v1/projects/${project.id}/releases`, { method: "POST", headers: stale.write });
+    assert.equal(refused.status, 401);
+    assert.deepEqual(await refused.json(), { error: "reauth_required" });
+    assert.deepEqual(await t.store.releases.listByProject(stale.org.id, project.id), []);
 
     const fresh = await signIn(t, { tenantId: stale.org.id, role: "owner" });
+    const created = await t.app.request(`/api/v1/projects/${project.id}/releases`, { method: "POST", headers: fresh.write });
+    const release = (await json<{ release: Release }>(created)).release;
     const ok = await t.app.request(`/api/v1/projects/${project.id}/releases/${release.number}/publish`, {
         method: "POST",
         headers: fresh.write,

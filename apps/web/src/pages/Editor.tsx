@@ -11,6 +11,11 @@ import { FIRST_PROMPT_KEY } from "./Studio";
 
 type Pane = "chat" | "preview" | "side";
 
+// What the person was doing when they were asked to confirm their sign-in.
+type Intent = { action: "publish" } | { action: "rollback"; number: number };
+const INTENT_KEY = "atelier.resume";
+const INTENT_TTL_MS = 10 * 60_000;
+
 const newId = () => crypto.randomUUID();
 
 interface EditorProps {
@@ -47,7 +52,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
 
     const [acting, setActing] = useState(false);
     const [confirmPublish, setConfirmPublish] = useState(false);
-    const [needsReauth, setNeedsReauth] = useState(false);
+    const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
     const loadThread = useCallback(async () => {
         try {
@@ -174,14 +179,22 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
 
     // ---- actions -----------------------------------------------------------------------
 
-    async function act(fn: () => Promise<string>) {
+    // Privileged actions (publish, roll back) may need a fresh sign-in. That is a
+    // full-page trip to the identity provider, so the action is remembered and
+    // finished automatically on return, instead of leaving the person to redo it.
+    async function act(fn: () => Promise<string>, intent?: Intent, resuming = false) {
         setActing(true);
         try {
             toast(await fn());
             await refresh();
         } catch (err) {
-            if (err instanceof ReauthRequired) setNeedsReauth(true);
-            else toast((err as Error).message, "error");
+            if (!(err instanceof ReauthRequired)) toast((err as Error).message, "error");
+            else if (resuming) {
+                // We have just been to the provider and it still isn't enough: say so rather than loop.
+                toast("We couldn't confirm it's you, so nothing was published. Sign out and in again, then retry.", "error");
+            } else {
+                setPendingIntent(intent ?? null);
+            }
         } finally {
             setActing(false);
         }
@@ -194,20 +207,53 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
             return "Restored. The version you left is still in the list.";
         });
 
-    const rollback = (number: number) =>
-        act(async () => {
-            const r = await api.rollback(pid, number);
-            return `Rolled back. Release ${r.number} is live.`;
-        });
+    const rollback = (number: number, resuming = false) =>
+        act(
+            async () => {
+                const r = await api.rollback(pid, number);
+                setTab("releases");
+                return `Rolled back. Release ${r.number} is live.`;
+            },
+            { action: "rollback", number },
+            resuming,
+        );
 
-    const publish = () => {
+    const publish = (resuming = false) => {
         setConfirmPublish(false);
-        return act(async () => {
-            const r = await api.publish(pid);
-            setTab("releases");
-            return `Release ${r.number} is live.`;
-        });
+        return act(
+            async () => {
+                const r = await api.publish(pid);
+                setTab("releases");
+                return `Release ${r.number} is live.`;
+            },
+            { action: "publish" },
+            resuming,
+        );
     };
+
+    const confirmIdentity = () => {
+        if (pendingIntent) sessionStorage.setItem(INTENT_KEY, JSON.stringify({ ...pendingIntent, projectId: pid, at: Date.now() }));
+        reauthenticate();
+    };
+
+    // Back from confirming identity: finish what was asked for (once, and only if recent).
+    const resumed = useRef(false);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per editor mount
+    useEffect(() => {
+        if (resumed.current) return;
+        resumed.current = true;
+        const raw = sessionStorage.getItem(INTENT_KEY);
+        if (!raw) return;
+        sessionStorage.removeItem(INTENT_KEY);
+        try {
+            const saved = JSON.parse(raw) as Intent & { projectId: string; at: number };
+            if (saved.projectId !== pid || Date.now() - saved.at > INTENT_TTL_MS) return;
+            if (saved.action === "publish") void publish(true);
+            else if (saved.action === "rollback" && Number.isInteger(saved.number)) void rollback(saved.number, true);
+        } catch {
+            // a malformed entry is simply dropped
+        }
+    }, [pid]);
 
     const saveDocument = async (doc: ContentDocument, draft: Record<string, unknown>) => {
         await api.saveContent(pid, doc.kind, doc.slug, draft);
@@ -350,19 +396,21 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
                 </Dialog>
             )}
 
-            {needsReauth && (
-                <Dialog onClose={() => setNeedsReauth(false)}>
+            {pendingIntent && (
+                <Dialog onClose={() => setPendingIntent(null)}>
                     <p className="eyebrow">One more step</p>
                     <h2>Confirm it's you.</h2>
                     <p>
-                        Publishing changes what the world sees, so we ask you to sign in again if it has been a while. Your work is saved.
+                        {pendingIntent.action === "publish" ? "Publishing changes" : "Rolling back changes"} what the world sees, so we ask
+                        you to confirm your sign-in first. You'll come straight back here and we'll finish{" "}
+                        {pendingIntent.action === "publish" ? "publishing" : "the rollback"} for you.
                     </p>
                     <div className="dialog-actions">
-                        <button type="button" className="btn" onClick={() => setNeedsReauth(false)}>
+                        <button type="button" className="btn" onClick={() => setPendingIntent(null)}>
                             Cancel
                         </button>
-                        <button type="button" className="btn btn-primary" onClick={reauthenticate}>
-                            Sign in again
+                        <button type="button" className="btn btn-seal" onClick={confirmIdentity}>
+                            Confirm and {pendingIntent.action === "publish" ? "publish" : "roll back"}
                         </button>
                     </div>
                 </Dialog>
