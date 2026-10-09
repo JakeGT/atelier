@@ -76,7 +76,16 @@ export class OidcService {
         codeVerifier: string,
         maxAge?: number,
     ): Promise<VerifiedClaims> {
-        const tokens = await oauth.authorizationCodeGrant(this.client, new URL(returnUrl), {
+        // The server is reached over HTTP behind Caddy, so `returnUrl` carries an
+        // http scheme and possibly an internal host. openid-client derives the
+        // token request's redirect_uri from that URL, which would not match the
+        // https origin registered with the provider. Rebuild it from the known
+        // public origin, keeping only the response's query/hash (code + state).
+        const incoming = new URL(returnUrl);
+        const callbackUrl = new URL(this.callbackUri());
+        callbackUrl.search = incoming.search;
+        callbackUrl.hash = incoming.hash;
+        const tokens = await oauth.authorizationCodeGrant(this.client, callbackUrl, {
             expectedState,
             expectedNonce,
             pkceCodeVerifier: codeVerifier,
