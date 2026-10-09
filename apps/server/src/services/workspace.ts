@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, realpath } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -11,71 +11,75 @@ export interface Checkpoint {
     date: string;
 }
 
+export const SHA_RE = /^[0-9a-f]{40}$/;
+
+const MIME: Record<string, string> = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".txt": "text/plain; charset=utf-8",
+};
+
+export const mimeFor = (path: string): string => MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
+
+// Git is run with hooks and repo-configured helpers neutralized: the repository
+// is written by the agent, so its .git/config must not be able to make git run
+// a program (fsmonitor, hooks, pagers, credential helpers).
+const SAFE_GIT = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "credential.helper="];
+
 async function git(dir: string, args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync("git", args, { cwd: dir });
+    const { stdout } = await execFileAsync("git", [...SAFE_GIT, ...args], {
+        cwd: dir,
+        env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: dir, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+    });
     return String(stdout).trim();
 }
 
-// A per-project workspace on the local filesystem, backed by git for
-// checkpoint / undo / redo. This is the P1 "sandbox" (a directory, mirroring the
-// single-container editor we are replacing); real isolation (gVisor/microVM) is a
-// P5 hardening item (ADR-0003).
-export class WorkspaceService {
-    readonly root: string;
-    readonly mcpEntry: string;
+// One project's working tree, backed by git for checkpoint / undo / redo. Used
+// inside the runtime container (runtime/daemon.ts) and, for local development
+// only, in-process by LocalRuntime.
+export class Workspace {
+    readonly dir: string;
 
-    constructor(root: string, mcpEntry: string) {
-        this.root = root;
-        this.mcpEntry = mcpEntry;
+    constructor(dir: string) {
+        this.dir = dir;
     }
 
-    dir(projectId: string): string {
-        return join(this.root, projectId);
-    }
-
-    async provision(projectId: string, mcpEnv: Record<string, string>): Promise<string> {
-        const dir = this.dir(projectId);
-        await mkdir(dir, { recursive: true });
-        const isRepo = await git(dir, ["rev-parse", "--is-inside-work-tree"]).then(
+    async init(): Promise<void> {
+        await mkdir(this.dir, { recursive: true });
+        const isRepo = await git(this.dir, ["rev-parse", "--is-inside-work-tree"]).then(
             () => true,
             () => false,
         );
         if (!isRepo) {
-            await git(dir, ["init", "-q"]);
-            await git(dir, ["config", "user.email", "atelier@localhost"]);
-            await git(dir, ["config", "user.name", "Atelier Agent"]);
+            await git(this.dir, ["init", "-q", "-b", "main"]);
+            await git(this.dir, ["config", "user.email", "agent@atelier.invalid"]);
+            await git(this.dir, ["config", "user.name", "Atelier"]);
         }
-        await writeFile(
-            join(dir, "opencode.json"),
-            JSON.stringify(
-                {
-                    mcp: {
-                        "atelier-content": {
-                            type: "local",
-                            command: ["node", this.mcpEntry],
-                            environment: mcpEnv,
-                        },
-                    },
-                },
-                null,
-                2,
-            ),
-        );
-        return dir;
     }
 
-    async checkpoint(projectId: string, message: string): Promise<string | null> {
-        const dir = this.dir(projectId);
-        await git(dir, ["add", "-A"]);
-        const status = await git(dir, ["status", "--porcelain"]);
+    async checkpoint(message: string): Promise<string | null> {
+        await git(this.dir, ["add", "-A"]);
+        const status = await git(this.dir, ["status", "--porcelain"]);
         if (!status) return null;
-        await git(dir, ["commit", "-q", "-m", message]);
-        return git(dir, ["rev-parse", "HEAD"]);
+        await git(this.dir, ["commit", "-q", "--no-verify", "-m", message || "Saved version"]);
+        return git(this.dir, ["rev-parse", "HEAD"]);
     }
 
-    async listCheckpoints(projectId: string): Promise<Checkpoint[]> {
-        const dir = this.dir(projectId);
-        const log = await git(dir, ["log", "--format=%H%x00%s%x00%cI"]).catch(() => "");
+    async listCheckpoints(): Promise<Checkpoint[]> {
+        const log = await git(this.dir, ["log", "-n", "200", "--format=%H%x00%s%x00%cI"]).catch(() => "");
         if (!log) return [];
         return log.split("\n").map((line) => {
             const [sha, message, date] = line.split("\0");
@@ -83,14 +87,33 @@ export class WorkspaceService {
         });
     }
 
-    async reset(projectId: string, ref: string): Promise<void> {
-        const dir = this.dir(projectId);
-        await git(dir, ["reset", "--hard", ref]);
-        await git(dir, ["clean", "-fd"]);
+    // Restoring a version records a new commit with that version's tree, so the
+    // timeline only grows and every restore can itself be undone.
+    async restore(sha: string): Promise<string | null> {
+        if (!SHA_RE.test(sha)) throw new Error("invalid commit sha");
+        await git(this.dir, ["cat-file", "-e", `${sha}^{commit}`]);
+        await git(this.dir, ["read-tree", "-u", "--reset", sha]);
+        await git(this.dir, ["clean", "-fdq"]);
+        return this.checkpoint(`Restored version ${sha.slice(0, 7)}`);
     }
 
-    async head(projectId: string): Promise<string | null> {
-        const dir = this.dir(projectId);
-        return git(dir, ["rev-parse", "HEAD"]).catch(() => null);
+    async head(): Promise<string | null> {
+        return git(this.dir, ["rev-parse", "HEAD"]).catch(() => null);
+    }
+
+    // Reads a file inside the workspace, refusing anything that resolves (after
+    // symlinks) outside it, and anything under .git.
+    async readFile(rel: string): Promise<{ body: Uint8Array; contentType: string } | null> {
+        const base = await realpath(resolve(this.dir));
+        const target = resolve(join(base, rel || "index.html"));
+        if (target !== base && !target.startsWith(`${base}/`)) return null;
+        if (target === join(base, ".git") || target.startsWith(`${join(base, ".git")}/`)) return null;
+        try {
+            const real = await realpath(target);
+            if (!real.startsWith(`${base}/`)) return null;
+            return { body: await readFile(real), contentType: mimeFor(real) };
+        } catch {
+            return null;
+        }
     }
 }

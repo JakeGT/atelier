@@ -1,68 +1,111 @@
-# Atelier with Docker Compose: the server and Postgres. A starting point, not a
-# finished deployment — put a reverse proxy with TLS in front of the server, and
-# keep the secrets somewhere safe. On the jaketalling platform the real stack
-# lives in the infra repo at apps/atelier/compose.yml (see docs/14).
+# Atelier with Docker Compose: Postgres, the control plane, and the provisioner
+# that creates one sandboxed workspace container per project (ADR-0006). A
+# starting point, not a finished deployment: put a reverse proxy with TLS in
+# front of the server, and keep the secrets somewhere safe. On the jaketalling
+# platform the real stack lives in the infra repo at apps/atelier/compose.yml
+# (see docs/14).
 #
+#   for t in server runtime provisioner; do docker build --target $t -t atelier-$t:local ..; done
 #   mkdir -p secrets
 #   openssl rand -base64 24 > secrets/postgres_password
 #   printf 'postgres://atelier:%s@db:5432/atelier' "$(cat secrets/postgres_password)" > secrets/atelier_database_url
-#   printf 'the authentic oidc client secret' > secrets/atelier_oidc_client_secret
+#   openssl rand -base64 32 > secrets/atelier_secrets_key
+#   openssl rand -base64 32 > secrets/atelier_provisioner_secret
+#   printf 'the oidc client secret' > secrets/atelier_oidc_client_secret
 #   chmod 0400 secrets/*
-#   docker compose -f deploy/compose.example.yml up -d --build
+#   docker compose -f deploy/compose.example.yml up -d
+#
+# This example connects as the database owner (single role). For the owner /
+# runtime-role split used in production (ADR-0008), create the atelier_runtime
+# group + a login in it, point DATABASE_URL_FILE at that login and
+# MIGRATION_DATABASE_URL_FILE at the owner (docs/14 §3).
 
 name: atelier
 
-services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: atelier
-      POSTGRES_DB: atelier
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    secrets: [postgres_password]
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    networks: [data]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U atelier -d atelier"]
-      interval: 5s
-      retries: 20
-
-  server:
-    build: { context: .., target: server }
-    restart: unless-stopped
-    depends_on:
-      db: { condition: service_healthy }
-    environment:
-      PUBLIC_ORIGIN: https://atelier.example.com
-      DATABASE_URL_FILE: /run/secrets/atelier_database_url
-      AUTH_MODE: oidc
-      OIDC_ISSUER: https://auth.example.com/application/o/atelier/
-      OIDC_CLIENT_ID: atelier
-      OIDC_CLIENT_SECRET_FILE: /run/secrets/atelier_oidc_client_secret
-      OIDC_PROVIDER_NAME: example
-      OIDC_ADMIN_GROUP: platform-admin
-      SIGNUP_MODE: invite
-    secrets: [atelier_database_url, atelier_oidc_client_secret]
-    networks: [data, proxy]
-    # Published here for trying it out; behind a reverse proxy, remove this.
-    ports: ["127.0.0.1:8080:8080"]
+x-hardening: &hardening
     read_only: true
-    tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    mem_limit: 1g
+
+services:
+    db:
+        image: postgres:16-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: atelier
+            POSTGRES_DB: atelier
+            POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+        secrets: [postgres_password]
+        volumes:
+            - db-data:/var/lib/postgresql/data
+        networks: [data]
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U atelier -d atelier"]
+            interval: 5s
+            retries: 20
+
+    # The only service with the Docker socket. It creates and stops per-project
+    # workspace containers from a fixed spec, and nothing else.
+    provisioner:
+        <<: *hardening
+        image: atelier-provisioner:local
+        container_name: atelier-provisioner
+        restart: unless-stopped
+        environment:
+            PROVISIONER_SECRET_FILE: /run/secrets/atelier_provisioner_secret
+            RUNTIME_IMAGE: atelier-runtime:local
+            RUNTIME_NETWORK: atelier-runtime
+            EGRESS_NETWORK: atelier-egress
+        secrets: [atelier_provisioner_secret]
+        volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+        networks: [control]
+
+    server:
+        <<: *hardening
+        image: atelier-server:local
+        container_name: atelier-server
+        restart: unless-stopped
+        depends_on:
+            db: { condition: service_healthy }
+            provisioner: { condition: service_started }
+        environment:
+            PUBLIC_ORIGIN: https://atelier.example.com
+            DATABASE_URL_FILE: /run/secrets/atelier_database_url
+            ATELIER_SECRETS_KEY_FILE: /run/secrets/atelier_secrets_key
+            RUNTIME_MODE: container
+            PROVISIONER_SECRET_FILE: /run/secrets/atelier_provisioner_secret
+            RUNTIME_API_URL: http://atelier-server:8080
+            AUTH_MODE: oidc
+            OIDC_ISSUER: https://auth.example.com/application/o/atelier/
+            OIDC_CLIENT_ID: atelier
+            OIDC_CLIENT_SECRET_FILE: /run/secrets/atelier_oidc_client_secret
+            OIDC_PROVIDER_NAME: example
+            OIDC_ADMIN_GROUP: platform-admin
+            SIGNUP_MODE: invite
+        secrets: [atelier_database_url, atelier_secrets_key, atelier_provisioner_secret, atelier_oidc_client_secret]
+        networks:
+            data: {}
+            control: {}
+            runtime: { aliases: [atelier-server] }
+            proxy: {}
+        # Published here for trying it out; behind a reverse proxy, remove this.
+        ports: ["127.0.0.1:8080:8080"]
+        tmpfs: [/tmp]
+        mem_limit: 1g
 
 networks:
-  data:
-    internal: true
-  proxy: {}
+    data: { internal: true }
+    control: { internal: true }
+    # Shared by the server and every workspace; must be internal (the provisioner checks).
+    runtime: { name: atelier-runtime, internal: true }
+    proxy: {}
 
 volumes:
-  db-data: {}
+    db-data: {}
 
 secrets:
-  postgres_password: { file: ./secrets/postgres_password }
-  atelier_database_url: { file: ./secrets/atelier_database_url }
-  atelier_oidc_client_secret: { file: ./secrets/atelier_oidc_client_secret }
+    postgres_password: { file: ./secrets/postgres_password }
+    atelier_database_url: { file: ./secrets/atelier_database_url }
+    atelier_secrets_key: { file: ./secrets/atelier_secrets_key }
+    atelier_provisioner_secret: { file: ./secrets/atelier_provisioner_secret }
+    atelier_oidc_client_secret: { file: ./secrets/atelier_oidc_client_secret }

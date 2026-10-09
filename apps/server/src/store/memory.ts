@@ -1,9 +1,24 @@
 import { randomUUID } from "node:crypto";
-import type { AgentSession, ContentDocument, Deployment, Membership, Organization, Project, Release, User } from "@atelier/shared";
+import type {
+    AgentSession,
+    AuditEntry,
+    ContentDocument,
+    ContentRevision,
+    Deployment,
+    Membership,
+    Organization,
+    Project,
+    Release,
+    ReleaseDocument,
+    User,
+} from "@atelier/shared";
 import type {
     AgentSessionStore,
+    AuditStore,
     ContentStore,
     DeploymentStore,
+    LoginSession,
+    LoginSessionStore,
     MembershipStore,
     OrganizationStore,
     ProjectStore,
@@ -13,9 +28,11 @@ import type {
 } from "./types.ts";
 
 const key = (...parts: string[]) => parts.join("\0");
+const now = () => new Date().toISOString();
 
 // In-memory store for development and tests. Tenant isolation is applied
-// explicitly (no RLS here); the RLS backstop lives in the Postgres store.
+// explicitly (no RLS here); the RLS backstop lives in the Postgres store and is
+// exercised by test/postgres.test.ts.
 export class MemoryStore implements Store {
     private readonly userMap = new Map<string, User>();
     private readonly orgMap = new Map<string, Organization>();
@@ -23,11 +40,16 @@ export class MemoryStore implements Store {
     private readonly projectMap = new Map<string, Project>();
     private readonly contentMap = new Map<string, ContentDocument>();
     private readonly contentIndex = new Map<string, string>();
+    private readonly revisionMap = new Map<string, ContentRevision[]>();
     private readonly agentSessionMap = new Map<string, AgentSession>();
     private readonly releaseMap = new Map<string, Release>();
+    private readonly manifestMap = new Map<string, ReleaseDocument[]>();
     private readonly deploymentMap = new Map<string, Deployment>();
+    private readonly auditLog: AuditEntry[] = [];
+    private readonly loginSessionMap = new Map<string, LoginSession>();
 
     users: UserStore = {
+        findById: async (id) => [...this.userMap.values()].find((u) => u.id === id) ?? null,
         findByIdentity: async (issuer, subject) => this.userMap.get(key(issuer, subject)) ?? null,
         upsertIdentity: async (input) => {
             const k = key(input.issuer, input.subject);
@@ -41,7 +63,7 @@ export class MemoryStore implements Store {
                       email: input.email,
                       name: input.name,
                       admin: input.admin,
-                      createdAt: new Date().toISOString(),
+                      createdAt: now(),
                   };
             this.userMap.set(k, user);
             return user;
@@ -88,7 +110,7 @@ export class MemoryStore implements Store {
                 agentConfigRef: null,
                 previewRef: null,
                 productionRef: null,
-                createdAt: new Date().toISOString(),
+                createdAt: now(),
             };
             this.projectMap.set(input.id, p);
             return p;
@@ -108,36 +130,32 @@ export class MemoryStore implements Store {
 
     content: ContentStore = {
         upsertDraft: async (input) => {
-            const now = new Date().toISOString();
+            // Mirror the composite FK: the project must belong to the tenant.
+            const project = this.projectMap.get(input.projectId);
+            if (!project || project.tenantId !== input.tenantId) throw new Error("project not found");
             const existingId = this.contentIndex.get(key(input.projectId, input.kind, input.slug));
             const existing = existingId ? this.contentMap.get(existingId) : undefined;
-            if (existing) {
-                const doc: ContentDocument = {
-                    ...existing,
-                    draft: input.draft,
-                    rev: existing.rev + 1,
-                    updatedBy: input.updatedBy,
-                    updatedAt: now,
-                };
-                this.contentMap.set(existing.id, doc);
-                return doc;
-            }
-            const doc: ContentDocument = {
-                id: randomUUID(),
-                projectId: input.projectId,
-                tenantId: input.tenantId,
-                kind: input.kind,
-                slug: input.slug,
-                schemaVersion: null,
-                draft: input.draft,
-                published: null,
-                publishedAt: null,
-                rev: 1,
-                updatedBy: input.updatedBy,
-                updatedAt: now,
-            };
+            const doc: ContentDocument = existing
+                ? { ...existing, draft: input.draft, rev: existing.rev + 1, updatedBy: input.updatedBy, updatedAt: now() }
+                : {
+                      id: randomUUID(),
+                      projectId: input.projectId,
+                      tenantId: input.tenantId,
+                      kind: input.kind,
+                      slug: input.slug,
+                      schemaVersion: null,
+                      draft: input.draft,
+                      published: null,
+                      publishedAt: null,
+                      rev: 1,
+                      updatedBy: input.updatedBy,
+                      updatedAt: now(),
+                  };
             this.contentMap.set(doc.id, doc);
             this.contentIndex.set(key(input.projectId, input.kind, input.slug), doc.id);
+            const revs = this.revisionMap.get(doc.id) ?? [];
+            revs.push({ documentId: doc.id, rev: doc.rev, draft: doc.draft, updatedBy: doc.updatedBy, createdAt: doc.updatedAt });
+            this.revisionMap.set(doc.id, revs);
             return doc;
         },
         get: async (tenantId, projectId, kind, slug) => {
@@ -147,24 +165,18 @@ export class MemoryStore implements Store {
         },
         list: async (tenantId, projectId) =>
             [...this.contentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId),
-        publish: async (input) => {
-            const id = this.contentIndex.get(key(input.projectId, input.kind, input.slug));
-            const doc = id ? this.contentMap.get(id) : undefined;
-            if (!doc || doc.tenantId !== input.tenantId) throw new Error("content document not found");
-            const now = new Date().toISOString();
-            const updated: ContentDocument = {
-                ...doc,
-                published: doc.draft,
-                publishedAt: now,
-                rev: doc.rev + 1,
-                updatedBy: input.actorId,
-                updatedAt: now,
-            };
-            this.contentMap.set(doc.id, updated);
-            return updated;
-        },
         snapshot: async (tenantId, projectId) =>
             [...this.contentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId && d.published !== null),
+        revisions: async (tenantId, documentId) => {
+            const doc = this.contentMap.get(documentId);
+            if (!doc || doc.tenantId !== tenantId) return [];
+            return [...(this.revisionMap.get(documentId) ?? [])].reverse();
+        },
+        revision: async (tenantId, documentId, rev) => {
+            const doc = this.contentMap.get(documentId);
+            if (!doc || doc.tenantId !== tenantId) return null;
+            return this.revisionMap.get(documentId)?.find((r) => r.rev === rev) ?? null;
+        },
     };
 
     agentSessions: AgentSessionStore = {
@@ -176,7 +188,7 @@ export class MemoryStore implements Store {
                 workspaceId: null,
                 model: input.model,
                 status: "provisioning",
-                startedAt: new Date().toISOString(),
+                startedAt: now(),
                 endedAt: null,
             };
             this.agentSessionMap.set(input.id, s);
@@ -196,7 +208,7 @@ export class MemoryStore implements Store {
                 ...s,
                 status,
                 workspaceId: workspaceId ?? s.workspaceId,
-                endedAt: ended ? new Date().toISOString() : s.endedAt,
+                endedAt: ended ? now() : s.endedAt,
             };
             this.agentSessionMap.set(id, updated);
             return updated;
@@ -204,27 +216,28 @@ export class MemoryStore implements Store {
     };
 
     releases: ReleaseStore = {
-        nextNumber: async (tenantId, projectId) => {
-            const numbers = [...this.releaseMap.values()]
-                .filter((r) => r.tenantId === tenantId && r.projectId === projectId)
-                .map((r) => r.number);
-            return (numbers.length ? Math.max(...numbers) : 0) + 1;
-        },
         create: async (input) => {
+            const numbers = [...this.releaseMap.values()]
+                .filter((r) => r.tenantId === input.tenantId && r.projectId === input.projectId)
+                .map((r) => r.number);
             const r: Release = {
                 id: input.id,
                 projectId: input.projectId,
                 tenantId: input.tenantId,
-                number: input.number,
+                number: (numbers.length ? Math.max(...numbers) : 0) + 1,
                 state: "planned",
                 codeSha: input.codeSha,
-                contentRev: input.contentRev,
+                contentRev: input.documents.reduce<number | null>((max, d) => Math.max(max ?? 0, d.rev), null),
                 actorId: input.actorId,
                 rollbackOf: input.rollbackOf,
                 deployedAt: null,
-                createdAt: new Date().toISOString(),
+                createdAt: now(),
             };
             this.releaseMap.set(input.id, r);
+            this.manifestMap.set(
+                input.id,
+                input.documents.map((d) => ({ ...d })),
+            );
             return r;
         },
         get: async (tenantId, projectId, number) => {
@@ -243,12 +256,34 @@ export class MemoryStore implements Store {
             }
             return null;
         },
-        updateState: async (tenantId, id, state) => {
-            const r = this.releaseMap.get(id);
+        manifest: async (tenantId, releaseId) => {
+            const r = this.releaseMap.get(releaseId);
+            return r && r.tenantId === tenantId ? (this.manifestMap.get(releaseId) ?? []) : [];
+        },
+        goLive: async (tenantId, projectId, releaseId) => {
+            const release = this.releaseMap.get(releaseId);
+            if (!release || release.tenantId !== tenantId || release.projectId !== projectId) throw new Error("release not found");
+            for (const r of this.releaseMap.values()) {
+                if (r.projectId === projectId && r.state === "live" && r.id !== releaseId)
+                    this.releaseMap.set(r.id, { ...r, state: "superseded" });
+            }
+            const shipped = new Map((this.manifestMap.get(releaseId) ?? []).map((d) => [d.documentId, d]));
+            const at = now();
+            for (const doc of this.contentMap.values()) {
+                if (doc.projectId !== projectId) continue;
+                const d = shipped.get(doc.id);
+                this.contentMap.set(doc.id, { ...doc, published: d ? d.content : null, publishedAt: d ? at : null });
+            }
+            const live: Release = { ...release, state: "live", deployedAt: at };
+            this.releaseMap.set(releaseId, live);
+            return live;
+        },
+        markFailed: async (tenantId, releaseId) => {
+            const r = this.releaseMap.get(releaseId);
             if (!r || r.tenantId !== tenantId) throw new Error("release not found");
-            const updated: Release = { ...r, state, deployedAt: state === "live" ? new Date().toISOString() : r.deployedAt };
-            this.releaseMap.set(id, updated);
-            return updated;
+            const failed: Release = { ...r, state: "failed" };
+            this.releaseMap.set(releaseId, failed);
+            return failed;
         },
     };
 
@@ -264,13 +299,52 @@ export class MemoryStore implements Store {
                 providerRef: null,
                 url: input.url,
                 state: input.state,
-                createdAt: new Date().toISOString(),
+                createdAt: now(),
             };
             this.deploymentMap.set(input.id, d);
             return d;
         },
         listByProject: async (tenantId, projectId) =>
             [...this.deploymentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId),
+    };
+
+    audit: AuditStore = {
+        record: async (entry) => {
+            this.auditLog.push({
+                id: this.auditLog.length + 1,
+                tenantId: entry.tenantId,
+                actorId: entry.actorId,
+                action: entry.action,
+                target: entry.target,
+                occurredAt: now(),
+                detail: entry.detail ?? null,
+            });
+        },
+        list: async ({ tenantId, limit = 100 }) =>
+            this.auditLog
+                .filter((e) => tenantId === undefined || e.tenantId === tenantId)
+                .slice(-limit)
+                .reverse(),
+    };
+
+    loginSessions: LoginSessionStore = {
+        create: async (idHash, session) => {
+            this.loginSessionMap.set(idHash, { ...session });
+        },
+        get: async (idHash) => {
+            const s = this.loginSessionMap.get(idHash);
+            return s ? { ...s } : null;
+        },
+        touch: async (idHash, lastSeenAt) => {
+            const s = this.loginSessionMap.get(idHash);
+            if (s) s.lastSeenAt = lastSeenAt;
+        },
+        delete: async (idHash) => {
+            this.loginSessionMap.delete(idHash);
+        },
+        deleteForUser: async (userId) => {
+            for (const [k, s] of this.loginSessionMap) if (s.userId === userId) this.loginSessionMap.delete(k);
+        },
     };
 
     async close(): Promise<void> {}

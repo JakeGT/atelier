@@ -63,10 +63,11 @@ test("tenant isolation: tenant B cannot read tenant A's data", async () => {
     assert.deepEqual(await store.content.list(tenantB, project.id), []);
 });
 
-test("content publish snapshots the draft; snapshot returns only published docs", async () => {
+test("snapshot returns only published docs, which only a live release sets", async () => {
     const { store, tenantA, userA } = makeStore();
+    await store.organizations.create({ id: tenantA, slug: "acme", name: "Acme" });
     const project = await store.projects.create({ id: randomUUID(), tenantId: tenantA, slug: "site", name: "Site" });
-    await store.content.upsertDraft({
+    const doc = await store.content.upsertDraft({
         tenantId: tenantA,
         projectId: project.id,
         kind: "home",
@@ -74,31 +75,27 @@ test("content publish snapshots the draft; snapshot returns only published docs"
         draft: { title: "Hello" },
         updatedBy: userA,
     });
-
     assert.deepEqual(await store.content.snapshot(tenantA, project.id), []);
 
-    const published = await store.content.publish({
+    const release = await store.releases.create({
+        id: randomUUID(),
         tenantId: tenantA,
         projectId: project.id,
-        kind: "home",
-        slug: "index",
+        codeSha: null,
         actorId: userA,
+        rollbackOf: null,
+        documents: [{ documentId: doc.id, kind: "home", slug: "index", rev: doc.rev, content: { title: "Hello" } }],
     });
-    assert.deepEqual(published.published, { title: "Hello" });
-    assert.ok(published.publishedAt);
-
+    await store.releases.goLive(tenantA, project.id, release.id);
     const snap = await store.content.snapshot(tenantA, project.id);
     assert.equal(snap.length, 1);
     assert.deepEqual(snap[0]?.published, { title: "Hello" });
+});
 
-    await store.content.upsertDraft({
-        tenantId: tenantA,
-        projectId: project.id,
-        kind: "home",
-        slug: "index",
-        draft: { title: "Hello v2" },
-        updatedBy: userA,
-    });
-    await store.content.publish({ tenantId: tenantA, projectId: project.id, kind: "home", slug: "index", actorId: userA });
-    assert.deepEqual((await store.content.snapshot(tenantA, project.id))[0]?.published, { title: "Hello v2" });
+test("content writes are refused for a project in another tenant", async () => {
+    const { store, tenantA, tenantB } = makeStore();
+    const project = await store.projects.create({ id: randomUUID(), tenantId: tenantA, slug: "site", name: "Site" });
+    await assert.rejects(
+        store.content.upsertDraft({ tenantId: tenantB, projectId: project.id, kind: "x", slug: "y", draft: {}, updatedBy: null }),
+    );
 });

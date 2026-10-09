@@ -2,14 +2,13 @@ import { existsSync } from "node:fs";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import type { Config } from "./config.ts";
-import { apiRoutes } from "./routes/api.ts";
+import { apiRoutes, type DeclaredRoute } from "./routes/api.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { configRoutes } from "./routes/config.ts";
 import { health } from "./routes/health.ts";
-import type { AgentRuntime } from "./services/agent.ts";
 import type { OidcService } from "./services/oidc.ts";
+import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
-import type { WorkspaceService } from "./services/workspace.ts";
 import type { Store } from "./store/types.ts";
 
 export interface Deps {
@@ -17,17 +16,32 @@ export interface Deps {
     store: Store;
     sessions: SessionStore;
     oidc?: OidcService;
-    workspaces: WorkspaceService;
-    agent: AgentRuntime;
+    runtime: WorkspaceRuntime;
+    // Signs agent tokens. Always set by main.ts (an ephemeral key in dev).
+    secretsKey: string;
 }
 
-export function createApp(deps: Deps): { app: Hono } {
+// Baseline headers for everything the app serves (the preview route adds a
+// stricter, sandboxing CSP of its own).
+const SECURITY_HEADERS: Record<string, string> = {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "same-origin",
+    "x-frame-options": "SAMEORIGIN",
+};
+
+export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } {
     const app = new Hono();
+
+    app.use("*", async (c, next) => {
+        await next();
+        for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+    });
 
     app.route("/", health);
     app.route("/", configRoutes(deps.config));
     app.route("/", authRoutes(deps.config, deps.oidc, deps.sessions, deps.store));
-    app.route("/", apiRoutes(deps.sessions, deps.store, deps.workspaces, deps.agent, deps.config));
+    const api = apiRoutes(deps.sessions, deps.store, deps.runtime, deps.config, deps.secretsKey);
+    app.route("/", api.app);
 
     // Serve the built web app when present (set WEB_DIST_DIR in the image).
     const dist = deps.config.webDistDir;
@@ -37,5 +51,5 @@ export function createApp(deps: Deps): { app: Hono } {
 
     app.get("/", (c) => c.json({ name: "atelier", status: "ok" }));
 
-    return { app };
+    return { app, declared: api.declared };
 }

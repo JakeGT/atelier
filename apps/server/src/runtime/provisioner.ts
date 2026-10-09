@@ -1,0 +1,192 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { Hono } from "hono";
+import { assertProjectId, workspaceName } from "../services/runtime.ts";
+import { type DockerClient, dockerError } from "./docker.ts";
+
+// The provisioner is the only Atelier service with the Docker socket (the
+// `cms-rebuilder` pattern from the current system, generalized — ADR-0006). It
+// is reachable only from the control plane on a private network, authenticates
+// it with a shared secret, and can do exactly two things: ensure a project's
+// runtime container exists and is running, or stop it. Every property of that
+// container — image, user, mounts, networks, limits — is fixed here from the
+// provisioner's own configuration; a request can only choose *which project*.
+
+export interface ProvisionerConfig {
+    image: string;
+    runtimeNetwork: string;
+    egressNetwork: string;
+    // Optional OCI runtime for workspaces (e.g. "runsc" for gVisor) — ADR-0003.
+    ociRuntime?: string;
+    memoryBytes: number;
+    nanoCpus: number;
+    pidsLimit: number;
+}
+
+const MANAGED = "dev.atelier.managed";
+const PROJECT = "dev.atelier.project";
+const SPEC = "dev.atelier.spec";
+
+interface ContainerInfo {
+    Id: string;
+    State?: { Running?: boolean };
+    Config?: { Labels?: Record<string, string> };
+}
+
+export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtimeSecret: string) {
+    const name = workspaceName(projectId);
+    return {
+        Image: cfg.image,
+        User: "node",
+        Env: [`RUNTIME_SECRET=${runtimeSecret}`, "WORKSPACE_DIR=/workspace", "AGENT_STATE_DIR=/tmp/agent", "PORT=8090"],
+        Cmd: ["node", "apps/server/src/runtime/daemon.ts"],
+        WorkingDir: "/app",
+        Labels: { [MANAGED]: "true", [PROJECT]: projectId },
+        HostConfig: {
+            ReadonlyRootfs: true,
+            CapDrop: ["ALL"],
+            SecurityOpt: ["no-new-privileges:true"],
+            PidsLimit: cfg.pidsLimit,
+            Memory: cfg.memoryBytes,
+            MemorySwap: cfg.memoryBytes,
+            NanoCpus: cfg.nanoCpus,
+            Tmpfs: { "/tmp": "rw,nosuid,nodev,size=512m,mode=1777" },
+            Mounts: [{ Type: "volume", Source: name, Target: "/workspace" }],
+            NetworkMode: cfg.runtimeNetwork,
+            RestartPolicy: { Name: "unless-stopped" },
+            LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
+            ...(cfg.ociRuntime ? { Runtime: cfg.ociRuntime } : {}),
+        },
+    };
+}
+
+// A fingerprint of everything that defines the container. A change (new image
+// tag, new limits, rotated secret) makes ensure() recreate it; the volume, and so
+// the project's files and history, are kept.
+// The image *id* is included so a rebuilt image under the same tag also counts.
+export function specHash(spec: ReturnType<typeof containerSpec>, imageId: string): string {
+    return createHash("sha256").update(JSON.stringify(spec)).update(imageId).digest("hex").slice(0, 32);
+}
+
+export class Provisioner {
+    private readonly cfg: ProvisionerConfig;
+    private readonly docker: DockerClient;
+    private readonly pending = new Map<string, Promise<{ workspaceId: string }>>();
+
+    constructor(cfg: ProvisionerConfig, docker: DockerClient) {
+        this.cfg = cfg;
+        this.docker = docker;
+    }
+
+    ensure(projectId: string, runtimeSecret: string): Promise<{ workspaceId: string }> {
+        assertProjectId(projectId);
+        const inflight = this.pending.get(projectId);
+        if (inflight) return inflight;
+        const p = this.doEnsure(projectId, runtimeSecret).finally(() => this.pending.delete(projectId));
+        this.pending.set(projectId, p);
+        return p;
+    }
+
+    private async inspect(name: string): Promise<ContainerInfo | null> {
+        const res = await this.docker.call("GET", `/containers/${name}/json`);
+        if (res.status === 404) return null;
+        if (res.status !== 200) throw dockerError("inspect", res);
+        const info = res.body as ContainerInfo;
+        // Never act on a container this provisioner did not create.
+        if (info.Config?.Labels?.[MANAGED] !== "true") throw new Error(`${name} exists but is not managed by Atelier`);
+        return info;
+    }
+
+    // The runtime network (shared with the control plane) must be internal: it is
+    // how the control plane reaches workspaces, not a route out. The egress network
+    // (internet for the model provider) is created here if compose has not.
+    private networksChecked = false;
+    private async ensureNetworks(): Promise<void> {
+        if (this.networksChecked) return;
+        const runtime = await this.docker.call("GET", `/networks/${this.cfg.runtimeNetwork}`);
+        if (runtime.status !== 200) throw dockerError(`runtime network ${this.cfg.runtimeNetwork}`, runtime);
+        if ((runtime.body as { Internal?: boolean }).Internal !== true) {
+            throw new Error(`runtime network ${this.cfg.runtimeNetwork} must be internal`);
+        }
+        const egress = await this.docker.call("GET", `/networks/${this.cfg.egressNetwork}`);
+        if (egress.status === 404) {
+            const created = await this.docker.call("POST", "/networks/create", {
+                Name: this.cfg.egressNetwork,
+                Driver: "bridge",
+                Labels: { [MANAGED]: "true" },
+            });
+            if (created.status !== 201) throw dockerError("create egress network", created);
+        } else if (egress.status !== 200) {
+            throw dockerError(`egress network ${this.cfg.egressNetwork}`, egress);
+        }
+        this.networksChecked = true;
+    }
+
+    private async doEnsure(projectId: string, runtimeSecret: string): Promise<{ workspaceId: string }> {
+        await this.ensureNetworks();
+        const name = workspaceName(projectId);
+        const base = containerSpec(this.cfg, projectId, runtimeSecret);
+        const image = await this.docker.call("GET", `/images/${encodeURIComponent(this.cfg.image)}/json`);
+        if (image.status !== 200) throw dockerError(`runtime image ${this.cfg.image}`, image);
+        const hash = specHash(base, (image.body as { Id?: string }).Id ?? "");
+        const spec = { ...base, Labels: { ...base.Labels, [SPEC]: hash } };
+
+        let info = await this.inspect(name);
+        if (info && info.Config?.Labels?.[SPEC] !== hash) {
+            const rm = await this.docker.call("DELETE", `/containers/${name}?force=true`);
+            if (rm.status !== 204 && rm.status !== 404) throw dockerError("remove", rm);
+            info = null;
+        }
+        if (!info) {
+            const created = await this.docker.call("POST", `/containers/create?name=${name}`, spec);
+            if (created.status !== 201) throw dockerError("create", created);
+            // Outbound internet for the model provider; the runtime network is internal.
+            const net = await this.docker.call("POST", `/networks/${this.cfg.egressNetwork}/connect`, { Container: name });
+            if (net.status !== 200) throw dockerError("connect egress", net);
+        }
+        if (!info?.State?.Running) {
+            const started = await this.docker.call("POST", `/containers/${name}/start`);
+            if (started.status !== 204 && started.status !== 304) throw dockerError("start", started);
+        }
+        return { workspaceId: name };
+    }
+
+    async stop(projectId: string): Promise<void> {
+        assertProjectId(projectId);
+        const name = workspaceName(projectId);
+        if (!(await this.inspect(name))) return;
+        const res = await this.docker.call("POST", `/containers/${name}/stop?t=10`);
+        if (res.status !== 204 && res.status !== 304) throw dockerError("stop", res);
+    }
+}
+
+export function provisionerApp(provisioner: Provisioner, secret: string): Hono {
+    const app = new Hono();
+    const want = Buffer.from(secret);
+    app.get("/healthz", (c) => c.json({ ok: true }));
+    app.use("/workspaces/*", async (c, next) => {
+        const header = c.req.header("authorization");
+        const given = Buffer.from(header?.startsWith("Bearer ") ? header.slice(7) : "");
+        if (given.length !== want.length || !timingSafeEqual(given, want)) return c.json({ error: "unauthorized" }, 401);
+        await next();
+    });
+    app.put("/workspaces/:projectId", async (c) => {
+        const body = (await c.req.json().catch(() => null)) as { runtimeSecret?: unknown } | null;
+        if (typeof body?.runtimeSecret !== "string" || body.runtimeSecret.length < 32)
+            return c.json({ error: "runtimeSecret required" }, 400);
+        try {
+            return c.json(await provisioner.ensure(c.req.param("projectId"), body.runtimeSecret));
+        } catch (err) {
+            console.error(`ensure ${c.req.param("projectId")}: ${(err as Error).message}`);
+            return c.json({ error: (err as Error).message }, 500);
+        }
+    });
+    app.delete("/workspaces/:projectId", async (c) => {
+        try {
+            await provisioner.stop(c.req.param("projectId"));
+            return c.json({ ok: true });
+        } catch (err) {
+            return c.json({ error: (err as Error).message }, 500);
+        }
+    });
+    return app;
+}

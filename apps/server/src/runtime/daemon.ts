@@ -1,0 +1,105 @@
+// The workspace daemon: runs inside one project's runtime container (image
+// target `runtime`), next to the agent. It owns the project's working tree
+// (/workspace, a per-project volume) and does everything that touches it — run
+// the agent, checkpoint, restore, serve preview files — on behalf of the control
+// plane. The container holds no Atelier secrets: only RUNTIME_SECRET, which is
+// specific to this project and lets the control plane (and nothing else on the
+// runtime network) call this daemon. The agent token for the content API comes
+// with each /runs request and is written to private tmpfs, never the workspace.
+
+import { timingSafeEqual } from "node:crypto";
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { OpenCodeAgent } from "../services/agent.ts";
+import { RunTracker } from "../services/runs.ts";
+import { startAgentRun } from "../services/runtime.ts";
+import { Workspace } from "../services/workspace.ts";
+
+const secret = process.env.RUNTIME_SECRET ?? "";
+// Keep the secret out of anything this process spawns.
+delete process.env.RUNTIME_SECRET;
+if (secret.length < 32) {
+    console.error("RUNTIME_SECRET is missing or too short");
+    process.exit(1);
+}
+
+const workspace = new Workspace(process.env.WORKSPACE_DIR ?? "/workspace");
+const agent = new OpenCodeAgent({
+    stateDir: process.env.AGENT_STATE_DIR ?? "/tmp/agent",
+    mcpEntry: process.env.MCP_SERVER_ENTRY ?? "/app/apps/server/src/mcp/content.ts",
+});
+const port = Number(process.env.PORT ?? 8090);
+
+const runs = new RunTracker();
+
+const authorized = (header: string | undefined): boolean => {
+    const given = Buffer.from(header?.startsWith("Bearer ") ? header.slice(7) : "");
+    const want = Buffer.from(secret);
+    return given.length === want.length && timingSafeEqual(given, want);
+};
+
+const app = new Hono();
+
+app.get("/healthz", (c) => c.json({ ok: true }));
+
+app.use("*", async (c, next) => {
+    if (!authorized(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+    await next();
+});
+
+app.post("/runs", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+        prompt?: unknown;
+        model?: unknown;
+        apiUrl?: unknown;
+        agentToken?: unknown;
+    } | null;
+    if (
+        !body ||
+        typeof body.prompt !== "string" ||
+        !body.prompt ||
+        typeof body.apiUrl !== "string" ||
+        typeof body.agentToken !== "string"
+    ) {
+        return c.json({ error: "prompt, apiUrl and agentToken are required" }, 400);
+    }
+    const model = typeof body.model === "string" ? body.model : null;
+    const run = startAgentRun(runs, workspace, agent, { prompt: body.prompt, model, apiUrl: body.apiUrl, agentToken: body.agentToken });
+    if (run === "busy") return c.json({ error: "busy" }, 409);
+    return c.json(run, 202);
+});
+
+app.get("/runs/:id", (c) => {
+    const run = runs.get(c.req.param("id"));
+    return run ? c.json(run) : c.json({ error: "not found" }, 404);
+});
+
+app.get("/checkpoints", async (c) => {
+    await workspace.init();
+    return c.json({ checkpoints: await workspace.listCheckpoints() });
+});
+
+app.post("/restore", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { sha?: unknown } | null;
+    if (typeof body?.sha !== "string") return c.json({ error: "sha required" }, 400);
+    const sha = body.sha;
+    try {
+        const result = await runs.exclusive(() => workspace.restore(sha));
+        if (result === "busy") return c.json({ error: "busy" }, 409);
+        return c.json({ sha: result });
+    } catch (err) {
+        return c.json({ error: (err as Error).message }, 400);
+    }
+});
+
+app.get("/head", async (c) => c.json({ sha: await workspace.head() }));
+
+app.get("/files/*", async (c) => {
+    const rel = decodeURIComponent(c.req.path.replace(/^\/files\/?/, ""));
+    const file = await workspace.readFile(rel);
+    if (!file) return c.json({ error: "not found" }, 404);
+    return new Response(file.body, { headers: { "content-type": file.contentType } });
+});
+
+await workspace.init();
+serve({ fetch: app.fetch, hostname: "0.0.0.0", port }, () => console.log(`workspace daemon listening on :${port}`));

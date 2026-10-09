@@ -4,6 +4,13 @@ import type { Project, Session } from "./api";
 import { api } from "./api";
 import { Editor } from "./Editor";
 
+const AUTH_ERRORS: Record<string, string> = {
+    denied: "Atelier is invite-only, and this account hasn't been invited yet.",
+    expired: "That sign-in took too long. Please try again.",
+    unverified: "Your identity provider didn't confirm your e-mail address.",
+    failed: "Sign-in didn't work. Please try again.",
+};
+
 export function App() {
     const [session, setSession] = useState<Session | null | undefined>(undefined);
     const [projects, setProjects] = useState<Project[]>([]);
@@ -57,10 +64,12 @@ export function App() {
     }
 
     if (session === null) {
+        const authError = new URLSearchParams(window.location.search).get("auth_error");
         return (
             <main className="shell">
                 <h1>Atelier</h1>
                 <p className="muted">Multi-tenant, multi-project AI website builder.</p>
+                {authError && <p className="error">{AUTH_ERRORS[authError] ?? AUTH_ERRORS.failed}</p>}
                 <a className="btn" href="/auth/login">
                     Sign in
                 </a>
@@ -77,6 +86,9 @@ export function App() {
             <header className="topbar">
                 <h1>Atelier</h1>
                 <span className="user">{session.email}</span>
+                <button type="button" onClick={() => void api.logout()}>
+                    Sign out
+                </button>
             </header>
 
             <section className="create">

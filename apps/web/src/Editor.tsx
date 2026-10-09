@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
-import type { AgentSession, Checkpoint, Project } from "./api";
-import { api } from "./api";
+import type { AgentSession, Checkpoint, Project, Release } from "./api";
+import { api, ReauthRequired, reauthenticate } from "./api";
 
 interface Message {
     id: string;
@@ -16,19 +16,26 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
     const [input, setInput] = useState("");
     const [busy, setBusy] = useState(false);
     const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+    const [releases, setReleases] = useState<Release[]>([]);
     const [previewKey, setPreviewKey] = useState(0);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [needsReauth, setNeedsReauth] = useState(false);
 
     const ensureSession = useCallback(async () => {
         const sessions = await api.listSessions(project.id);
-        if (sessions.length > 0) return sessions[0];
-        return api.createSession(project.id);
+        const ready = sessions.find((s) => s.status === "ready");
+        return ready ?? api.createSession(project.id);
     }, [project.id]);
 
-    const loadCheckpoints = useCallback(async () => {
-        if (!session) return;
-        setCheckpoints(await api.listCheckpoints(project.id, session.id));
-    }, [project.id, session]);
+    const loadTimeline = useCallback(async () => {
+        const [cps, rels] = await Promise.all([
+            api.listCheckpoints(project.id).catch(() => []),
+            api.listReleases(project.id).catch(() => []),
+        ]);
+        setCheckpoints(cps);
+        setReleases([...rels].reverse());
+    }, [project.id]);
 
     useEffect(() => {
         void ensureSession()
@@ -37,8 +44,28 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
     }, [ensureSession]);
 
     useEffect(() => {
-        if (session) void loadCheckpoints();
-    }, [session, loadCheckpoints]);
+        if (session) void loadTimeline();
+    }, [session, loadTimeline]);
+
+    // A fresh signed preview link on every reload (they expire after two hours).
+    // biome-ignore lint/correctness/useExhaustiveDependencies: previewKey is the reload trigger
+    useEffect(() => {
+        void api
+            .previewUrl(project.id)
+            .then(setPreviewUrl)
+            .catch(() => setPreviewUrl(null));
+    }, [project.id, previewKey]);
+
+    // Runs an action, turning "please sign in again" into a prompt rather than an error.
+    async function guarded(fn: () => Promise<unknown>) {
+        setError(null);
+        try {
+            await fn();
+        } catch (err) {
+            if (err instanceof ReauthRequired) setNeedsReauth(true);
+            else setError((err as Error).message);
+        }
+    }
 
     async function send(e: FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -46,9 +73,8 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
         const prompt = input.trim();
         setInput("");
         setBusy(true);
-        setError(null);
         setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: prompt }]);
-        try {
+        await guarded(async () => {
             const result = await api.sendMessage(project.id, session.id, prompt);
             setMessages((m) => [
                 ...m,
@@ -60,24 +86,34 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
                 },
             ]);
             setPreviewKey((k) => k + 1);
-            await loadCheckpoints();
-        } catch (err) {
-            setError((err as Error).message);
-        } finally {
-            setBusy(false);
-        }
+            await loadTimeline();
+        });
+        setBusy(false);
     }
 
-    async function restore(sha: string) {
-        if (!session) return;
-        try {
-            await api.resetCheckpoint(project.id, session.id, sha);
+    const restore = (sha: string) =>
+        guarded(async () => {
+            await api.restoreCheckpoint(project.id, sha);
             setPreviewKey((k) => k + 1);
-            await loadCheckpoints();
-        } catch (err) {
-            setError((err as Error).message);
-        }
-    }
+            await loadTimeline();
+        });
+
+    const publish = () =>
+        guarded(async () => {
+            setBusy(true);
+            try {
+                await api.publish(project.id);
+                await loadTimeline();
+            } finally {
+                setBusy(false);
+            }
+        });
+
+    const rollback = (number: number) =>
+        guarded(async () => {
+            await api.rollback(project.id, number);
+            await loadTimeline();
+        });
 
     return (
         <main className="editor">
@@ -87,6 +123,9 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
                 </button>
                 <h1>{project.name}</h1>
                 <span className="muted">{session?.status ?? "…"}</span>
+                <button type="button" className="primary" onClick={publish} disabled={busy || !session}>
+                    Publish website
+                </button>
             </header>
 
             <div className="panes">
@@ -108,7 +147,7 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
                         ))}
                         {busy && (
                             <div className="msg assistant">
-                                <div className="bubble">Thinking…</div>
+                                <div className="bubble">Working…</div>
                             </div>
                         )}
                     </div>
@@ -132,7 +171,13 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
                             ↻
                         </button>
                     </div>
-                    <iframe key={previewKey} src={`/api/v1/projects/${project.id}/preview/index.html`} title="preview" />
+                    {/* Agent-written pages: sandboxed (no same-origin), so they can't act as the signed-in user. */}
+                    <iframe
+                        key={previewKey}
+                        src={previewUrl ?? "about:blank"}
+                        title="preview"
+                        sandbox="allow-scripts allow-forms allow-popups allow-modals"
+                    />
                 </section>
 
                 <section className="pane timeline">
@@ -141,15 +186,37 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
                         {checkpoints.length === 0 ? (
                             <p className="muted">No versions yet.</p>
                         ) : (
-                            checkpoints.map((c) => (
+                            checkpoints.map((c, i) => (
                                 <div key={c.sha} className="checkpoint">
                                     <div className="cp-msg">{c.message}</div>
                                     <div className="cp-meta">
                                         {c.sha.slice(0, 7)} · {new Date(c.date).toLocaleString()}
                                     </div>
-                                    <button type="button" onClick={() => restore(c.sha)}>
-                                        Restore
-                                    </button>
+                                    {i > 0 && (
+                                        <button type="button" onClick={() => restore(c.sha)} disabled={busy}>
+                                            Restore
+                                        </button>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="pane-head">Releases</div>
+                    <div className="checkpoints">
+                        {releases.length === 0 ? (
+                            <p className="muted">Not published yet.</p>
+                        ) : (
+                            releases.map((r) => (
+                                <div key={r.id} className="checkpoint">
+                                    <div className="cp-msg">
+                                        Release {r.number} · {r.state}
+                                    </div>
+                                    <div className="cp-meta">{new Date(r.deployedAt ?? r.createdAt).toLocaleString()}</div>
+                                    {(r.state === "superseded" || r.state === "rolled_back") && (
+                                        <button type="button" onClick={() => rollback(r.number)} disabled={busy}>
+                                            Roll back to this
+                                        </button>
+                                    )}
                                 </div>
                             ))
                         )}
@@ -157,6 +224,14 @@ export function Editor({ project, onBack }: { project: Project; onBack: () => vo
                 </section>
             </div>
 
+            {needsReauth && (
+                <p className="error banner">
+                    Publishing needs you to confirm it's you.{" "}
+                    <button type="button" onClick={reauthenticate}>
+                        Sign in again
+                    </button>
+                </p>
+            )}
             {error && <p className="error banner">{error}</p>}
         </main>
     );

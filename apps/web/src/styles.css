@@ -276,3 +276,14 @@ textarea {
     padding: 8px 14px;
     box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
 }
+
+.topbar .primary {
+    margin-left: auto;
+    background: #1f6f4a;
+    color: #fff;
+    border-color: #1f6f4a;
+}
+
+.topbar .primary:disabled {
+    opacity: 0.6;
+}
