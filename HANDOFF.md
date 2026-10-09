@@ -1,20 +1,19 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-09 (late). Status: **`p1.9` deployed**: P0 + P1, P1 hardening, and the interface redesign.
-> Two stacked PRs are open and **not merged**:
-> [#1 `p1-hardening`](https://github.com/JakeGT/atelier/pull/1) → `main`, and
-> [#2 `ui-redesign`](https://github.com/JakeGT/atelier/pull/2) → `p1-hardening`.
+> Last updated 2026-10-10. Status: **`p2.0` deployed**: P0, P1 (+ hardening, interface redesign) and P2 (multi-tenant).
+> P1 work is merged to `main`. P2 is on branch `p2-multi-tenant`,
+> [PR #3](https://github.com/JakeGT/atelier/pull/3), **not yet merged**.
 
 ## TL;DR
 
 Atelier is a multi-tenant, multi-project AI website builder: the platform rebuild of
-the single-tenant `connectionerring-editor`. P0 (foundations) and P1 (single-tenant
-vertical slice) are live at `atelier.jaketalling.com` behind Authentik. An
-architecture review found that P1 met its safety criteria only on paper. The
-`p1-hardening` branch fixes that, and its design is in ADRs 0006–0011.
+the single-tenant `connectionerring-editor`. It is live at `atelier.jaketalling.com`
+behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; P3
+(hosting and domains) is next.
 
-**Working rule:** each phase is developed on its own branch and reviewed as a PR.
-Nothing goes straight to `main`.
+**Working rules:**
+- Each phase is developed on its own branch and reviewed as a PR. Nothing goes straight to `main`.
+- After every push, check CI (`gh pr checks <n>`). Never commit key-shaped literals, even in tests.
 
 ## Where everything lives
 
@@ -26,22 +25,20 @@ Nothing goes straight to `main`.
 | Web UI | `apps/web/` |
 | Platform infra | `~/Projects/jaketalling-com/jaketalling-platform-infrastructure/apps/atelier/` |
 
-**Git:** Atelier `main` = `3e2e982`; `p1-hardening` = `6960de3` (code) + `ce403bb`
-(docs) + this handoff. Infra: `ad26b3d` (Atelier p1.2) is committed locally;
-infra `main` is ~11 commits ahead of origin and not pushed.
+**Git:** `main` has P0–P1. `p2-multi-tenant` (PR #3) has P2. The infra repo's Atelier commits are local only (its `main` is many commits ahead of origin and is not pushed).
 
 ## Current deployment
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server:p1.9`, `atelier-provisioner:p1.9`, `atelier-runtime:p1.9` (built locally from `ui-redesign`) |
-| Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), plus `atelier-ws-<projectId>` per project, created on demand |
-| Migrations | `0001`–`0006` applied; `db/grants.sql` re-applied at each start |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p2.0` (built locally from `p2-multi-tenant`) |
+| Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), plus `atelier-ws-<projectId>` per project, created on demand and stopped when idle |
+| Migrations | `0001`–`0007` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
-| Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-egress` |
+| Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backups before deploys | `backups/postgres-20261009T200517Z` (before p1.2), `…T222908Z` (before p1.4) |
+| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261009T233444Z` (before p2.0) |
 
 Verified after deploy:
 - `/healthz` returns 200;
@@ -75,7 +72,7 @@ browser ─▶ Caddy ─▶ atelier-server ──(atelier-control)──▶ atel
 
 ## The interface (branch `ui-redesign`)
 
-- Routes: `/` landing (public, adapts when signed in), `/login`, `/studio` (your websites), `/p/:slug` (editor). Private routes redirect to `/login?next=…`.
+- Routes: `/` landing (public, adapts when signed in), `/login`, `/studio` (→ the studio last used), `/o/:org` (websites), `/o/:org/settings/:tab`, `/o/:org/p/:slug` (editor). Private routes redirect to `/login?next=…`.
 - Design tokens: `apps/web/src/styles/tokens.css` (paper / night themes). Pages are in `apps/web/src/pages/`, the editor's parts in `apps/web/src/editor/`.
 - Fonts and icons are bundled. The app shell's CSP allows only same-origin scripts plus a per-response nonce, which Cloudflare reuses for the bot-detection script it injects.
 - The conversation is stored per project on the server (`agent_messages`). The browser keeps only UI preferences.
@@ -96,8 +93,9 @@ AUTH_MODE=dev COOKIE_SECURE=false PORT=18090 PUBLIC_ORIGIN=http://localhost:1809
 pnpm check                                   # lint + typecheck + tests (Postgres suite skipped)
 docker run -d --rm --name atelier-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:16-alpine
 TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # all tests, incl. RLS/role suite
+scripts/e2e.sh      # the real images end to end (sandbox, network boundaries); E2E_AGENT=1 adds a real assistant run
 
-for t in server runtime provisioner; do docker build --target $t -t atelier-$t:<tag> .; done
+for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:<tag> .; done
 cd ~/Projects/jaketalling-com/jaketalling-platform-infrastructure && sh scripts/backup.sh
 cd apps/atelier && sed -i 's/^ATELIER_VERSION=.*/ATELIER_VERSION=<tag>/' .env && docker compose up -d
 docker logs atelier-server --tail 20 && curl -fsS https://atelier.jaketalling.com/healthz
@@ -105,31 +103,18 @@ docker logs atelier-server --tail 20 && curl -fsS https://atelier.jaketalling.co
 
 Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin off`).
 
-## Known gaps (tracked in docs/13 E2.6 and ADRs)
+## Known gaps
 
-- **Egress is open:** workspaces can reach any internet host (E2.6 allow-list
-  proxy, then the ADR-0011 model proxy).
-- **gVisor not enabled:** the provisioner supports `RUNTIME_OCI_RUNTIME=runsc`.
-  Trying it is the P2 spike (risk R4).
-- **Workspace volumes aren't backed up:** `atelier-ws-*` holds project code
-  (ADR-0009). This is a VPS go-live gate; the P3 remote mirror fixes it properly.
-- **No idle reaping:** workspace containers keep running until stopped (P2).
-- **Usage isn't metered yet:** runs report token counts but write no
-  `usage_events` (E2.5, and later via the ADR-0011 proxy).
-- **Two separate undo timelines:** code versions and content revisions aren't
-  unified into one view.
+- **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
+- **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
+- **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). This is a VPS go-live gate; the P3 remote mirror fixes it properly.
+- **Invitations don't send e-mail.** The inviter tells the person; they join at their next sign-in. They must also be on the platform's Authentik allowlist.
+- **Per-project role overrides** aren't built (organisation roles only).
+- **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
+- **One old workspace container** (from before p2.0) keeps its old network until it is next used or reaped; it is then recreated in proxy mode.
 
 ## Next steps
 
-1. **Jake: sign in at `https://atelier.jaketalling.com`** and run the loop on a
-   throwaway project:
-   1. create a project and send a chat;
-   2. check that the preview loads with its CSS;
-   3. click Publish (you may be asked to sign in again);
-   4. roll back.
-2. **Review and merge PR #1.**
-3. **Push the infra repo** when you're happy with its queued commits.
-4. **Start P2 on a new branch** (`p2-multi-tenant`):
-   - org selection (`/orgs/{org}`) and invites;
-   - quotas and metering;
-   - E2.6: gVisor spike, egress proxy, idle reaping.
+1. **Jake: try P2 in production.** Create a second studio, invite someone, open the settings pages, archive and restore a website, and run the assistant once (it now goes through the egress proxy).
+2. **Review and merge PR #3.**
+3. **P3 on a new branch (`p3-hosting`):** Cloudflare Pages per project, the build split into an untrusted build and a trusted upload (ADR-0010), custom domains, real rollback, and the remote mirror for project code (ADR-0009).
