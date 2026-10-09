@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-09 (late). Status: **`p1.5` deployed**: P0 + P1, P1 hardening, and the interface redesign.
+> Last updated 2026-10-09 (late). Status: **`p1.6` deployed**: P0 + P1, P1 hardening, and the interface redesign.
 > Two stacked PRs are open and **not merged**:
 > [#1 `p1-hardening`](https://github.com/JakeGT/atelier/pull/1) → `main`, and
 > [#2 `ui-redesign`](https://github.com/JakeGT/atelier/pull/2) → `p1-hardening`.
@@ -34,7 +34,7 @@ infra `main` is ~11 commits ahead of origin and not pushed.
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server:p1.5`, `atelier-provisioner:p1.5`, `atelier-runtime:p1.5` (built locally from `ui-redesign`) |
+| Images | `atelier-server:p1.6`, `atelier-provisioner:p1.6`, `atelier-runtime:p1.6` (built locally from `ui-redesign`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), plus `atelier-ws-<projectId>` per project, created on demand |
 | Migrations | `0001`–`0006` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -75,6 +75,7 @@ browser ─▶ Caddy ─▶ atelier-server ──(atelier-control)──▶ atel
 
 ## The interface (branch `ui-redesign`)
 
+- Routes: `/` landing (public, adapts when signed in), `/login`, `/studio` (your websites), `/p/:slug` (editor). Private routes redirect to `/login?next=…`.
 - Design tokens: `apps/web/src/styles/tokens.css` (paper / night themes). Pages are in `apps/web/src/pages/`, the editor's parts in `apps/web/src/editor/`.
 - Fonts and icons are bundled. The app shell's CSP allows only same-origin scripts plus a per-response nonce, which Cloudflare reuses for the bot-detection script it injects.
 - The conversation is stored per project on the server (`agent_messages`). The browser keeps only UI preferences.
