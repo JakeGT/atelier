@@ -5,6 +5,8 @@ import { ContainerRuntime, runtimeSecret } from "../src/services/runtime.ts";
 
 const KEY = "k".repeat(40);
 
+const auth = (init?: RequestInit): string | undefined => (init?.headers as Record<string, string> | undefined)?.authorization;
+
 // A fake provisioner + workspace daemons, recording what the control plane asks of them.
 function fakeWorld(workspaces: { projectId: string; running: boolean; busy?: boolean }[]) {
     const calls: string[] = [];
@@ -15,7 +17,7 @@ function fakeWorld(workspaces: { projectId: string; running: boolean; busy?: boo
         const json = (body: unknown, status = 200) =>
             new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
         if (url.host === "provisioner") {
-            assert.equal((init?.headers as Record<string, string>).authorization, "Bearer prov-secret");
+            assert.equal(auth(init), "Bearer prov-secret");
             if (method === "GET" && url.pathname === "/workspaces") return json({ workspaces });
             if (method === "DELETE") {
                 const w = workspaces.find((x) => url.pathname.endsWith(x.projectId));
@@ -27,7 +29,7 @@ function fakeWorld(workspaces: { projectId: string; running: boolean; busy?: boo
         const w = workspaces.find((x) => url.host.startsWith(`atelier-ws-${x.projectId}`));
         assert.ok(w, `unexpected host ${url.host}`);
         // Each daemon is addressed with its own project's derived secret.
-        assert.equal((init?.headers as Record<string, string>).authorization, `Bearer ${runtimeSecret(KEY, w.projectId)}`);
+        assert.equal(auth(init), `Bearer ${runtimeSecret(KEY, w.projectId)}`);
         if (url.pathname === "/status") return json({ busy: w.busy ?? false });
         if (url.pathname === "/head") return json({ sha: null });
         return json({});
