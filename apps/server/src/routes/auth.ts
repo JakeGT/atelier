@@ -19,11 +19,29 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
 
     const notConfigured = () => new Response("OIDC is not configured.", { status: 503 });
 
+    const safeNext = (requested: string | undefined): string => {
+        const next = requested ?? "/";
+        return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+    };
+
     app.get("/auth/login", async (c) => {
+        // Local development only (config refuses AUTH_MODE=dev off localhost).
+        if (config.authMode === "dev") {
+            const user = await store.users.upsertIdentity({
+                issuer: "dev",
+                subject: "local",
+                email: "you@localhost",
+                name: "Local Developer",
+                admin: true,
+            });
+            await ensureUserOrg(store, user.id, user.email, user.name);
+            const { id } = await sessions.createSession(user.id);
+            writeCookie(c, "session", secure, id);
+            return c.redirect(safeNext(c.req.query("next")));
+        }
         if (!oidc) return notConfigured();
         if (!loginLimiter.allow(clientIp(c))) return c.json({ error: "too many requests" }, 429);
-        const requested = c.req.query("next") ?? "/";
-        const next = requested.startsWith("/") && !requested.startsWith("//") && !requested.startsWith("/\\") ? requested : "/";
+        const next = safeNext(c.req.query("next"));
         const state = randomState();
         const nonce = randomNonce();
         const codeVerifier = randomCodeVerifier();

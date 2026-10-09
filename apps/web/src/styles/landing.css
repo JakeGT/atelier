@@ -1,0 +1,477 @@
+.landing {
+    --gutter: clamp(20px, 5vw, 72px);
+    overflow-x: clip;
+}
+
+.landing-nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px var(--gutter);
+    background: color-mix(in srgb, var(--paper) 82%, transparent);
+    backdrop-filter: blur(14px) saturate(1.4);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.3s;
+}
+
+.landing-nav nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.landing-nav nav .btn-primary {
+    margin-left: 8px;
+}
+
+@media (max-width: 720px) {
+    .landing-nav nav a {
+        display: none;
+    }
+}
+
+/* ---- hero -------------------------------------------------------------------- */
+
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    align-items: center;
+    gap: clamp(32px, 5vw, 80px);
+    padding: clamp(40px, 8vh, 96px) var(--gutter) clamp(64px, 10vh, 128px);
+    min-height: calc(100dvh - 70px);
+}
+
+.hero h1 {
+    margin-top: 20px;
+    font-size: clamp(64px, 9.4vw, 148px);
+}
+
+.hero-lede {
+    max-width: 34em;
+    margin-top: 28px;
+    font-size: clamp(17px, 1.45vw, 20px);
+    line-height: 1.5;
+    color: var(--ink-2);
+    text-wrap: pretty;
+}
+
+.hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px 20px;
+    margin-top: 36px;
+}
+
+.hero-error {
+    margin-top: 24px;
+    padding: 12px 16px;
+    max-width: 34em;
+    border-left: 2px solid var(--seal);
+    background: var(--seal-wash);
+    border-radius: 0 var(--radius-s) var(--radius-s) 0;
+    color: var(--ink);
+}
+
+.reveal {
+    animation: reveal 0.9s var(--ease) both;
+}
+
+@keyframes reveal {
+    from {
+        opacity: 0;
+        transform: translateY(18px);
+        filter: blur(6px);
+    }
+}
+
+/* ---- the easel: the product drawn in HTML -------------------------------------- */
+
+.easel {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.25fr);
+    gap: 14px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background:
+        radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0) 0 0 / 14px 14px,
+        var(--paper-deep);
+    box-shadow: var(--shadow-3);
+    transform: perspective(1800px) rotateY(-9deg) rotateX(3deg) rotate(1deg);
+    transform-origin: left center;
+    transition: transform 0.9s var(--ease);
+}
+
+.easel:hover {
+    transform: perspective(1800px) rotateY(-3deg) rotateX(1deg) rotate(0deg);
+}
+
+.easel-chat,
+.easel-site {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+    background: var(--surface);
+    overflow: hidden;
+}
+
+.easel-chat {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.easel-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.easel-bar .wordmark {
+    font-size: 18px;
+}
+
+.bubble {
+    max-width: 92%;
+    padding: 9px 12px;
+    border-radius: 14px;
+}
+
+.bubble-you {
+    align-self: flex-end;
+    background: var(--ink);
+    color: var(--paper);
+    border-bottom-right-radius: 4px;
+}
+
+.bubble-them {
+    align-self: flex-start;
+    background: var(--paper-deep);
+    color: var(--ink);
+    border-bottom-left-radius: 4px;
+}
+
+.bubble-typing {
+    padding: 12px 14px;
+    color: var(--seal);
+}
+
+.easel-composer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+    padding: 9px 9px 9px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--ink-3);
+}
+
+.easel-composer i {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--seal);
+}
+
+.site-chrome {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper-deep);
+}
+
+.site-chrome i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--line-strong);
+}
+
+.site-chrome span {
+    margin-left: 8px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ink-3);
+}
+
+/* The sample site keeps its own palette in both themes: it is "someone's website". */
+.site-body {
+    padding: 18px 20px 20px;
+    background: #f4ece0;
+    color: #2a1d14;
+    min-height: 100%;
+}
+
+.site-nav {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 10.5px;
+    color: #7a6455;
+}
+
+.site-nav b {
+    margin-right: auto;
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 400;
+    font-style: italic;
+    color: #2a1d14;
+}
+
+.site-shop {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #2a1d14;
+    color: #f4ece0;
+}
+
+.site-kicker {
+    margin-top: 26px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #b0552f;
+}
+
+.site-title {
+    margin-top: 8px;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3.4vw, 50px);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+}
+
+.site-grid {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr 1fr;
+    gap: 8px;
+    margin-top: 22px;
+}
+
+.pot {
+    aspect-ratio: 3 / 4;
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+}
+
+.pot::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 14%;
+    width: 46%;
+    aspect-ratio: 1 / 1.25;
+    transform: translateX(-50%);
+    border-radius: 44% 44% 38% 38% / 30% 30% 60% 60%;
+    box-shadow: inset -8px -10px 18px rgba(0, 0, 0, 0.18);
+}
+
+.pot-a {
+    background: linear-gradient(160deg, #e3cdb4, #cfae8d);
+}
+.pot-a::after {
+    background: #b0552f;
+}
+.pot-b {
+    background: linear-gradient(160deg, #d8d2c2, #bdb5a0);
+}
+.pot-b::after {
+    background: #3f4a3c;
+    border-radius: 50% 50% 42% 42% / 22% 22% 70% 70%;
+}
+.pot-c {
+    background: linear-gradient(160deg, #e9dcc9, #d4bfa3);
+}
+.pot-c::after {
+    background: #efe6d6;
+    width: 54%;
+    border-radius: 30% 30% 46% 46% / 14% 14% 80% 80%;
+}
+
+@media (max-width: 980px) {
+    .hero {
+        grid-template-columns: 1fr;
+        min-height: 0;
+    }
+    .easel {
+        transform: none;
+    }
+    .easel:hover {
+        transform: none;
+    }
+}
+
+@media (max-width: 560px) {
+    .easel {
+        grid-template-columns: 1fr;
+    }
+    .easel-chat {
+        display: none;
+    }
+}
+
+/* ---- sections ------------------------------------------------------------------ */
+
+.section-head {
+    max-width: 780px;
+}
+
+.section-head h2 {
+    margin-top: 16px;
+    font-size: clamp(44px, 6vw, 88px);
+}
+
+.section-lede {
+    max-width: 36em;
+    margin-top: 24px;
+    font-size: 18px;
+    color: var(--ink-2);
+    text-wrap: pretty;
+}
+
+.steps {
+    padding: var(--space-9) var(--gutter);
+    border-top: 1px solid var(--line);
+}
+
+.steps ol {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin: 64px 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--line-strong);
+}
+
+.steps li {
+    padding: 28px 32px 8px 0;
+}
+
+.steps li + li {
+    padding-left: 32px;
+    border-left: 1px solid var(--line);
+}
+
+.step-n {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 72px;
+    line-height: 1;
+    font-style: italic;
+    color: var(--seal);
+}
+
+.steps h3,
+.rules h3 {
+    margin-top: 20px;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+}
+
+.steps li p,
+.rules li p {
+    margin-top: 8px;
+    color: var(--ink-2);
+    text-wrap: pretty;
+}
+
+.rules {
+    padding: var(--space-9) var(--gutter);
+    background: var(--ink);
+    color: var(--paper);
+    /* Inverted block: re-point the tokens the children use. */
+    --ink-2: color-mix(in srgb, var(--paper) 72%, var(--ink));
+    --ink-3: color-mix(in srgb, var(--paper) 50%, var(--ink));
+    --line: color-mix(in srgb, var(--paper) 14%, transparent);
+}
+
+.rules .display em {
+    color: var(--seal);
+}
+
+.rules ul {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    margin: 64px 0 0;
+    padding: 0;
+    list-style: none;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+}
+
+.rules li {
+    padding: 36px;
+    background: var(--ink);
+    transition: background-color 0.4s var(--ease);
+}
+
+.rules li:hover {
+    background: color-mix(in srgb, var(--paper) 5%, var(--ink));
+}
+
+.rules li svg {
+    width: 26px;
+    height: 26px;
+    color: var(--seal);
+    stroke-width: 1.5;
+}
+
+.closing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 36px;
+    padding: var(--space-9) var(--gutter);
+    text-align: center;
+}
+
+.closing h2 {
+    font-size: clamp(56px, 10vw, 160px);
+}
+
+.landing-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 28px var(--gutter);
+    border-top: 1px solid var(--line);
+}
+
+@media (max-width: 860px) {
+    .steps ol,
+    .rules ul {
+        grid-template-columns: 1fr;
+    }
+    .steps li,
+    .steps li + li {
+        padding: 28px 0 20px;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+    }
+    .steps li:first-child {
+        border-top: 0;
+    }
+}

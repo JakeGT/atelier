@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+    AgentMessage,
     AgentSession,
     AuditEntry,
     ContentDocument,
@@ -20,6 +21,7 @@ import type {
     DeploymentStore,
     LoginSessionStore,
     MembershipStore,
+    MessageStore,
     OrganizationStore,
     ProjectStore,
     ReleaseStore,
@@ -280,6 +282,7 @@ export class PostgresStore implements Store {
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;
+    messages: MessageStore;
     releases: ReleaseStore;
     deployments: DeploymentStore;
     audit: AuditStore;
@@ -471,6 +474,45 @@ export class PostgresStore implements Store {
                             ended_at = CASE WHEN ${status} IN ('ended', 'failed') THEN now() ELSE ended_at END
                         WHERE id = ${id} RETURNING ${tx.unsafe(SESSION_COLS)}`;
                     return rowToAgentSession(firstRow(rows));
+                }),
+        };
+
+        this.messages = {
+            add: async (input) => {
+                await this.withTenant(
+                    input.tenantId,
+                    (tx) => tx`
+                        INSERT INTO agent_messages (id, project_id, tenant_id, session_id, role, body, tools, run_id, author_id)
+                        VALUES (${randomUUID()}, ${input.projectId}, ${input.tenantId}, ${input.sessionId}, ${input.role}, ${input.text},
+                                ${input.tools ? this.sql.json(input.tools) : null}, ${input.runId}, ${input.authorId})
+                        ON CONFLICT DO NOTHING`,
+                );
+            },
+            list: async (tenantId, projectId, limit = 200) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<
+                        {
+                            id: string;
+                            project_id: string;
+                            role: string;
+                            body: string;
+                            tools: AgentMessage["tools"];
+                            run_id: string | null;
+                            created_at: Ts;
+                        }[]
+                    >`
+                        SELECT id, project_id, role, body, tools, run_id, created_at FROM (
+                            SELECT * FROM agent_messages WHERE project_id = ${projectId} ORDER BY seq DESC LIMIT ${limit}
+                        ) recent ORDER BY seq`;
+                    return rows.map((r) => ({
+                        id: r.id,
+                        projectId: r.project_id,
+                        role: r.role as AgentMessage["role"],
+                        text: r.body,
+                        tools: r.tools,
+                        runId: r.run_id,
+                        createdAt: isoNow(r.created_at),
+                    }));
                 }),
         };
 

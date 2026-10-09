@@ -19,7 +19,7 @@ BEGIN
     -- Tenant-scoped tables (RLS applies to the runtime role) and identity tables.
     GRANT SELECT, INSERT, UPDATE, DELETE ON
         organizations, memberships, projects, content_documents, content_revisions,
-        media_assets, releases, release_documents, deployments, agent_sessions,
+        media_assets, releases, release_documents, deployments, agent_sessions, agent_messages,
         users, sessions
         TO atelier_runtime;
     GRANT SELECT, INSERT ON usage_events TO atelier_runtime;

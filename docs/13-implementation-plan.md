@@ -106,6 +106,26 @@ verified end to end in Docker:
 - **Design ADRs for later phases:** project code storage (0009), build isolation
   (0010) and the BYOK model proxy (0011).
 
+### Interface redesign (branch `ui-redesign`, 2026-10-09)
+
+The web app was rebuilt as a designed product rather than a scaffold:
+
+- **Design system:** `apps/web/src/styles/tokens.css`. Warm paper, ink and one
+  vermilion accent; Instrument Serif for display, Geist for the interface, Geist
+  Mono for metadata; light ("paper") and dark ("night") themes. Fonts and icons
+  are bundled, so the app shell's CSP allows no third-party hosts.
+- **Screens:** a public landing page; the studio (a prompt-first composer and a
+  shelf of projects with generated covers); the editor (conversation, a
+  device-framed preview on a workbench, and versions / releases / content).
+  Below 960 px the editor shows one pane at a time.
+- **Server support:** the conversation is stored per project (`agent_messages`,
+  migration `0006`) and settled server-side, so it follows the project across
+  browsers; `GET .../overview`; name-only project creation; an SPA fallback
+  with a CSP on every HTML response; `AUTH_MODE=dev` (localhost only) for
+  working on the UI without an identity provider.
+- **Content panel:** documents are edited as labelled fields, not raw JSON. This
+  is the seed of the P5 direct content editor.
+
 ---
 
 ## P2 — Multi-tenant + multi-project

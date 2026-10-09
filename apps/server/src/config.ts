@@ -11,7 +11,9 @@ const envSchema = z.object({
     DATABASE_URL_FILE: z.string().optional(),
     ATELIER_SECRETS_KEY: z.string().optional(),
     ATELIER_SECRETS_KEY_FILE: z.string().optional(),
-    AUTH_MODE: z.enum(["oidc", "off"]).default("oidc"),
+    // "dev" signs every visitor in as one local admin, with no identity provider. It
+    // is refused unless the origin is plain-HTTP localhost (see loadConfig).
+    AUTH_MODE: z.enum(["oidc", "off", "dev"]).default("oidc"),
     OIDC_ISSUER: z.string().optional(),
     OIDC_CLIENT_ID: z.string().optional(),
     OIDC_CLIENT_SECRET: z.string().optional(),
@@ -67,6 +69,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     if (e.RUNTIME_MODE === "container") {
         if (!secretsKey) throw new ConfigError("RUNTIME_MODE=container requires ATELIER_SECRETS_KEY(_FILE)");
         if (!provisionerSecret) throw new ConfigError("RUNTIME_MODE=container requires PROVISIONER_SECRET(_FILE)");
+    }
+    if (e.AUTH_MODE === "dev") {
+        const host = new URL(e.PUBLIC_ORIGIN ?? `http://localhost:${e.PORT}`);
+        const local = host.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(host.hostname);
+        if (!local || bool(e.COOKIE_SECURE, true)) {
+            throw new ConfigError("AUTH_MODE=dev is only allowed on http://localhost with COOKIE_SECURE=false");
+        }
     }
     const oidcClientSecret = e.OIDC_CLIENT_SECRET ?? (e.OIDC_CLIENT_SECRET_FILE ? readSecret(e.OIDC_CLIENT_SECRET_FILE) : undefined);
 

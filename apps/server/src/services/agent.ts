@@ -136,7 +136,8 @@ export function parseRunOutput(stdout: string): AgentResult {
         } catch {
             continue;
         }
-        if (evt.type === "text" && evt.part?.text) text += evt.part.text;
+        // Each text event is a separate passage (before/after tool calls): keep them apart.
+        if (evt.type === "text" && evt.part?.text) text += (text ? "\n\n" : "") + evt.part.text.trim();
         else if (evt.type === "tool_use") {
             toolEvents.push({ name: evt.part?.tool ?? "unknown", state: evt.part?.state?.status ?? "unknown" });
         } else if (evt.type === "step_finish" && evt.part?.tokens) {

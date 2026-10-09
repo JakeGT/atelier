@@ -171,6 +171,17 @@ test("tenant B cannot read tenant A's projects, content, releases, sessions or m
     assert.deepEqual(await store.content.revisions(b.tenantId, a.doc.id), []);
     assert.deepEqual(await store.releases.listByProject(b.tenantId, a.project.id), []);
     assert.equal(await store.agentSessions.get(b.tenantId, session.id), null);
+    await store.messages.add({
+        tenantId: a.tenantId,
+        projectId: a.project.id,
+        sessionId: null,
+        role: "user",
+        text: "hi",
+        runId: null,
+        authorId: null,
+    });
+    assert.equal((await store.messages.list(a.tenantId, a.project.id)).length, 1);
+    assert.deepEqual(await store.messages.list(b.tenantId, a.project.id), []);
     assert.equal(await store.memberships.roleOf(b.tenantId, userA.id), null);
     assert.equal(await store.memberships.roleOf(a.tenantId, userA.id), "owner");
 });
@@ -187,6 +198,7 @@ test("with no tenant set, every tenant-scoped table reads as empty (fail closed)
         "release_documents",
         "deployments",
         "agent_sessions",
+        "agent_messages",
         "usage_events",
     ]) {
         const [r] = await raw<{ n: number }[]>`SELECT count(*)::int AS n FROM ${raw(table)}`;
@@ -323,4 +335,23 @@ test("releases pin content and go live atomically (one live release per project)
         store.withTenant(a.tenantId, (tx) => tx`UPDATE releases SET state = 'live' WHERE id = ${r1.id}`),
         /releases_one_live_per_project/,
     );
+});
+
+test("a run gets exactly one request and one reply in the conversation", { skip }, async () => {
+    const a = await seedTenant("tenant-j");
+    const runId = randomUUID();
+    const base = { tenantId: a.tenantId, projectId: a.project.id, sessionId: null, runId, authorId: null };
+    await store.messages.add({ ...base, role: "user", text: "make it blue" });
+    await store.messages.add({ ...base, role: "assistant", text: "done", tools: [{ name: "write", state: "completed" }] });
+    await store.messages.add({ ...base, role: "assistant", text: "done again" });
+    await store.messages.add({ ...base, role: "error", text: "late error" });
+    const thread = await store.messages.list(a.tenantId, a.project.id);
+    assert.deepEqual(
+        thread.map((m) => [m.role, m.text]),
+        [
+            ["user", "make it blue"],
+            ["assistant", "done"],
+        ],
+    );
+    assert.deepEqual(thread[1]?.tools, [{ name: "write", state: "completed" }]);
 });

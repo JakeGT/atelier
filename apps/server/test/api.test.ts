@@ -270,3 +270,98 @@ test("a second run while one is in progress is refused with 409", async () => {
     assert.equal((await t.app.request(url, { method: "POST", headers: write, body: '{"prompt":"two"}' })).status, 409);
     release();
 });
+
+test("the conversation is stored with the project and settles runs nobody polled", async () => {
+    const t = await makeApp();
+    const { read, write } = await signIn(t);
+    const project = await createProject(t, write);
+    const session = (
+        await json<{ session: AgentSession }>(
+            await t.app.request(`/api/v1/projects/${project.id}/sessions`, { method: "POST", headers: write }),
+        )
+    ).session;
+    const thread = async () =>
+        json<{ messages: { role: string; text: string; runId: string | null }[]; activeRun: RunState | null }>(
+            await t.app.request(`/api/v1/projects/${project.id}/messages`, { headers: read }),
+        );
+    assert.deepEqual((await thread()).messages, []);
+
+    // The agent blocks until released, so the test can look at the thread mid-run.
+    let release: (() => void) | null = null;
+    const real = t.agent.run;
+    t.agent.run = async (input) => {
+        await new Promise<void>((r) => {
+            release = r;
+        });
+        return real(input);
+    };
+    const letItFinish = async () => {
+        while (!release) await new Promise((r) => setTimeout(r, 5));
+        (release as () => void)();
+    };
+    const url = `/api/v1/projects/${project.id}/sessions/${session.id}/messages`;
+    await t.app.request(url, { method: "POST", headers: write, body: '{"prompt":"make it blue"}' });
+
+    // While it runs: the request is in the thread and the run is reported as active.
+    const during = await thread();
+    assert.deepEqual(
+        during.messages.map((m) => [m.role, m.text]),
+        [["user", "make it blue"]],
+    );
+    assert.equal(during.activeRun?.status, "running");
+
+    // Nobody polls /runs/:id (the tab was closed). Opening the thread later still shows the reply, once.
+    await letItFinish();
+    for (let i = 0; i < 200 && (await thread()).activeRun; i++) await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < 2; i++) {
+        const after = await thread();
+        assert.equal(after.activeRun, null);
+        assert.deepEqual(
+            after.messages.map((m) => [m.role, m.text]),
+            [
+                ["user", "make it blue"],
+                ["assistant", "echo:make it blue"],
+            ],
+        );
+    }
+
+    // Another tenant sees nothing.
+    const other = await signIn(t);
+    assert.equal((await t.app.request(`/api/v1/projects/${project.id}/messages`, { headers: other.read })).status, 404);
+});
+
+test("a project needs only a name; slugs are derived and kept unique", async () => {
+    const t = await makeApp();
+    const { write } = await signIn(t);
+    const make = async (name: string) =>
+        (
+            await json<{ project: Project }>(
+                await t.app.request("/api/v1/projects", { method: "POST", headers: write, body: JSON.stringify({ name }) }),
+            )
+        ).project.slug;
+    assert.equal(await make("Okoro Ceramics"), "okoro-ceramics");
+    assert.equal(await make("Okoro Ceramics"), "okoro-ceramics-2");
+    assert.equal(await make("Café & Bar!"), "cafe-bar");
+    assert.equal(await make("???"), "site");
+    assert.equal((await t.app.request("/api/v1/projects", { method: "POST", headers: write, body: "{}" })).status, 400);
+});
+
+test("the overview reports unpublished changes", async () => {
+    const t = await makeApp();
+    const { read, write } = await signIn(t);
+    const project = await createProject(t, write);
+    const overview = async () =>
+        json<{ hasChanges: boolean; changedDocuments: number; liveRelease: Release | null }>(
+            await t.app.request(`/api/v1/projects/${project.id}/overview`, { headers: read }),
+        );
+    assert.equal((await overview()).hasChanges, false);
+    await t.app.request(`/api/v1/projects/${project.id}/content/page/home`, { method: "PUT", headers: write, body: '{"title":"Hi"}' });
+    assert.deepEqual([(await overview()).hasChanges, (await overview()).changedDocuments], [true, 1]);
+    const r = (
+        await json<{ release: Release }>(await t.app.request(`/api/v1/projects/${project.id}/releases`, { method: "POST", headers: write }))
+    ).release;
+    await t.app.request(`/api/v1/projects/${project.id}/releases/${r.number}/publish`, { method: "POST", headers: write });
+    const after = await overview();
+    assert.equal(after.hasChanges, false);
+    assert.equal(after.liveRelease?.number, 1);
+});
