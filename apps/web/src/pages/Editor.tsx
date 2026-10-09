@@ -226,7 +226,7 @@ export function Editor({ project, session, canPublish, theme, onToggleTheme }: E
         <div className={`editor pane-${pane} ${sideOpen ? "side-open" : ""}`}>
             <header className="editor-bar">
                 <div className="editor-bar-left">
-                    <button type="button" className="btn btn-ghost btn-icon" onClick={() => navigate("/")} title="All websites">
+                    <button type="button" className="btn btn-ghost btn-icon" onClick={() => navigate("/studio")} title="All websites">
                         <ArrowLeft />
                     </button>
                     <h1 className="display">{project.name}</h1>

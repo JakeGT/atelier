@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-// ---- routing: a tiny History-API router ("/" and "/p/:slug") ----------------------
+// ---- routing: a tiny History-API router ("/", "/login", "/studio", "/p/:slug") ------
 
 const listeners = new Set<() => void>();
 const notify = () => {
@@ -9,7 +9,7 @@ const notify = () => {
 window.addEventListener("popstate", notify);
 
 export function navigate(path: string, opts: { replace?: boolean } = {}): void {
-    if (path === window.location.pathname) return;
+    if (path === window.location.pathname + window.location.search) return;
     if (opts.replace) window.history.replaceState(null, "", path);
     else window.history.pushState(null, "", path);
     window.scrollTo(0, 0);

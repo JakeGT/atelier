@@ -20,8 +20,9 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
     const notConfigured = () => new Response("OIDC is not configured.", { status: 503 });
 
     const safeNext = (requested: string | undefined): string => {
-        const next = requested ?? "/";
-        return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+        // After signing in, people go to their studio unless they were heading somewhere.
+        const next = requested ?? "/studio";
+        return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/studio";
     };
 
     app.get("/auth/login", async (c) => {
@@ -57,18 +58,18 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
         const flowId = readCookie(c, "oidc", secure);
         const flow = flowId ? sessions.takeFlow(flowId) : undefined;
         clearCookie(c, "oidc", secure);
-        if (!flow) return c.redirect("/?auth_error=expired");
+        if (!flow) return c.redirect("/login?auth_error=expired");
         try {
             const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier, flow.maxAge);
             const isAdmin = claims.groups.includes(oidc.adminGroup);
 
             // Sign-up is invite-gated: platform admins, or people who already have
             // an account. Org invitations (P2) will add a third way in.
-            if (!claims.email) return c.redirect("/?auth_error=failed");
-            if (oidc.trustEmail === false && !claims.verified) return c.redirect("/?auth_error=unverified");
+            if (!claims.email) return c.redirect("/login?auth_error=failed");
+            if (oidc.trustEmail === false && !claims.verified) return c.redirect("/login?auth_error=unverified");
             if (config.signupMode !== "open" && !isAdmin) {
                 const existing = await store.users.findByIdentity(claims.issuer, claims.subject);
-                if (!existing) return c.redirect("/?auth_error=denied");
+                if (!existing) return c.redirect("/login?auth_error=denied");
             }
 
             const user = await store.users.upsertIdentity({
@@ -96,7 +97,7 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             return c.redirect(flow.next);
         } catch (err) {
             console.error(`OIDC callback failed: ${(err as Error).message}`);
-            return c.redirect("/?auth_error=failed");
+            return c.redirect("/login?auth_error=failed");
         }
     });
 

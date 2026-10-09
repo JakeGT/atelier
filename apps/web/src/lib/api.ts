@@ -151,7 +151,8 @@ const put = <T>(url: string, body?: unknown) => send("PUT", url, body).then((r) 
 
 const p = (projectId: string) => `/api/v1/projects/${projectId}`;
 
-export function signIn(next = window.location.pathname): void {
+// Hands off to the identity provider (a full page navigation, not a client route).
+export function startSignIn(next = "/studio"): void {
     window.location.assign(`/auth/login?next=${encodeURIComponent(next)}`);
 }
 

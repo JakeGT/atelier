@@ -1,15 +1,7 @@
 import { ArrowRight, ArrowUpRight, History, Lock, MousePointerClick, Stamp } from "lucide-react";
-import type { PublicConfig } from "../lib/api";
-import { signIn } from "../lib/api";
-import type { Theme } from "../lib/hooks";
-import { Dots, ThemeToggle, Wordmark } from "../ui/kit";
-
-const AUTH_ERRORS: Record<string, string> = {
-    denied: "Atelier is invite-only, and this account hasn't been invited yet.",
-    expired: "That sign-in took too long. Please try again.",
-    unverified: "Your identity provider didn't confirm your e-mail address.",
-    failed: "Sign-in didn't work. Please try again.",
-};
+import type { PublicConfig, Session } from "../lib/api";
+import { navigate, type Theme } from "../lib/hooks";
+import { Dots, ThemeToggle, UserMenu, Wordmark } from "../ui/kit";
 
 const STEPS = [
     {
@@ -52,10 +44,18 @@ const RULES = [
     },
 ];
 
-export function Landing({ config, theme, onToggleTheme }: { config: PublicConfig | null; theme: Theme; onToggleTheme: () => void }) {
-    const authError = new URLSearchParams(window.location.search).get("auth_error");
-    const canSignIn = config === null || config.authMode === "dev" || config.oidcConfigured;
-    const enter = () => signIn("/");
+interface LandingProps {
+    // null when signed out, undefined while that is still being worked out. The
+    // page is the same either way; only the way in changes.
+    session: Session | null | undefined;
+    config: PublicConfig | null;
+    theme: Theme;
+    onToggleTheme: () => void;
+}
+
+export function Landing({ session, config, theme, onToggleTheme }: LandingProps) {
+    // Until we know, head for the studio: it sends signed-out visitors to the login page.
+    const enter = () => navigate(session === null ? "/login" : "/studio");
 
     return (
         <div className="landing">
@@ -69,9 +69,18 @@ export function Landing({ config, theme, onToggleTheme }: { config: PublicConfig
                         House rules
                     </a>
                     <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-                    <button type="button" className="btn btn-primary" onClick={enter} disabled={!canSignIn}>
-                        Sign in
-                    </button>
+                    {session ? (
+                        <>
+                            <button type="button" className="btn btn-primary" onClick={enter}>
+                                Open studio <ArrowRight />
+                            </button>
+                            <UserMenu session={session} />
+                        </>
+                    ) : session === null ? (
+                        <button type="button" className="btn btn-primary" onClick={enter}>
+                            Sign in
+                        </button>
+                    ) : null}
                 </nav>
             </header>
 
@@ -89,20 +98,14 @@ export function Landing({ config, theme, onToggleTheme }: { config: PublicConfig
                         Atelier is a private studio where you say what your website should be and an AI assistant builds it in front of you.
                         You review every change, and nothing goes out until you say so.
                     </p>
-                    {authError && (
-                        <p className="hero-error reveal" role="alert">
-                            {AUTH_ERRORS[authError] ?? AUTH_ERRORS.failed}
-                            {authError === "denied" && config?.inviteHint ? ` ${config.inviteHint}` : ""}
-                        </p>
-                    )}
                     <div className="hero-actions reveal" style={{ animationDelay: "220ms" }}>
-                        <button type="button" className="btn btn-seal btn-lg" onClick={enter} disabled={!canSignIn}>
-                            Enter the studio <ArrowRight />
+                        <button type="button" className="btn btn-seal btn-lg" onClick={enter}>
+                            {session ? "Open your studio" : "Enter the studio"} <ArrowRight />
                         </button>
                         <span className="mono muted">
-                            {canSignIn
-                                ? `Invite-only · sign in with ${config?.providerName ?? "your account"}`
-                                : "Sign-in is not configured yet"}
+                            {session
+                                ? `Signed in as ${session.email}`
+                                : `Invite-only · sign in with ${config?.providerName ?? "your account"}`}
                         </span>
                     </div>
                 </div>
@@ -156,8 +159,8 @@ export function Landing({ config, theme, onToggleTheme }: { config: PublicConfig
                 <h2 className="display">
                     The studio is <em>open.</em>
                 </h2>
-                <button type="button" className="btn btn-primary btn-lg" onClick={enter} disabled={!canSignIn}>
-                    Start a website <ArrowUpRight />
+                <button type="button" className="btn btn-primary btn-lg" onClick={enter}>
+                    {session ? "Back to your websites" : "Start a website"} <ArrowUpRight />
                 </button>
             </section>
 

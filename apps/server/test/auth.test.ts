@@ -93,7 +93,7 @@ test("a callback without a login flow goes home with an error, not into a redire
     const t = await makeApp({ AUTH_MODE: "oidc" }, stubOidc());
     const res = await t.app.request("/auth/callback?code=abc&state=nope");
     assert.equal(res.status, 302);
-    assert.equal(res.headers.get("location"), "/?auth_error=expired");
+    assert.equal(res.headers.get("location"), "/login?auth_error=expired");
 });
 
 test("an uninvited, non-admin account is refused", async () => {
@@ -102,8 +102,16 @@ test("an uninvited, non-admin account is refused", async () => {
     const login = await t.app.request("/auth/login");
     cookies.absorb(login);
     const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
-    assert.equal(res.headers.get("location"), "/?auth_error=denied");
+    assert.equal(res.headers.get("location"), "/login?auth_error=denied");
     assert.equal(await t.store.users.count(), 0);
+});
+
+test("signing in with no destination lands in the studio", async () => {
+    const t = await makeApp({ AUTH_MODE: "oidc" }, stubOidc());
+    const cookies = jar();
+    cookies.absorb(await t.app.request("/auth/login"));
+    const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
+    assert.equal(res.headers.get("location"), "/studio");
 });
 
 test("the post-login redirect cannot leave the site", async () => {
@@ -112,6 +120,6 @@ test("the post-login redirect cannot leave the site", async () => {
         const cookies = jar();
         cookies.absorb(await t.app.request(`/auth/login?next=${encodeURIComponent(next)}`));
         const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
-        assert.equal(res.headers.get("location"), "/", next);
+        assert.equal(res.headers.get("location"), "/studio", next);
     }
 });
