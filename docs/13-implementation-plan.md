@@ -15,10 +15,11 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | pending |
 | P5 | Direct content editor & hardening | First-party CMS, gVisor, retention, alerting, VPS go-live gates | pending |
 
-**Current status (2026-10-09):** P0 and P1 are implemented, tested (18 test
-cases green), and deployed to `atelier.jaketalling.com` (image `atelier-server:p1.0`,
-migration `0002_tenancy.sql` applied, OIDC via Authentik). Each phase lists
-epics (E-x.y), tasks, and acceptance criteria; P2 onwards remain planned.
+**Current status (2026-10-09):** P0 and P1 are implemented and deployed to
+`atelier.jaketalling.com`. P1 was then hardened on the `p1-hardening` branch
+(see "P1 hardening" below and ADRs 0006–0011). Work happens on one branch per
+phase, reviewed as a PR before merging to `main`. Each phase lists epics
+(E-x.y), tasks, and acceptance criteria. P2 onwards remain planned.
 
 ---
 
@@ -72,6 +73,39 @@ content + release), so it is done first and narrow.
 - The agent cannot publish, read secrets, or reach the host/other paths.
 - Undo/redo restores prior versions.
 
+### P1 hardening (branch `p1-hardening`, 2026-10-09)
+
+An architecture review of the P1 slice found that it met its acceptance
+criteria only on paper. Fixes, all tested (unit and Postgres suites) and
+verified end to end in Docker:
+
+- **Agent containment (ADR-0006):** the agent had been running inside the server
+  container with access to the server's secrets. It now has a per-project
+  runtime container and volume, created by a socket-holding provisioner. The
+  workspace daemon does all git and file work. Agent tokens are per-run (1 h)
+  and never written into the repo.
+- **Runs are background jobs:** start returns 202, and the client polls. OpenCode
+  is spawned with stdin closed, which fixes the hang where `opencode run` waited
+  for EOF on piped stdin.
+- **Release model (ADR-0007):**
+  - releases pin a manifest, and `published` changes only on go-live;
+  - there is no per-document publish;
+  - content revisions are kept and restorable;
+  - a code restore is a new commit;
+  - one live release per project is enforced in the database.
+- **Database (ADR-0008):** a runtime role that owns nothing and serves requests,
+  separate from the owner that runs migrations, plus RLS on `memberships`, an
+  append-only audit log and login sessions stored in the database. Migration
+  `0004` repairs content that was stored double-encoded (a jsonb string instead
+  of an object).
+- **Authorization:** the permission table is enforced on every route, with a CI
+  coverage test. Publish and rollback need a recent sign-in (step-up), audit
+  entries are written, and the web client now sends the CSRF token (it never
+  did, so every write from the browser was being rejected).
+- **Preview:** signed, sandboxed (opaque-origin) preview URLs.
+- **Design ADRs for later phases:** project code storage (0009), build isolation
+  (0010) and the BYOK model proxy (0011).
+
 ---
 
 ## P2 — Multi-tenant + multi-project
@@ -89,6 +123,10 @@ Goal: the hard isolation boundary and the tenant/project management surface.
   project; per-tenant model override.
 - E2.5 Quotas & metering v1: `usage_events`, per-project/tenant token + build
   ceilings, usage view.
+- E2.6 Sandbox hardening (ADR-0003 stage P2, moved here from P5): spike gVisor
+  (`runsc`) with OpenCode + git (risk R4), then enable it via the provisioner's
+  `RUNTIME_OCI_RUNTIME`; an egress allow-list proxy for workspaces; idle
+  workspace reaping; a sandbox-escape test suite.
 
 **Acceptance criteria**
 - An automated test proves tenant A cannot read tenant B's projects/content/
@@ -150,7 +188,7 @@ go-live gates.
 - E5.0 First-party direct content editor: a lightweight CMS UI so users edit
   content directly (no agent), reusing the embedded content store's
   draft/publish + release model (ADR-0002 amendment).
-- E5.1 gVisor (`runsc`) for agent workspaces; sandbox-escape test suite.
+- E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
 - E5.3 Alerting (build/publish failure, stall, spend over ceiling).
 - E5.4 VPS migration gates: off-host encrypted backups + restore drill, external
@@ -158,7 +196,8 @@ go-live gates.
 
 **Acceptance criteria**
 - A documented restore drill restores a tenant from backup within RTO.
-- An isolation/escape test passes under gVisor.
+- Workspace volumes are covered by off-host backups (ADR-0009) and a restore
+  drill.
 - A non-technical user edits content directly in the CMS without an agent.
 
 ---
@@ -201,9 +240,13 @@ deferred.
 
 ## Initial acceptance criteria (whole system)
 
-1. New tenant → invite member → create project, entirely via UI, no operator.
+1. Once a person is admitted at the identity provider (the platform's
+   Authentik allowlist, an operator step by design), they can create a tenant,
+   invite members and create projects entirely in the UI, with no further
+   operator steps.
 2. Non-technical owner performs edit → preview → publish unaided.
 3. Cross-tenant leak impossible by construction (isolation test green).
 4. A compromised agent is contained to its workspace.
-5. Usage metered per project and surfaced as an invoice.
+5. Usage is metered per project and visible to the tenant. There's no
+   invoicing: billing is BYOK (docs/12 §4).
 6. Publish is human-only, audited, and rollback-able.

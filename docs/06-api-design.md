@@ -1,15 +1,29 @@
 # 06 — API design
 
-> **Implementation status (P1, deployed):** the tenant is derived from the
-> session (the user's first org), not a URL segment — routes are flat
-> `/api/v1/projects/...` (no `/orgs/{org}/` prefix). Implemented: `GET /orgs`;
-> `GET|POST /projects`; `GET /projects/:id/content`, `PUT .../content/:kind/:slug`,
-> `POST .../content/:kind/:slug/publish`, `GET .../snapshot`; `GET|POST
-> /projects/:id/sessions`; `POST .../sessions/:sid/messages`; `GET
-> .../sessions/:sid/checkpoints`, `POST .../checkpoints/:sha/reset`; `GET
-> .../preview/*`; `GET|POST /projects/:id/releases`,
-> `POST .../releases/:n/publish|rollback`. Not yet: membership invite/roles,
-> domains, usage, operator/admin routes, reauth step-up, media upload.
+> **Implementation status (P1 + hardening):** P1 routes are flat
+> (`/api/v1/projects/...`). The tenant comes from the session (the user's first
+> org). P2 adds `/orgs/{org}/...`, where **the URL selects the org and the
+> membership check authorizes it** (§1's "never from a URL segment" means the
+> URL alone never grants access). Every route is registered with a permission
+> from the shared table (`requirePermission`), and `test/permissions.test.ts`
+> fails CI if one isn't. Mutations need the CSRF token. Publish and rollback
+> also need a sign-in within `STEP_UP_MINUTES` (`401 reauth_required`).
+> Implemented:
+> - `GET /orgs`, `GET|POST /projects`
+> - content: `GET .../content`, `PUT .../content/:kind/:slug`,
+>   `GET .../content/:kind/:slug/revisions`,
+>   `POST .../revisions/:rev/restore`, `GET .../snapshot`
+> - sessions and runs: `GET|POST .../sessions`,
+>   `POST .../sessions/:sid/messages` (202, a background run),
+>   `GET .../runs/:runId`
+> - versions: `GET .../checkpoints`, `POST .../checkpoints/:sha/restore`
+> - preview: `GET .../preview-url` → `/preview/<signed>/…`
+> - releases: `GET|POST .../releases`, `GET .../releases/:n/manifest`,
+>   `POST .../releases/:n/publish|rollback`
+> - audit: `GET /audit` (org admins), `GET /admin/audit` (platform-admin)
+>
+> There is **no per-document publish** (ADR-0007). Not yet built: membership
+> invite/roles, domains, usage, media upload.
 
 Atelier's control plane exposes one HTTP API (Hono) consumed by three clients:
 the **web UI** (browser), the **agent runtime** (internal, secret-authenticated),

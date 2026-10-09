@@ -1,17 +1,22 @@
 # 08 — AI runtime (agent orchestration & sandboxing)
 
-> **Implementation status (P1, deployed):** the agent is driven via
-> `opencode run --format json --dir <workspace> --auto` (a one-shot subprocess
-> returning NDJSON — completed text + tool events, **no token streaming**), not
-> `opencode serve` + the SDK (streaming is a P1.6/P2 enhancement). The workspace
-> is a **local git directory** on the host tmpfs inside the server container
-> (hardened: `read_only`, `cap_drop: ALL`, `no-new-privileges`), not a separate
-> sandbox container — the gVisor/microVM stage is P5. Preview is a static file
-> server (`GET /projects/:id/preview/*`), not Vite. The content MCP server
-> (`apps/server/src/mcp/content.ts`, `@modelcontextprotocol/sdk`, stdio) exposes
-> `content_list`/`content_get`/`content_upsert_draft`/`content_publish`.
-> Checkpoint/undo/redo is git commit/reset via `WorkspaceService`; each
-> workspace gets an `opencode.json` declaring the content MCP on provision.
+> **Implementation status (P1 + hardening):** see **ADR-0006**. Each project
+> has its own runtime container, created on demand by the provisioner from a
+> fixed, hardened spec (`node` user, read-only rootfs, `cap_drop: ALL`,
+> `no-new-privileges`, limits, tmpfs). Its working tree is a per-project volume.
+> It sits on the internal `atelier-runtime` network (to reach the control plane)
+> and `atelier-egress` (the model provider), and holds no Atelier secrets.
+> - **Runs:** the in-container daemon runs `opencode run --format json --auto`
+>   with stdin closed and a 15-minute kill timeout, as a background job (the
+>   client polls). It commits each completed run, and runs one job at a time.
+> - **Content MCP:** `content_list`/`content_get`/`content_upsert_draft`, calling
+>   the API with a per-run token. There is **no publish**.
+> - **Undo:** restoring a version adds a new commit, so the history only grows.
+> - **Preview:** static files from the workspace via a signed, sandboxed URL. It
+>   is not Vite.
+> - **gVisor:** `RUNTIME_OCI_RUNTIME=runsc` is supported by the provisioner.
+>   Enabling it is the **P2** spike (the stages table below stands, and docs/13
+>   now agrees).
 
 The AI assistant (OpenCode) is the core value of Atelier. It runs **untrusted**
 in two senses: the model's output is not trusted, and the code it edits is user

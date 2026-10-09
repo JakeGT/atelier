@@ -107,14 +107,28 @@ for what we are building toward. The architecture and data-model documents
 
 ## Status
 
-**P0 and P1 are implemented and deployed** (2026-10-09). The foundations and the
-single-tenant vertical slice are live at `atelier.jaketalling.com` behind
-Authentik: sign-in → first-org bootstrap → create project → chat with the AI
-agent (OpenCode, in a git-backed workspace) → preview → version timeline
-(checkpoint/restore) → create/publish/rollback a release. See
-[`13-implementation-plan.md`](docs/13-implementation-plan.md) for per-epic detail
-and what remains.
+**P0 and P1 are implemented and deployed** at `atelier.jaketalling.com` behind
+Authentik. **P1 was hardened on 2026-10-09** (branch `p1-hardening`; ADRs
+0006–0011):
+- The agent runs in a per-project sandbox container with no secrets.
+- Releases pin their content.
+- The database uses a separate, non-owner runtime role.
+- Every route is permission-checked.
+- Previews are sandboxed.
 
-P2–P5 (multi-tenant hardening, hosting/domains, BYOK providers + templates +
-operator console, direct content editor + sandbox hardening) are next, per the
-phased roadmap.
+The working loop is sign-in → create project → chat with the agent → preview →
+versions (restore) → publish / roll back.
+
+See [`HANDOFF.md`](HANDOFF.md) for the current operational state, and
+[`13-implementation-plan.md`](docs/13-implementation-plan.md) for what's next
+(P2: multi-tenant + sandbox hardening).
+
+### Development
+
+```sh
+pnpm install
+pnpm check                      # lint + typecheck + tests (Postgres suite skipped)
+docker run -d --rm --name atelier-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:16-alpine
+TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # + RLS/role suite
+pnpm --filter @atelier/server dev   # in-memory store, RUNTIME_MODE=local (no sandbox; dev only)
+```

@@ -4,13 +4,16 @@
 
 | # | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- | --- |
-| R1 | RLS tenancy leak (a table missing `tenant_id`/policy) | Med | High | CI check: every tenant-scoped table has the column + policy; isolation test suite |
-| R2 | Agent sandbox escape (kernel CVE in P1 hardened Docker) | Low | High | P2 gVisor; no Docker socket in agent; private networks; escape tests |
+| R1 | RLS tenancy leak (a table missing `tenant_id`/policy) | Med | High | Postgres suite in CI asserts every `tenant_id` table forces RLS with a policy, plus cross-tenant read/write tests; non-owner runtime role (ADR-0008) |
+| R2 | Agent sandbox escape (kernel CVE; P1 is hardened Docker) | Low | High | Per-project container with no secrets/socket (ADR-0006); P2 gVisor (E2.6); escape tests |
 | R3 | Prompt injection from user content steering the agent | Med | Med | User text is data, never instructions; reviewer + human gates |
 | R4 | gVisor incompatibility with OpenCode/Vite toolchain | Med | Med | Validate in a P2 spike before committing |
 | R5 | Cloudflare Pages API rate limits at scale | Low–Med | Med | Deploy-target abstraction + self-hosted fallback documented |
 | R6 | Reinventing CMS features badly (draft/publish/media) | Med | Med | Keep surface small; clean adapter boundary; Payload as fallback |
 | R7 | Single shared Postgres noisy-neighbor (one hot tenant) | Low | Low–Med | Per-tenant quotas; migration path to schema/DB-per-tenant |
+| R8 | Agent exfiltrates data or abuses the internet (egress is open in P1) | Med | Med | The workspace holds only its own project's files and a 1 h draft-only token; egress allow-list proxy (E2.6) then model proxy (ADR-0011) |
+| R9 | Loss of project code (workspace volumes not in the Postgres backup) | Low | High | ADR-0009: volume backup is a VPS go-live gate; P3 remote mirror |
+| R10 | Provisioner compromise (holds the Docker socket = host root) | Low | High | Private network reachable only from the control plane, shared secret, fixed container spec, UUID-only input, refuses unmanaged containers |
 
 ## 2. Open questions — resolved at sign-off (2026-10-08)
 
@@ -38,11 +41,11 @@
 | `07` + ADR-0005 | Authentik OIDC (app-level) | Accepted |
 | `02` | Scope: + templates/pre-made skills, BYOK, future CMS | Accepted (amended) |
 | `13` | Phase ordering P0–P5; parallelize after groundwork | Accepted |
+| ADR-0006…0011 | Runtime containment, release model, DB roles, code storage, build isolation, BYOK proxy | Accepted 2026-10-09 (P1 review) |
 
 ## 4. Status
 
-**Approved 2026-10-08; P0 and P1 shipped 2026-10-09.** All decisions above are
-accepted with the noted amendments. P0 (foundations + platform onboarding) and
-P1 (single-tenant vertical slice) are implemented, tested (18 test cases green),
-and deployed to `atelier.jaketalling.com`. P2–P5 remain planned (see
-`13-implementation-plan.md`).
+**Approved 2026-10-08; P0 and P1 shipped 2026-10-09; P1 hardened 2026-10-09**
+(branch `p1-hardening`, ADRs 0006–0011). P2–P5 remain planned (see
+`13-implementation-plan.md`). From P2 on, each phase is developed on its own
+branch and reviewed as a PR.

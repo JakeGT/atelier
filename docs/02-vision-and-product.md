@@ -52,7 +52,7 @@ production build.
 | --- | --- | --- |
 | **Site owner** | Non-technical owner (the "Andrew/Dad" of today) | Plain-language editing, safe publish, undo, no CLI/terminals |
 | **Team editor** | A member of the org who edits content | Scoped access, collaborative drafts, no destructive power |
-| **Tenant admin** | Manages org membership, projects, billing | Invite/remove members, quotas, invoices, project create/archive |
+| **Tenant admin** | Manages org membership, projects, billing | Invite/remove members, quotas, usage, project create/archive |
 | **Agency user** | Manages many client sites under one tenant | Project switching, per-client isolation, template reuse |
 | **Platform operator** | Runs Atelier (us) | Fleet health, cost, abuse prevention, support tooling |
 
@@ -119,11 +119,13 @@ Derived directly from the single-tenant assumptions identified in `01`:
 
 ## 7. Success criteria (measurable)
 
-1. A new tenant can be created, add a member, and create a project entirely via
-   the product UI (no operator intervention).
+1. Once admitted at the identity provider (invite-only by design; ADR-0005), a
+   person can create a tenant, add a member, and create a project entirely via
+   the product UI, with no further operator steps.
 2. A non-technical owner can ask the assistant to change content, preview it, and
    publish it without touching a terminal.
 3. A cross-tenant data leak is impossible by construction (isolation tests in CI).
 4. A compromised or malicious agent session is contained to its workspace and
    cannot affect other projects or tenants.
-5. Usage is metered per project and can be surfaced as an invoice.
+5. Usage is metered per project and visible to the tenant (BYOK, with no
+   invoicing in v1).

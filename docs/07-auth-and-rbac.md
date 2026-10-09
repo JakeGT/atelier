@@ -1,12 +1,14 @@
 # 07 — Authentication & authorization
 
-> **Implementation status (P1, deployed):** OIDC via Authentik is implemented and
-> live — `services/oidc.ts` (authorization code + PKCE, RS256), account keyed by
-> `(issuer, subject)`, admin from the `platform-admin` group, session in a
-> `__Host-` HttpOnly cookie with CSRF token, plus sign-in bootstrap (first org +
-> owner membership on first login). Role-based authorization is **not** yet
-> enforced per route: the `permissions.ts` table exists, but P1 routes only check
-> session + first-org tenancy; role checks land in P2.
+> **Implementation status (P1 + hardening):** OIDC via Authentik (code + PKCE,
+> RS256), accounts keyed by `(issuer, subject)`, admin from the
+> `platform-admin` group, and first-sign-in bootstrap (first org + owner).
+> Login sessions are stored in Postgres (SHA-256 of the cookie value) and
+> survive restarts. Roles are enforced on every route from `ROLE_PERMISSIONS`.
+> Forbidden and not-found both answer 404. Step-up uses the session's
+> `auth_time` (publish/rollback within `STEP_UP_MINUTES`, re-auth via
+> `prompt=login`). Agent tokens are minted per run (1 h). Invites, role
+> management and per-project roles are P2.
 
 Atelier authenticates through **Authentik** using OIDC, exactly as `triagent`
 does (`docs/authentication.md` there is the reference implementation pattern).

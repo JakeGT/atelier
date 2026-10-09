@@ -1,11 +1,16 @@
 # 11 — Safety & security
 
-> **Implementation status (P1, deployed):** the server runs hardened — `read_only`
-> rootfs, `cap_drop: ALL`, `no-new-privileges`, unprivileged `node` user,
-> `pids_limit`/`mem_limit`, tmpfs for `/tmp`; the agent runs as a subprocess of
-> that unprivileged process with `--auto` (a known P1 relaxation of the
-> permission model — tighten in P2). gVisor sandboxing, retention, and alerting
-> are P5.
+> **Implementation status (P1 + hardening):** the agent runs in its own
+> per-project container with no Atelier secrets, no socket, and no route to the
+> database (ADR-0006). The provisioner is the only socket holder. The server
+> serves as a non-owner DB role, and the audit log is append-only (ADR-0008).
+> Previews are sandboxed (opaque origin). CSRF, role checks and step-up apply
+> to every mutation that needs them, and publish, rollback, restore, project
+> creation and sign-in are audited. Still open:
+> - an egress allow-list (P2);
+> - gVisor (P2 spike);
+> - retention and alerting (P5);
+> - workspace volumes are not yet in the platform backup (ADR-0009).
 
 Atelier inherits the safety model of `connectionerring-editor` (privilege split,
 draft-then-publish, human gates) and the platform hardening conventions

@@ -1,11 +1,13 @@
 # 04 — Architecture
 
-> **Implementation status (P1, deployed):** the control plane is a single
-> `@atelier/server` Hono service that also serves the web UI — there is no
-> separate `runtime`/`worker`/`scheduler` service yet. The agent runs as a
-> subprocess inside the server container, and the workspace is a local git dir on
-> the tmpfs; the "execution plane" is not yet a separate sandbox (see P2/P5 and
-> ADR-0003).
+> **Implementation status (P1 + hardening, 2026-10-09):** three services from one
+> source tree (ADR-0006). `atelier-server` is the control plane (Hono API + web
+> UI). Per-project **runtime containers** (`atelier-ws-<projectId>`: workspace
+> daemon + OpenCode + git + content MCP, on a per-project volume) form the
+> execution plane. `atelier-provisioner` is the only holder of the Docker
+> socket, and the only thing that creates or stops runtime containers. The
+> deploy worker is still to come (P3, split into an untrusted build and a
+> trusted upload per ADR-0010).
 
 ## 1. Big picture
 

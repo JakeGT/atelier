@@ -1,17 +1,21 @@
 # 05 — Tenancy and data model
 
-> **Implementation status (P1, deployed):** implemented in
-> `apps/server/db/migrations/0002_tenancy.sql` + `store/postgres.ts`. Deviations
-> from this doc: `users` is keyed by `(issuer, subject)` (not `sub`);
-> `memberships` and `projects` use `tenant_id` (not `organization_id`);
-> `projects` has no `repo_ref` (the workspace is a local git dir) but carries
-> `content_schema_ref`/`agent_config_ref`/`preview_ref`/`production_ref`;
-> `content_documents`, `releases` and `deployments` all carry `tenant_id` +
-> `created_at`; the `rev`/`number`/`content_rev` counters are `int` (not
-> `bigint`); `project_members` is deferred to P2. RLS uses
-> `FORCE ROW LEVEL SECURITY` (the app connects as the table owner);
-> `memberships` carries **no** RLS in P1 (a P2 hardening item).
-> `users.last_seen_at` is not implemented (sessions are in-memory).
+> **Implementation status (P1 + hardening):** migrations `0001`–`0005`
+> (`apps/server/db/migrations/`) + `db/grants.sql`. Deviations from this doc:
+> - `users` is keyed by `(issuer, subject)`.
+> - `memberships`/`projects` use `tenant_id`.
+> - Child tables have composite `(project_id, tenant_id)` foreign keys (RLS does
+>   not apply to FK checks).
+> - Every table with `tenant_id`, **including `memberships`**, has RLS forced and
+>   a policy. `memberships` is also visible to its own user via
+>   `app.current_user`.
+> - New tables: `sessions` (login sessions, hashed ids), `content_revisions`
+>   (draft history) and `release_documents` (release manifests, ADR-0007).
+> - The server connects as a non-owner runtime role and migrates as the owner
+>   (ADR-0008).
+> - `projects.repo_ref` is unused: code lives in the per-project workspace
+>   volume (ADR-0009).
+> - `project_members` is deferred to P2.
 
 ## 1. Tenancy decision (summary)
 
