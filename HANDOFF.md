@@ -173,14 +173,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). Off-host backups are part of the VPS move, the last phase (P6); accepted until then.
 - **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
-- **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
 - **Workspaces keep the runtime they were created with** until their next request, when an idle one is recreated on the current runtime (`ContainerRuntime.bringUpToDate`, since p5.8). Until p5.8 they were never recreated, and one on p3.5 blanked the editor by reporting runs without `steps`; runs are now made whole (`wholeRun`) and the app has an error screen (`ui/Safety.tsx`).
 
 ## Next steps
 
 The order from here (docs/13):
 
-1. **P5 is built** (content studio incl. lists of items and checks before publishing, media, retention, alerting). What it leaves: number/date/yes-no fields, focal points, video posters, deleting a whole studio.
+1. **P5 is built** (content studio incl. lists of items and checks before publishing, media, retention, alerting). All of the content studio is built. What P5 leaves: deleting a whole studio and exporting its data (in progress, next branch).
 2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
 3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
 

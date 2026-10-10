@@ -137,3 +137,59 @@ test("a list of items with several parts: each entry is a copy of the first, wit
     const mixed = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { services: ["Just a line", { name: "An item" }] } }]));
     assert.match(mixed, /<li class="card">Just a line<\/li><li class="card"><h3 data-item="name">An item<\/h3>/);
 });
+
+test("links, yes/no, dates and video: each binding does one small thing", () => {
+    const page = `<!doctype html><html lang="fr"><head></head><body>
+<a data-content="page/home#cta" data-content-href="page/home#cta_link" href="old.html">Old words</a>
+<a data-content-href="page/home#bad" href="kept.html">x</a>
+<section data-content-if="page/home#show_offer"><h2 data-content="page/home#offer">Offer</h2></section>
+<section data-content-if="page/home#show_other"><p>stays</p></section>
+<time data-content="page/home#opens" data-content-date="long">soon</time><span data-content="page/home#opens">raw</span><b data-content="page/home#opens" data-content-date="numeric">n</b>
+<span data-content="page/home#price">0</span>
+<video data-content-video="page/home#film" controls><source src="old.mp4"></video>
+<img data-content-image="page/home#photo" src="" style="object-fit:cover; object-position: 0 0">
+</body></html>`;
+    const content = {
+        cta: "Book a class",
+        cta_link: "classes.html",
+        bad: "javascript:alert(1)",
+        show_offer: false,
+        show_other: true,
+        offer: "hidden",
+        opens: "2026-03-01",
+        price: 45,
+        film: "media/kiln-abc123.mp4",
+        photo: "media/pot-abc123.jpg",
+    };
+    const media = (n: string) =>
+        n === "kiln-abc123.mp4"
+            ? { name: n, alt: "", width: 1280, height: 720, variants: [], poster: "kiln-abc123-poster.jpg" }
+            : n === "pot-abc123.jpg"
+              ? { name: n, alt: "A pot", width: 800, height: 600, variants: [], focal: { x: 25.4, y: 80 } }
+              : undefined;
+    const out = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content }]), { media });
+    assert.match(out, /<a data-content="page\/home#cta" data-content-href="page\/home#cta_link" href="classes\.html">Book a class<\/a>/);
+    assert.match(out, /<a data-content-href="page\/home#bad" href="kept\.html">x<\/a>/);
+    assert.ok(!out.includes("show_offer") && !out.includes("hidden"), "a part switched off is not in the page at all");
+    assert.match(out, /<section data-content-if="page\/home#show_other"><p>stays<\/p><\/section>/);
+    // Written out in the page's own language; the machine-readable date goes on <time>.
+    assert.match(out, /<time data-content="page\/home#opens" data-content-date="long" datetime="2026-03-01">1 mars 2026<\/time>/);
+    assert.match(out, /<span data-content="page\/home#opens">2026-03-01<\/span>/);
+    assert.match(out, /data-content-date="numeric">01\/03\/2026<\/b>/);
+    assert.match(out, /<span data-content="page\/home#price">45<\/span>/);
+    assert.match(
+        out,
+        /<video data-content-video="page\/home#film" controls="" src="media\/kiln-abc123\.mp4" poster="media\/kiln-abc123-poster\.jpg"><\/video>/,
+    );
+    assert.match(out, /style="object-fit:cover;object-position:25% 80%"/);
+    // With nothing saved for a yes/no field, the part stays (only an explicit "no" removes it).
+    assert.match(fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: {} }])), /data-content-if="page\/home#show_offer"/);
+    // A language the machine does not know falls back rather than failing.
+    assert.match(
+        fillHtml(
+            '<html lang="!!"><body><i data-content="a/b#d" data-content-date>x</i></body></html>',
+            lookupFrom([{ kind: "a", slug: "b", content: { d: "2026-12-25" } }]),
+        ),
+        />25 December 2026</,
+    );
+});

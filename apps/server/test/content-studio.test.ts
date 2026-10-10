@@ -244,3 +244,50 @@ test("the page map says which pages show which pieces of wording, and follows th
     const other = await signIn(t);
     assert.equal((await get(t, other, `${other.api}/projects/${p.split("/").pop()}/content/map`)).status, 404);
 });
+
+test("one history: versions, wording changes and publishes together, newest first, each saying what can be done", async () => {
+    const { t, who, p, save, publish } = await setup();
+    type Entry = {
+        type: string;
+        at: string;
+        current?: boolean;
+        by?: string | null;
+        kind?: string;
+        slug?: string;
+        rev?: number;
+        number?: number;
+        live?: boolean;
+        title?: string;
+    };
+    const history = async () => (await json<{ entries: Entry[] }>(await get(t, who, `${p}/history`))).entries;
+    await save({ headline: "One" });
+    await save({ headline: "Two" });
+    assert.equal((await publish()).status, 200);
+    const entries = await history();
+    assert.deepEqual(entries.map((e) => e.type).sort(), ["published", "version", "wording", "wording"]);
+    for (let i = 1; i < entries.length; i++) assert.ok((entries[i - 1]?.at ?? "") >= (entries[i]?.at ?? ""), "newest first");
+    const wording = entries.filter((e) => e.type === "wording");
+    assert.deepEqual(
+        wording.map((e) => [e.kind, e.slug, e.rev, e.current, e.by]),
+        [
+            ["page", "home", 2, true, who.user.name],
+            ["page", "home", 1, false, who.user.name],
+        ],
+    );
+    assert.equal(entries.find((e) => e.type === "version")?.current, true);
+    assert.deepEqual([entries.find((e) => e.type === "published")?.number, entries.find((e) => e.type === "published")?.live], [1, true]);
+    // Going back to earlier wording is itself an entry, and becomes the current one.
+    assert.equal((await send(t, who, "POST", `${p}/content/page/home/revisions/1/restore`)).status, 200);
+    const after = (await history()).filter((e) => e.type === "wording");
+    assert.deepEqual(
+        after.map((e) => [e.rev, e.current]),
+        [
+            [3, true],
+            [2, false],
+            [1, false],
+        ],
+    );
+    // Someone outside the studio cannot read it.
+    const other = await signIn(t);
+    assert.equal((await get(t, other, `${other.api}/projects/${p.split("/").pop()}/history`)).status, 404);
+});

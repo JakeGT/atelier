@@ -1,4 +1,8 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { MediaAsset } from "@atelier/shared";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parseFragment, serialize } from "parse5";
 import sharp from "sharp";
@@ -141,6 +145,8 @@ export interface Prepared {
     // The file pages refer to, then its smaller copies.
     main: PreparedFile;
     variants: (PreparedFile & { width: number })[];
+    // A video's still picture, when one could be made.
+    poster?: PreparedFile;
 }
 
 export async function prepareUpload(original: string, bytes: Uint8Array): Promise<Prepared> {
@@ -159,6 +165,19 @@ export async function prepareUpload(original: string, bytes: Uint8Array): Promis
         main: { name, body, mime: what.mime },
         variants: [],
     });
+    if (what.kind === "video") {
+        const still = await videoStill(bytes, what.ext).catch(() => null);
+        if (!still) return plain();
+        const size = await sharp(still)
+            .metadata()
+            .catch(() => null);
+        return {
+            ...plain(),
+            width: size?.width ?? null,
+            height: size?.height ?? null,
+            poster: { name: `${name.slice(0, name.lastIndexOf("."))}-poster.jpg`, body: still, mime: "image/jpeg" },
+        };
+    }
     if (what.kind !== "image") return plain();
     if (what.ext === "svg") {
         const clean = Buffer.from(sanitizeSvg(Buffer.from(bytes).toString("utf8")), "utf8");
@@ -207,8 +226,49 @@ export async function prepareUpload(original: string, bytes: Uint8Array): Promis
     }
 }
 
+// A still picture from a second into a clip (or its first frame), no wider than
+// 1,280 px. Needs ffmpeg; without it a video simply has no poster.
+const FFMPEG = process.env.FFMPEG_PATH ?? "ffmpeg";
+async function videoStill(bytes: Uint8Array, ext: string): Promise<Uint8Array | null> {
+    const dir = await mkdtemp(join(tmpdir(), "atelier-still-"));
+    const input = join(dir, `clip.${ext}`);
+    const output = join(dir, "still.jpg");
+    try {
+        await writeFile(input, bytes);
+        for (const at of ["1", "0"]) {
+            const ok = await new Promise<boolean>((resolve) => {
+                const child = spawn(
+                    FFMPEG,
+                    ["-v", "error", "-y", "-ss", at, "-i", input, "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4", output],
+                    {
+                        stdio: "ignore",
+                    },
+                );
+                const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+                child.once("error", () => {
+                    clearTimeout(timer);
+                    resolve(false);
+                });
+                child.once("exit", (code) => {
+                    clearTimeout(timer);
+                    resolve(code === 0);
+                });
+            });
+            const still = ok ? await readFile(output).catch(() => null) : null;
+            if (still?.length) return new Uint8Array(still);
+        }
+        return null;
+    } finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
 // Every file name stored for an asset: the one pages use, then its smaller copies.
-export const filesOf = (a: Pick<MediaAsset, "name" | "variants">): string[] => [a.name, ...a.variants.map((v) => v.name)];
+export const filesOf = (a: Pick<MediaAsset, "name" | "variants"> & { poster?: string | null }): string[] => [
+    a.name,
+    ...a.variants.map((v) => v.name),
+    ...(a.poster ? [a.poster] : []),
+];
 export const storageKey = (a: Pick<MediaAsset, "tenantId" | "projectId">, name: string): string => `${a.tenantId}/${a.projectId}/${name}`;
 export const MEDIA_NAME = /^[a-z0-9][a-z0-9-]{0,60}\.[a-z0-9]{2,5}$/;
 

@@ -17,7 +17,7 @@ export interface LooseText {
     text: string;
 }
 
-const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image"];
+const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image", "data-content-video"];
 // Never wording a visitor reads.
 const SKIP = new Set([
     "script",

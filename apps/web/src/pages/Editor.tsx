@@ -22,7 +22,19 @@ import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
 import { WordingDialog } from "../editor/Wording";
 import { changedFiles } from "../lib/activity";
-import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Pulse, Release, Run, Session } from "../lib/api";
+import type {
+    AgentSession,
+    Checkpoint,
+    ContentDocument,
+    HistoryEntry,
+    Org,
+    Overview,
+    Project,
+    Pulse,
+    Release,
+    Run,
+    Session,
+} from "../lib/api";
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, useClickOutside, useStored } from "../lib/hooks";
 import { Dialog, Dots, UserMenu, useToast } from "../ui/kit";
@@ -72,6 +84,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const typing = useRef(false);
 
     const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+    const [history, setHistory] = useState<HistoryEntry[]>([]);
     const [releases, setReleases] = useState<Release[]>([]);
     const [documents, setDocuments] = useState<ContentDocument[]>([]);
     const [overview, setOverview] = useState<Overview | null>(null);
@@ -128,13 +141,15 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     // ---- data ------------------------------------------------------------------------
 
     const refresh = useCallback(async () => {
-        const [cps, rels, docs, ov] = await Promise.all([
+        const [cps, hist, rels, docs, ov] = await Promise.all([
             a.listCheckpoints(pid).catch(() => [] as Checkpoint[]),
+            a.history(pid).catch(() => [] as HistoryEntry[]),
             a.listReleases(pid).catch(() => [] as Release[]),
             a.listContent(pid).catch(() => [] as ContentDocument[]),
             a.overview(pid).catch(() => null),
         ]);
         setCheckpoints(cps);
+        setHistory(hist);
         setReleases([...rels].reverse());
         setDocuments(docs);
         setOverview(ov);
@@ -309,6 +324,16 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         }
     }
 
+    const restoreWording = async (kind: string, slug: string, rev: number) => {
+        try {
+            await a.restoreContent(pid, kind, slug, rev);
+            toast("That earlier wording is back. What it replaced is still in the history.");
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+        await refresh();
+        reloadPreview();
+    };
     const restore = (sha: string) =>
         act(async () => {
             await a.restoreCheckpoint(pid, sha);
@@ -452,9 +477,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         className={`btn btn-ghost side-toggle ${sideOpen ? "on" : ""}`}
                         onClick={() => setSideOpen((o) => !o)}
                         aria-pressed={sideOpen}
-                        title="Show or hide the panel with saved versions, what is published, your wording, and your pictures and files"
+                        title="Show or hide the panel with the website's history, what is published, your wording, and your pictures and files"
                     >
-                        <PanelRight /> <span className="bar-label">Versions, wording, pictures</span>
+                        <PanelRight /> <span className="bar-label">History, wording, pictures</span>
                     </button>
                     {canPublish && (
                         <button
@@ -534,6 +559,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     tab={tab}
                     onTab={setTab}
                     checkpoints={checkpoints}
+                    history={history}
+                    onRestoreWording={(kind, slug, rev) => void restoreWording(kind, slug, rev)}
                     releases={releases}
                     documents={documents}
                     busy={acting || running}
@@ -550,7 +577,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     [
                         ["chat", "Chat", MessageSquare],
                         ["preview", "Preview", Eye],
-                        ["side", "Versions", History],
+                        ["side", "History", History],
                     ] as const
                 ).map(([id, label, Icon]) => (
                     <button key={id} type="button" className={pane === id ? "on" : ""} onClick={() => setPane(id)}>

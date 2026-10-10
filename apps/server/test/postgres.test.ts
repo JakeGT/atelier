@@ -772,6 +772,8 @@ test("media library: records are per studio; a removed file is kept until it is 
         decorative: false,
         bytes: 1234,
         variants: [{ name: "shop-abc123-480.webp", width: 480, bytes: 100 }],
+        focal: null,
+        poster: null,
         uploadedBy: null,
     });
     assert.deepEqual(asset.variants, [{ name: "shop-abc123-480.webp", width: 480, bytes: 100 }]);
@@ -783,6 +785,19 @@ test("media library: records are per studio; a removed file is kept until it is 
     assert.equal(await store.media.remove(b.tenantId, a.projectId, asset.id), null);
 
     assert.equal((await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "", decorative: true }))?.decorative, true);
+    // A focal point is set, kept when not mentioned, and cleared with null.
+    assert.deepEqual(
+        (await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "x", decorative: false, focal: { x: 25, y: 80 } }))?.focal,
+        { x: 25, y: 80 },
+    );
+    assert.deepEqual((await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "y", decorative: false }))?.focal, {
+        x: 25,
+        y: 80,
+    });
+    assert.equal(
+        (await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "y", decorative: false, focal: null }))?.focal,
+        null,
+    );
     assert.ok((await store.media.remove(a.tenantId, a.projectId, asset.id))?.deletedAt);
     assert.equal((await store.media.list(a.tenantId, a.projectId)).length, 0);
     assert.equal((await store.media.list(a.tenantId, a.projectId, true)).length, 1);
@@ -841,6 +856,10 @@ test("retention queries: old messages and old versions of wording go; the newest
             authorId: null,
         });
     }
+    // The latest changes to one website's wording, newest first, each naming its document; another studio sees none.
+    const recent = await store.content.recentRevisions(a.tenantId, a.projectId, 3);
+    assert.deepEqual(recent.map((r) => [r.kind, r.slug, r.rev]), [["page", "home", 5], ["page", "home", 4], ["page", "home", 3]]);
+    assert.equal((await store.content.recentRevisions(b.tenantId, a.projectId, 10)).length, 0);
     const future = new Date(Date.now() + 60_000);
     const past = new Date(Date.now() - 60_000);
     assert.equal(await store.content.pruneRevisions(a.tenantId, past, 2), 0);

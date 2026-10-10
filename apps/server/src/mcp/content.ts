@@ -63,12 +63,12 @@ const base = {
 const field = z.object({
     ...base,
     type: z
-        .enum(["text", "long", "rich", "list", "image", "items"])
+        .enum(["text", "long", "rich", "list", "image", "items", "link", "number", "date", "yesno", "video"])
         .describe(
-            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members)",
+            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members). link: a web address or a page such as about.html, shown with data-content-href on an <a>. number. date: 'YYYY-MM-DD', written out by the page when the element has data-content-date. yesno: true or false, with data-content-if on a part of the page to show or hide it. video: the path of a clip from media_list, on a <video data-content-video>",
         ),
     itemFields: z
-        .array(z.object({ ...base, type: z.enum(["text", "long", "rich", "image", "link"]) }))
+        .array(z.object({ ...base, type: z.enum(["text", "long", "rich", "image", "link", "number", "date"]) }))
         .optional()
         .describe("For type items: the parts every entry has. link: a web address or a page such as about.html"),
 });
@@ -124,16 +124,19 @@ const vision = process.env.ATELIER_VISION === "1";
 let looks = 0;
 const MAX_LOOKS = 16;
 
+interface LibraryFile {
+    path: string;
+    description: string;
+    width: number | null;
+    height: number | null;
+    smallerCopies: { path: string; width: number }[];
+    poster?: string | null;
+    focal?: { x: number; y: number } | null;
+}
 const libraryFiles = async () =>
     (
         (await api("/api/agent/media")) as {
-            files: {
-                path: string;
-                description: string;
-                width: number | null;
-                height: number | null;
-                smallerCopies: { path: string; width: number }[];
-            }[];
+            files: LibraryFile[];
         }
     ).files;
 
@@ -161,6 +164,8 @@ server.tool(
                         width: f.width,
                         height: f.height,
                         variants: f.smallerCopies.map((c) => ({ name: c.path.replace(/^media\//, ""), width: c.width })),
+                        focal: f.focal ?? null,
+                        poster: f.poster ? f.poster.replace(/^media\//, "") : null,
                     })),
                 mediaFile: async (name) => {
                     const res = await fetch(`${apiUrl}/api/agent/media/file/${encodeURIComponent(name)}`, {

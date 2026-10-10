@@ -229,3 +229,22 @@ test("the assistant can read a library file with its own token, and only its own
     // A token for another website does not reach this one's files.
     assert.equal((await get(asset.name, token("33333333-3333-4333-8333-333333333333"))).status, 401);
 });
+
+test("a picture's focal point: set, kept, cleared, and carried to the page", async () => {
+    const { t, me, project, upload, build } = await setup();
+    const { asset } = await json<{ asset: Asset & { focal: { x: number; y: number } | null } }>(
+        await upload("pot.jpg", await photo(900), { alt: "A pot" }),
+    );
+    assert.equal(asset.focal, null);
+    const p = `/projects/${project.id}/media/${asset.id}`;
+    assert.equal((await me.patch(p, { alt: "A pot", focal: { x: 120, y: 5 } })).status, 400);
+    const set = await json<{ asset: { focal: unknown } }>(await me.patch(p, { alt: "A pot", focal: { x: 20, y: 75 } }));
+    assert.deepEqual(set.asset.focal, { x: 20, y: 75 });
+    assert.deepEqual((await json<{ asset: { focal: unknown } }>(await me.patch(p, { alt: "A clay pot" }))).asset.focal, { x: 20, y: 75 });
+
+    await build('<img data-content-image="page/home#photo" src="" style="object-fit:cover">');
+    await me.put(`/projects/${project.id}/content/page/home`, { photo: asset.path });
+    const { url } = await json<{ url: string }>(await me.get(`/projects/${project.id}/preview-url`));
+    assert.match(await (await t.app.request(`${url}index.html`)).text(), /style="object-fit:cover;object-position:20% 75%"/);
+    assert.equal((await json<{ asset: { focal: unknown } }>(await me.patch(p, { alt: "A clay pot", focal: null }))).asset.focal, null);
+});

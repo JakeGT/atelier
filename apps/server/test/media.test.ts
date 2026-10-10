@@ -193,3 +193,30 @@ test("configuration: R2 needs all four values; a bucket alone is refused clearly
     assert.equal(eu.r2?.endpoint, "https://acct.eu.r2.cloudflarestorage.com");
     assert.throws(() => loadConfig({ ...base, RESEND_API_KEY: "k" }), /requires MAIL_FROM/);
 });
+
+test("a video gets a still picture when ffmpeg is here, and is stored without one when it is not", async (t) => {
+    const { spawnSync } = await import("node:child_process");
+    if (spawnSync("ffmpeg", ["-version"]).status !== 0) return t.skip("no ffmpeg here");
+    const dir = mkdtempSync(join(tmpdir(), "atelier-clip-"));
+    const made = spawnSync("ffmpeg", [
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=640x360:rate=10",
+        "-t",
+        "2",
+        "-pix_fmt",
+        "yuv420p",
+        join(dir, "clip.mp4"),
+    ]);
+    assert.equal(made.status, 0, String(made.stderr));
+    const { readFileSync } = await import("node:fs");
+    const p = await prepareUpload("Studio tour.mp4", new Uint8Array(readFileSync(join(dir, "clip.mp4"))));
+    assert.equal(p.kind, "video");
+    assert.match(p.main.name, /^studio-tour-[0-9a-f]{6}\.mp4$/);
+    assert.match(p.poster?.name ?? "", /^studio-tour-[0-9a-f]{6}-poster\.jpg$/);
+    assert.deepEqual([p.width, p.height], [640, 360]);
+    assert.equal((await sharp(p.poster?.body).metadata()).format, "jpeg");
+});

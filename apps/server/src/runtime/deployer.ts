@@ -33,6 +33,8 @@ const mediaInfo = z
             width: z.number().nullable(),
             height: z.number().nullable(),
             variants: z.array(z.object({ name: z.string(), width: z.number() })),
+            focal: z.object({ x: z.number(), y: z.number() }).nullable().optional(),
+            poster: z.string().nullable().optional(),
         }),
     )
     .max(2000);
