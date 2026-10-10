@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p4.3` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #8. Open: [PR #9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs only: the content studio plan) and [PR #10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates` (operator console, templates, ideas, wording pop-up).
+> Last updated 2026-10-10. Status: **`p5.0` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #8. Three PRs are open, to merge in this order: [#9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs), [#10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates`, [#11](https://github.com/JakeGT/atelier/pull/11) `p5-content-studio` (stacked on #10; includes #9).
 
 ## TL;DR
 
@@ -31,9 +31,9 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p4.3` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.0` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
-| Migrations | `0001`–`0012` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0013` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
