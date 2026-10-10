@@ -182,5 +182,14 @@ test("configuration: R2 needs all four values; a bucket alone is refused clearly
     });
     assert.equal(on.mediaStorage, "r2");
     assert.equal(on.r2?.endpoint, "https://a.eu.r2.cloudflarestorage.com");
+    const eu = loadConfig({
+        ...base,
+        R2_BUCKET: "b",
+        R2_ACCOUNT_ID: "acct",
+        R2_ACCESS_KEY_ID: "k",
+        R2_SECRET_ACCESS_KEY: "s",
+        R2_JURISDICTION: "eu",
+    });
+    assert.equal(eu.r2?.endpoint, "https://acct.eu.r2.cloudflarestorage.com");
     assert.throws(() => loadConfig({ ...base, RESEND_API_KEY: "k" }), /requires MAIL_FROM/);
 });

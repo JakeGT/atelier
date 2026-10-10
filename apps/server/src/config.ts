@@ -65,7 +65,9 @@ const envSchema = z.object({
     R2_ACCOUNT_ID: z.string().optional(),
     R2_ACCOUNT_ID_FILE: z.string().optional(),
     R2_BUCKET: z.string().optional(),
-    // Only for a bucket created in a jurisdiction: https://<account>.eu.r2.cloudflarestorage.com
+    // For a bucket created in a jurisdiction ("eu"): it is reached at <account>.eu.r2.cloudflarestorage.com.
+    R2_JURISDICTION: z.enum(["eu", "fedramp"]).optional(),
+    // Any other S3-compatible address, given whole. Takes precedence.
     R2_ENDPOINT: z.string().url().optional(),
     R2_ACCESS_KEY_ID: z.string().optional(),
     R2_ACCESS_KEY_ID_FILE: z.string().optional(),
@@ -122,6 +124,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         secretAccessKey: fromFile(e.R2_SECRET_ACCESS_KEY, e.R2_SECRET_ACCESS_KEY_FILE),
         endpoint: e.R2_ENDPOINT,
     };
+    if (!r2.endpoint && e.R2_JURISDICTION && r2.accountId)
+        r2.endpoint = `https://${r2.accountId}.${e.R2_JURISDICTION}.r2.cloudflarestorage.com`;
     const mediaStorage = e.MEDIA_STORAGE ?? (r2.bucket ? "r2" : "off");
     if (mediaStorage === "r2" && !(r2.accountId && r2.bucket && r2.accessKeyId && r2.secretAccessKey))
         throw new ConfigError(
