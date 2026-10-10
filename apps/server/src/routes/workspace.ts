@@ -3,6 +3,7 @@ import { findLook, LOOK_PREFIX, THEME_FILE, themeCss } from "../design/looks.ts"
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { starter } from "../services/designKit.ts";
 import { baseOf, fillHtml, isBound, lookupFrom } from "../services/fill.ts";
+import { formActions, formNames } from "../services/forms.ts";
 import { agentInstructions } from "../services/instructions.ts";
 import { filesOf, MEDIA_NAME, mimeOfName, storageKey } from "../services/media.ts";
 import { PREVIEW_BRIDGE } from "../services/previewBridge.ts";
@@ -448,9 +449,17 @@ export function workspaceRoutes(api: Api): void {
                 const drafts = await store.content.list(claims.tenantId, claims.projectId);
                 const library = html.includes("data-content-image") ? await store.media.list(claims.tenantId, claims.projectId) : [];
                 const byName = new Map(library.map((a) => [a.name, { ...a, alt: a.decorative ? "" : a.alt }]));
+                // Forms can be tried in the preview: what is sent arrives marked as a trial.
+                const actions = formActions(
+                    config.publicOrigin,
+                    `${secretsKey}:form`,
+                    { tenantId: claims.tenantId, projectId: claims.projectId, preview: true },
+                    formNames(html),
+                );
                 html = fillHtml(html, lookupFrom(drafts.map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }))), {
                     media: (n) => byName.get(n),
                     base: baseOf(rel),
+                    forms: (n) => actions[n],
                 });
             }
             if (c.req.header("sec-fetch-dest") === "iframe") html = `${html}\n${PREVIEW_BRIDGE}`;

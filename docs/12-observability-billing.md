@@ -94,6 +94,7 @@ on 2026-10-10 at the owner's request, and each is a setting):
 | The conversation with the assistant | 12 months | `RETAIN_MESSAGES_DAYS` |
 | Earlier versions of a piece of wording | The newest 20 of each piece, and anything from the last 90 days | `RETAIN_REVISIONS_KEPT`, `RETAIN_REVISIONS_DAYS` |
 | A file removed from the media library | 30 days, then deleted from storage | `RETAIN_REMOVED_MEDIA_DAYS` |
+| What visitors sent through a website's forms | 12 months | `RETAIN_FORMS_DAYS` |
 | The activity record | 24 months | `RETAIN_AUDIT_DAYS` |
 | Notifications | 90 days | fixed |
 

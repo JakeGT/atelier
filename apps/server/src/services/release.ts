@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Project, Release } from "@atelier/shared";
 import type { Store } from "../store/types.ts";
 import { contentProblems } from "./contentChecks.ts";
+import { formActions, formNames } from "./forms.ts";
 import { type DeployInput, type Hosting, HostingError, siteName } from "./hosting.ts";
 import { filesOf, mimeOfName, storageKey } from "./media.ts";
 import type { MediaStorage } from "./mediaStorage.ts";
@@ -34,6 +35,7 @@ export class ReleaseService {
     private readonly hosting: Hosting | null;
     private readonly prefix: string;
     private readonly storage: MediaStorage | null;
+    private readonly forms: { origin: string; secret: string } | null;
     // One deployment per website at a time.
     private readonly deploying = new Set<string>();
 
@@ -43,7 +45,10 @@ export class ReleaseService {
         hosting: Hosting | null = null,
         prefix = "atl-",
         storage: MediaStorage | null = null,
+        // Where forms send to (this server's public address) and the key their links are signed with.
+        forms: { origin: string; secret: string } | null = null,
     ) {
+        this.forms = forms;
         this.storage = storage;
         this.store = store;
         this.runtime = runtime;
@@ -160,6 +165,8 @@ export class ReleaseService {
                 canonicalHost: null,
                 commit: head,
                 content,
+                // A link to show someone is still a trial: what is sent through it is marked as such.
+                forms: this.formsFor(tenantId, projectId, archive, true),
                 ...(await this.mediaFor(tenantId, projectId, archive, content)),
             });
             const deployment = await this.store.deployments.create({
@@ -187,6 +194,17 @@ export class ReleaseService {
         } finally {
             this.deploying.delete(projectId);
         }
+    }
+
+    // Where each form in the website's pages sends to, for the host to write into them.
+    private formsFor(tenantId: string, projectId: string, archive: Uint8Array, preview: boolean): Record<string, string> {
+        if (!this.forms) return {};
+        return formActions(
+            this.forms.origin,
+            this.forms.secret,
+            { tenantId, projectId, preview },
+            formNames(Buffer.from(archive).toString("latin1")),
+        );
     }
 
     // The website's project at the host, named once and kept.
@@ -302,6 +320,7 @@ export class ReleaseService {
                 canonicalHost: await this.canonicalHost(tenantId, projectId, site),
                 commit: release.codeSha,
                 content,
+                forms: this.formsFor(tenantId, projectId, archive, false),
                 ...(await this.mediaFor(tenantId, projectId, archive, content)),
             });
             await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });

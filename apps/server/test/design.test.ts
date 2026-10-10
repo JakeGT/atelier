@@ -53,10 +53,14 @@ test("the gallery: every look and section can be looked at, sandboxed", async ()
     assert.equal(kit.layouts.length, LAYOUTS.length);
     const page = await t.app.request(kit.looks.find((l) => l.id === "editorial")?.previewUrl ?? "");
     assert.equal(page.status, 200);
-    assert.match(page.headers.get("content-security-policy") ?? "", /^sandbox;/);
+    assert.match(page.headers.get("content-security-policy") ?? "", /^sandbox allow-scripts;/);
     assert.match(await page.text(), /<link rel="stylesheet" href="theme\.css">/);
     const theme = await (await t.app.request(`${kit.looks.find((l) => l.id === "editorial")?.previewUrl}theme.css`)).text();
     assert.equal(lookOf(theme), "editorial");
+    // The kit's own script is served with it, so tabs and the menu work in the gallery.
+    const script = await t.app.request(`${kit.looks.find((l) => l.id === "editorial")?.previewUrl}kit.js`);
+    assert.match(script.headers.get("content-type") ?? "", /javascript/);
+    assert.ok(!/https?:\/\/|import\s|require\(/.test(await script.text()), "kit.js loads nothing from anywhere");
     // A section is shown wearing the look asked for.
     const bars = kit.layouts.find((l) => l.id === "bars")?.previewUrl ?? "";
     assert.match(await (await t.app.request(bars)).text(), /class="k-bars"/);

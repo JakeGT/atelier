@@ -278,6 +278,8 @@ export const LOOK_PREFIX = "look:";
 const MARKER = /^\/\* atelier-look: ([a-z0-9-]+) /;
 export const THEME_FILE = "theme.css";
 export const KIT_FILE = "kit.css";
+// The behaviour of the interactive sections.
+export const KIT_SCRIPT = "kit.js";
 
 export function themeCss(look: Look): string {
     const lines = Object.entries(look.tokens).map(([name, value]) => `    ${name}: ${value};`);

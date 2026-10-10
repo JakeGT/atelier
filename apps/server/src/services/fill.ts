@@ -68,6 +68,8 @@ export interface FillOptions {
     media?: (name: string) => MediaInfo | undefined;
     // From this page to the website's top folder: "" for /index.html, "../" for /blog/post.html.
     base?: string;
+    // Where each named form sends to (`<form data-form="contact">`); absent: forms are left as written.
+    forms?: (name: string) => string | undefined;
     // The page's language (from <html lang>), for writing dates out.
     lang?: string;
 }
@@ -348,6 +350,26 @@ function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
         const to = link ? lookup(link) : undefined;
         if (child.tagName === "a" && typeof to === "string" && to.trim() && SAFE_HREF.test(to.trim()) && !/^\s*javascript:/i.test(to))
             setAttr(child, "href", to.trim());
+        // A named form is told where to send, and given a field only a robot fills in.
+        const formName = child.tagName === "form" ? attr(child, "data-form") : undefined;
+        const action = formName ? options.forms?.(formName) : undefined;
+        if (action) {
+            setAttr(child, "action", action);
+            setAttr(child, "method", "post");
+            setAttr(child, "accept-charset", "utf-8");
+            if (!child.childNodes.some((c) => isElement(c) && attr(c, "name") === "_gotcha")) {
+                const trap = defaultTreeAdapter.createElement("input", child.namespaceURI, [
+                    { name: "type", value: "text" },
+                    { name: "name", value: "_gotcha" },
+                    { name: "tabindex", value: "-1" },
+                    { name: "autocomplete", value: "off" },
+                    { name: "aria-hidden", value: "true" },
+                    { name: "style", value: "position:absolute;left:-9999px;width:1px;height:1px;opacity:0" },
+                ]);
+                trap.parentNode = child;
+                child.childNodes.push(trap);
+            }
+        }
         const length = parseRef(attr(child, "data-content-percent") ?? "");
         if (length) setPercent(child, lookup(length));
         const bound = child.attrs.some((a) => BINDINGS.includes(a.name));
@@ -358,7 +380,7 @@ function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
 }
 
 // Whether a page has anything to fill. A page that has not is served exactly as written.
-export const isBound = (html: string): boolean => html.includes("data-content");
+export const isBound = (html: string): boolean => html.includes("data-content") || html.includes("data-form=");
 
 // The page with its bound elements showing the stored values.
 export function fillHtml(html: string, lookup: Lookup, options: FillOptions = {}): string {

@@ -133,6 +133,33 @@ export interface UsageStore {
     monthly(tenantId: string, since: Date): Promise<{ month: string; kind: string; units: number }[]>;
 }
 
+// What a visitor sent through one of a website's forms.
+export interface FormSubmission {
+    id: string;
+    projectId: string;
+    form: string;
+    data: Record<string, string>;
+    preview: boolean;
+    createdAt: string;
+    readAt: string | null;
+}
+export interface FormStore {
+    add(input: {
+        id: string;
+        tenantId: string;
+        projectId: string;
+        form: string;
+        data: Record<string, string>;
+        preview: boolean;
+    }): Promise<FormSubmission>;
+    list(tenantId: string, projectId: string, limit?: number): Promise<FormSubmission[]>;
+    unread(tenantId: string, projectId: string): Promise<number>;
+    markRead(tenantId: string, projectId: string): Promise<void>;
+    remove(tenantId: string, projectId: string, id: string): Promise<void>;
+    // Retention: removes submissions older than `before`; returns how many.
+    purgeBefore(tenantId: string, before: Date): Promise<number>;
+}
+
 // A website a studio saved to begin other websites from.
 export interface StudioTemplate {
     id: string;
@@ -371,6 +398,7 @@ export interface Store {
     media: MediaStore;
     projectMembers: ProjectMemberStore;
     studioTemplates: StudioTemplateStore;
+    forms: FormStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;

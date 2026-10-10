@@ -1713,3 +1713,90 @@ button.where:hover {
     align-items: baseline;
     gap: 8px;
 }
+
+/* ---- messages from visitors ---- */
+
+.messages-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.messages-head p {
+    margin: 0;
+}
+
+.messages-list {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.message {
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+}
+
+.message-new {
+    border-color: var(--seal);
+}
+
+.message-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.message-head .muted {
+    margin-left: auto;
+    font-size: 0.85rem;
+}
+
+.message-body {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+}
+
+.message-body > div {
+    display: grid;
+    grid-template-columns: minmax(90px, 160px) 1fr;
+    gap: 12px;
+}
+
+.message-body dt {
+    font-size: 0.85rem;
+}
+
+.message-body dd {
+    margin: 0;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.message-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: 0.9rem;
+}
+
+@media (max-width: 560px) {
+    .message-body > div {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
+}

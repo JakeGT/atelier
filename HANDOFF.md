@@ -185,6 +185,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - New websites can start in a look (`template: "look:<id>"`). The editor has a **Design** button (Looks, Sections).
 - The assistant has `design_kit`, `design_section`, `design_use_look`, and rules to take every colour and font from the variables.
 
+## Interactive sections and forms (branch `interactive-forms`, ADR-0017)
+
+- **No framework, by decision.** Interactive things are ordinary HTML plus the kit's own `assets/kit.js` (written into a website beside `kit.css`); every section works without script, so its words stay editable.
+- **Seven more sections** (accordion, tabs, carousel, filterable list, tick-and-add-up, contact form, sign-up form), and the navigation folds into a Menu button on a phone.
+- **Forms:** `<form data-form="name">` with no action. Preview and publishing fill in `…/f/<signed token>` (`services/forms.ts`, `fill.ts` option `forms`). `routes/forms.ts` receives (public, limited, robot trap), stores (`form_submissions`, migration 0019), and notifies owners and admins. Read under **Content → Messages from visitors** (`editor/Messages.tsx`, `…/content/messages`), API `…/submissions`.
+- A website published before this must be published again for its forms to send.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

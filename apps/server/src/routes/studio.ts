@@ -19,6 +19,7 @@ websites/<name>/published.json   each time it was published
 websites/<name>/files/           the website itself: its pages, styles and scripts
 websites/<name>/media/           the pictures and files uploaded for it
 websites/<name>/media.json       what is known about each of those (descriptions, sizes)
+websites/<name>/messages.json    what visitors sent through its forms
 
 The website's files open in any browser. Wording marked in a page with
 data-content attributes is filled in from wording.json when the website is
@@ -153,6 +154,14 @@ export function studioRoutes(api: Api): void {
                     }
                 }
             }
+            yield await part("messages.json", async () =>
+                (await store.forms.list(org.id, project.id, 5000)).map((m) => ({
+                    sent: m.createdAt,
+                    form: m.form,
+                    trial: m.preview,
+                    ...m.data,
+                })),
+            );
             const assets = await store.media.list(org.id, project.id).catch(() => []);
             yield await part("media.json", async () =>
                 assets.map((a) => ({

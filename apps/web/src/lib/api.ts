@@ -292,6 +292,17 @@ export interface SitePage {
     examples: { tag: string; text: string }[];
 }
 
+// What a visitor sent through one of a website's forms.
+export interface FormMessage {
+    id: string;
+    form: string;
+    data: Record<string, string>;
+    // Sent from the private preview while trying the form, not by a visitor.
+    preview: boolean;
+    createdAt: string;
+    readAt: string | null;
+}
+
 // A file in a website's media library.
 export interface MediaAsset {
     id: string;
@@ -615,6 +626,10 @@ export function orgApi(org: string) {
 
         // For each page of the website, the pieces of wording it shows ("page/home#headline").
         contentMap: (projectId: string) => get<{ pages: SitePage[] }>(`${p(projectId)}/content/map`).then((b) => b.pages),
+        listMessages: (projectId: string) => get<{ messages: FormMessage[]; unread: number }>(`${p(projectId)}/submissions`),
+        readMessages: (projectId: string) => post<{ ok: true }>(`${p(projectId)}/submissions/read`),
+        removeMessage: (projectId: string, id: string) => del<{ ok: true }>(`${p(projectId)}/submissions/${id}`),
+        messagesCsvUrl: (projectId: string) => `${p(projectId)}/submissions.csv`,
         listMedia: (projectId: string) => get<MediaLibrary>(`${p(projectId)}/media`),
         uploadMedia: (projectId: string, file: File, about: { alt: string; decorative: boolean }) => {
             const form = new FormData();

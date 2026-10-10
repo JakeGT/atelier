@@ -20,7 +20,7 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE ON
         organizations, memberships, projects, content_documents, content_revisions,
         media_assets, releases, release_documents, deployments, agent_sessions, agent_messages,
-        invitations, provider_keys, project_domains, notifications, project_members, studio_templates,
+        invitations, provider_keys, project_domains, notifications, project_members, studio_templates, form_submissions,
         users, sessions
         TO atelier_runtime;
     GRANT SELECT, INSERT ON usage_events TO atelier_runtime;

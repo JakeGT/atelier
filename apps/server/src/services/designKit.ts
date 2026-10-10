@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { LAYOUTS, SAMPLE_CONTENT, SHOWCASE, samplePage } from "../design/layouts.ts";
-import { findLook, KIT_FILE, type Look, THEME_FILE, themeCss } from "../design/looks.ts";
+import { findLook, KIT_FILE, KIT_SCRIPT, type Look, THEME_FILE, themeCss } from "../design/looks.ts";
 import { fillHtml, lookupFrom } from "./fill.ts";
 
 // The design kit a website carries: theme.css (its look) and kit.css (the shared
@@ -8,6 +8,7 @@ import { fillHtml, lookupFrom } from "./fill.ts";
 // what lets a look be changed without touching a page.
 
 export const KIT_CSS = readFileSync(new URL("../../assets/kit.css", import.meta.url), "utf8");
+export const KIT_JS = readFileSync(new URL("../../assets/kit.js", import.meta.url), "utf8");
 
 const b64 = (text: string): string => Buffer.from(text, "utf8").toString("base64");
 
@@ -15,6 +16,7 @@ const b64 = (text: string): string => Buffer.from(text, "utf8").toString("base64
 export const kitFiles = (look: Look): { path: string; content: string }[] => [
     { path: THEME_FILE, content: b64(themeCss(look)) },
     { path: KIT_FILE, content: b64(KIT_CSS) },
+    { path: KIT_SCRIPT, content: b64(KIT_JS) },
 ];
 
 // A first page for a website that starts with a look and nothing else: its name,
@@ -79,6 +81,7 @@ export function sampleFile(lookId: string, layoutId: string | null, rel: string)
     if (!look) return null;
     if (rel === THEME_FILE) return { body: themeCss(look), type: "text/css; charset=utf-8" };
     if (rel === KIT_FILE) return { body: KIT_CSS, type: "text/css; charset=utf-8" };
+    if (rel === KIT_SCRIPT) return { body: KIT_JS, type: "text/javascript; charset=utf-8" };
     if (rel !== "index.html") return null;
     const sections = layoutId ? LAYOUTS.filter((l) => l.id === layoutId) : LAYOUTS.filter((l) => SHOWCASE.includes(l.id));
     if (sections.length === 0) return null;

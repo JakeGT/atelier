@@ -5,9 +5,10 @@ import { kitFiles, sampleFile } from "../services/designKit.ts";
 import { type Api, ORG, PROJECT, param } from "./kit.ts";
 
 const TTL_S = 2 * 60 * 60;
-// Samples are looked at, never used: no scripts, and only inside Atelier's own pages.
+// Samples are looked at inside Atelier's own pages only. They are Atelier's own files, so the kit's
+// script may run (tabs, the folding menu), on an origin of its own; forms go nowhere.
 const HEADERS = {
-    "content-security-policy": "sandbox; frame-ancestors 'self'",
+    "content-security-policy": "sandbox allow-scripts; frame-ancestors 'self'",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "cache-control": "private, max-age=600",

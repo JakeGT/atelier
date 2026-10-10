@@ -122,7 +122,10 @@ export function createApi(deps: ApiDeps) {
                 publicOrigin: config.publicOrigin,
                 operatorEmail: config.operatorEmail,
             }),
-        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix, deps.storage ?? null),
+        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix, deps.storage ?? null, {
+            origin: config.publicOrigin,
+            secret: `${deps.secretsKey}:form`,
+        }),
         box: new SecretBox(deps.secretsKey),
         app,
         declared,
