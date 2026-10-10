@@ -15,7 +15,7 @@ writeFileSync(
 <h1 data-content="page/home#headline">written in the file</h1>
 <table class="prices wide"><tr><td style="min-width:900px">a table far wider than a phone</td></tr></table>
 <img src="media/missing-000000.jpg" alt="x"><img data-content-image="page/home#photo" src="" alt="">
-<p style="font-size:8px;margin:0 20px">tiny print</p><div style="height:3000px;background:linear-gradient(#c63,#246)"></div>
+<p style="font-size:8px;margin:0 20px">tiny print</p><div style="margin:0 20px"><span class="bar-track" style="display:block;height:20px"><span class="bar-fill" style="width:60%;height:100%;background:#d63b1f"></span></span></div><div style="height:3000px;background:linear-gradient(#c63,#246)"></div>
 <script>throw new Error("boom from the page")</script></body></html>`,
 );
 writeFileSync(join(dir, "site.css"), "body{margin:0;font-family:sans-serif}h1{color:#c63}");
@@ -69,6 +69,11 @@ test("looking at a page: pictures at the visitor's width, saved wording filled i
         assert.match(problems, /A picture did not load: media\/missing-000000\.jpg/);
         assert.match(problems, /A script on the page failed: Error: boom from the page/);
         assert.match(problems, /1 pieces of text are smaller than 11px/);
+        // A bar's fill written as a span: it has a colour and a width, and nothing shows.
+        assert.match(
+            problems,
+            /Cannot be seen: span\.bar-fill has a colour but takes up no space: it is an inline element \(span\), so its width and height are ignored; give it display:block/,
+        );
         assert.match(problems, /No margin: h1 'Saved headline' touches the edge of the screen/);
         // In words, for a model that cannot read pictures: what is there, where, how big.
         assert.match(seen.outline[0] ?? "", /^h1 'Saved headline' at left 0px, top \d+px, 390x\d+px, text 32px$/);

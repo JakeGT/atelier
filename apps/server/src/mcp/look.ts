@@ -260,13 +260,23 @@ export class Browser {
                             }
                             const cut = key.filter((b) => /^(H\\d|P|LI|BUTTON|A)$/.test(b.el.tagName) && b.el.scrollWidth > b.el.clientWidth + 4 && getComputedStyle(b.el).overflowX !== "visible").slice(0, 5).map((b) => say(b.el) + " is cut off: it needs " + b.el.scrollWidth + "px and has " + b.el.clientWidth + "px");
                             const edge = key.filter((b) => /^(H\\d|P|LI|BUTTON)$/.test(b.el.tagName) && b.el.textContent.trim() && (b.x < 4 || b.x + b.w > w - 4) && b.w < w + 2).slice(0, 5).map((b) => say(b.el) + " touches the edge of the screen");
-                            return { outline, overlaps, cut, edge, title: document.title, height: Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0), scrollWidth: d.scrollWidth, viewport: w, wide, broken, tiny, empty: !document.body || (document.body.innerText.trim().length === 0 && !document.body.querySelector("img,canvas,svg,video,picture")) };
+                            // Drawn but not visible: an element given a colour and a size that ends up with no area.
+                            // The usual cause is a width or height on an inline element (a span), which browsers ignore.
+                            const painted = (el) => { const s = getComputedStyle(el); return (s.backgroundColor && s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent") || s.backgroundImage !== "none"; };
+                            const unseen = [...document.body.querySelectorAll("*")].filter((el) => {
+                                if (el.children.length || el.textContent.trim() || ["BR", "HR", "SCRIPT", "STYLE", "IMG", "INPUT", "SVG", "PATH"].includes(el.tagName.toUpperCase())) return false;
+                                const s = getComputedStyle(el), r = el.getBoundingClientRect();
+                                if (s.display === "none" || s.visibility === "hidden") return false;
+                                return painted(el) && (r.width < 1 || r.height < 1);
+                            }).slice(0, 6).map((el) => { const s = getComputedStyle(el); return name(el) + " has a colour but takes up no space" + (s.display === "inline" ? ": it is an inline element (" + el.tagName.toLowerCase() + "), so its width and height are ignored; give it display:block" : " (" + Math.round(el.getBoundingClientRect().width) + "x" + Math.round(el.getBoundingClientRect().height) + "px)"); });
+                            return { unseen, outline, overlaps, cut, edge, title: document.title, height: Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0), scrollWidth: d.scrollWidth, viewport: w, wide, broken, tiny, empty: !document.body || (document.body.innerText.trim().length === 0 && !document.body.querySelector("img,canvas,svg,video,picture")) };
                         })()`,
                     },
                     sessionId,
                 )) as {
                     result?: {
                         value?: {
+                            unseen: string[];
                             outline: { y: number; bottom: number; line: string }[];
                             overlaps: string[];
                             cut: string[];
@@ -290,6 +300,7 @@ export class Browser {
                         `The page is wider than the screen (${m.scrollWidth}px on a ${m.viewport}px screen), so it scrolls sideways. Too wide: ${m.wide.join("; ") || "unknown"}.`,
                     );
                 for (const src of m.broken) problems.push(`A picture did not load: ${src}`);
+                for (const u of m.unseen) problems.push(`Cannot be seen: ${u}.`);
                 for (const o of m.overlaps) problems.push(`Overlapping: ${o}.`);
                 for (const c of m.cut) problems.push(`Cut off: ${c}.`);
                 for (const e of m.edge) problems.push(`No margin: ${e}.`);

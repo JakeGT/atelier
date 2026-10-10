@@ -193,3 +193,31 @@ test("links, yes/no, dates and video: each binding does one small thing", () => 
         />25 December 2026</,
     );
 });
+
+test("a bar's length is a value of its own, so each entry of a list can have a different one", () => {
+    const page = `<!doctype html><html><head></head><body>
+<ul data-content-list="page/home#bars"><li><b data-item="label">First</b><span class="track"><span class="fill" data-item-percent="amount" style="width:99%;height:8px"></span></span></li><li><b data-item="label">written second</b><span class="track"><span class="fill" style="width:41%"></span></span></li></ul>
+<div class="fill" data-content-percent="page/home#progress" style="background:red"></div><i data-content-percent="page/home#nothing" style="width:7%"></i></body></html>`;
+    const bars = [
+        { label: "Perceived", amount: 99 },
+        { label: "Actual", amount: "41" },
+        { label: "Directions", amount: 3.26 },
+        { label: "Too much", amount: 250 },
+        { label: "No number" },
+    ];
+    const out = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { bars, progress: 62 } }]));
+    const widths = [...out.matchAll(/data-item-percent="amount" style="([^"]*)"/g)].map((m) => m[1]);
+    assert.deepEqual(widths, [
+        "height:8px;width:99%",
+        "height:8px;width:41%",
+        "height:8px;width:3.3%",
+        "height:8px;width:100%",
+        "width:99%;height:8px",
+    ]);
+    assert.match(out, /data-content-percent="page\/home#progress" style="background:red;width:62%"/);
+    // Nothing saved: the page's own width stays.
+    assert.match(out, /data-content-percent="page\/home#nothing" style="width:7%"/);
+    // A value cannot bring anything else into the style.
+    const odd = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { progress: "50%;background:url(x)" } }]));
+    assert.match(odd, /data-content-percent="page\/home#progress" style="background:red"/);
+});

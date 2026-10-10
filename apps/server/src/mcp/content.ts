@@ -65,7 +65,7 @@ const field = z.object({
     type: z
         .enum(["text", "long", "rich", "list", "image", "items", "link", "number", "date", "yesno", "video"])
         .describe(
-            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members). link: a web address or a page such as about.html, shown with data-content-href on an <a>. number. date: 'YYYY-MM-DD', written out by the page when the element has data-content-date. yesno: true or false, with data-content-if on a part of the page to show or hide it. video: the path of a clip from media_list, on a <video data-content-video>",
+            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members). link: a web address or a page such as about.html, shown with data-content-href on an <a>. number (also how long a bar is, 0 to 100, with data-content-percent or data-item-percent on the bar's fill). date: 'YYYY-MM-DD', written out by the page when the element has data-content-date. yesno: true or false, with data-content-if on a part of the page to show or hide it. video: the path of a clip from media_list, on a <video data-content-video>",
         ),
     itemFields: z
         .array(z.object({ ...base, type: z.enum(["text", "long", "rich", "image", "link", "number", "date"]) }))
@@ -102,7 +102,7 @@ const savedDocuments = async (): Promise<SavedDocument[]> =>
 
 server.tool(
     "content_check",
-    "Check that everything a visitor can read is wording the person can edit. Reads the website's pages as they are now and reports, per page: text and pictures not connected to content (`notEditable`), elements marked for a field that has nothing saved (`markedButNothingSaved`); and overall: saved wording no page shows (`savedButOnNoPage`) and saved wording with no described field (`notDescribed`). Call it before you finish any request that added or changed pages or wording, fix what it reports, and call it again until `ok` is true. Text that is truly not wording to edit (a decorative symbol, a version number) can be marked with the attribute data-content-skip instead.",
+    "Check that everything a visitor can read is wording the person can edit. Reads the website's pages as they are now and reports, per page: text and pictures not connected to content (`notEditable`), elements marked for a field that has nothing saved (`markedButNothingSaved`), and lists whose entries are written differently in the page but will all be shown as copies of the first (`entriesWillAllLookTheSame`); and overall: saved wording no page shows (`savedButOnNoPage`) and saved wording with no described field (`notDescribed`). Call it before you finish any request that added or changed pages or wording, fix what it reports, and call it again until `ok` is true. Text that is truly not wording to edit (a decorative symbol, a version number) can be marked with the attribute data-content-skip instead.",
     {},
     async () => {
         const report = coverageReport(await readPages(workspace), await savedDocuments());

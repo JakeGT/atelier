@@ -16,6 +16,8 @@ import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parse, parseFragment,
 //   <section data-content-if="page/home#show_offer">…</section>   shown unless the yes/no field is "no"
 //   <time data-content="page/home#opens" data-content-date="long">…</time>   a date, written out in the page's language
 //   <video data-content-video="page/home#film" controls></video>   a clip from the media library, with its poster
+//   <span class="fill" data-content-percent="page/home#progress"></span>   how long a bar is: a number from 0 to 100
+//       becomes the element's width (inside a list of items: data-item-percent="key")
 //
 // A real HTML parser does the work. A value is inserted as text (or, for rich
 // text, through an allow-list), so nothing a field contains can add markup or
@@ -278,6 +280,16 @@ function clone(el: Element): Element {
 
 const ITEM_KEY = /^[A-Za-z][\w-]{0,63}$/;
 
+// How long a bar is: a number from 0 to 100 becomes the element's width, added to
+// whatever the element already says about its own style. Anything else is left alone.
+function setPercent(el: Element, value: unknown): void {
+    const n = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
+    if (!Number.isFinite(n)) return;
+    const width = Math.max(0, Math.min(100, Math.round(n * 10) / 10));
+    const style = (attr(el, "style") ?? "").replace(/(^|;)\s*width\s*:[^;]*;?/gi, "$1").trim();
+    setAttr(el, "style", `${style}${style && !style.endsWith(";") ? ";" : ""}width:${width}%`);
+}
+
 // Fills the parts of one item, and returns false if the element should not be in
 // this entry at all. Every entry is a copy of the first, so a part this entry
 // does not have must not show the first entry's: its text is emptied, and a link
@@ -294,6 +306,8 @@ function fillItem(node: Element, entry: Record<string, unknown>, options: FillOp
         if (!to || !SAFE_HREF.test(to) || /^\s*javascript:/i.test(to)) return false;
         setAttr(node, "href", to);
     }
+    const percent = named("data-item-percent");
+    if (percent) setPercent(node, percent.value);
     const image = named("data-item-image");
     if (image) {
         if (typeof image.value !== "string" || !MEDIA_PATH.test(image.value)) return false;
@@ -334,6 +348,8 @@ function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
         const to = link ? lookup(link) : undefined;
         if (child.tagName === "a" && typeof to === "string" && to.trim() && SAFE_HREF.test(to.trim()) && !/^\s*javascript:/i.test(to))
             setAttr(child, "href", to.trim());
+        const length = parseRef(attr(child, "data-content-percent") ?? "");
+        if (length) setPercent(child, lookup(length));
         const bound = child.attrs.some((a) => BINDINGS.includes(a.name));
         if (bound) fillElement(child, lookup, options);
         // A filled element's contents are final; anything else may hold bound elements further in.
@@ -354,7 +370,7 @@ export function fillHtml(html: string, lookup: Lookup, options: FillOptions = {}
 }
 
 // The fields a page binds, in order, for the editor ("what on this page can be edited").
-export type BoundType = "text" | "rich" | "list" | "image" | "video" | "link" | "yesno";
+export type BoundType = "text" | "rich" | "list" | "image" | "video" | "link" | "yesno" | "percent";
 export function boundRefs(html: string): { ref: string; type: BoundType }[] {
     if (!isBound(html)) return [];
     const out: { ref: string; type: BoundType }[] = [];
@@ -369,6 +385,7 @@ export function boundRefs(html: string): { ref: string; type: BoundType }[] {
                 ["data-content-video", "video"],
                 ["data-content-href", "link"],
                 ["data-content-if", "yesno"],
+                ["data-content-percent", "percent"],
             ] as const) {
                 const v = attr(child, name);
                 if (v && parseRef(v)) out.push({ ref: v, type });
