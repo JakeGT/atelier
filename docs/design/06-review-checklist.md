@@ -63,3 +63,4 @@ Write findings and fixes as `audit-YYYY-MM-DD.md` in this folder: the screen,
 what was wrong, which rule it broke, and what was done. Link it from the
 [reference](README.md). If an audit teaches a new rule, add it to the document
 it belongs in and to the reference.
+- [ ] **A control is never inside the thing it changes the size of.** (The preview's size chooser once lived inside the preview frame: choosing Phone shrank the bar and hid the way back.) Tools that do not fit take a second row; they are never clipped and never lose their words.

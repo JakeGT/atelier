@@ -307,7 +307,9 @@
 
 .bench {
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
     min-width: 0;
     min-height: 0;
     padding: 18px;
@@ -319,9 +321,10 @@
 .frame {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
     width: 100%;
     max-width: 100%;
-    height: 100%;
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-l);
     background: var(--surface-raised);
@@ -347,10 +350,13 @@
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
     gap: 12px;
+    width: 100%;
     height: 44px;
-    padding: 0 8px 0 14px;
-    border-bottom: 1px solid var(--line);
+    padding: 0 8px 0 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-l);
     background: var(--surface);
+    container-type: inline-size;
 }
 
 .frame-lights {
@@ -381,19 +387,6 @@
     align-items: center;
     justify-content: flex-end;
     gap: 2px;
-}
-
-.frame-phone .frame-lights,
-.frame-phone .frame-address {
-    display: none;
-}
-
-.frame-phone .frame-chrome {
-    grid-template-columns: 1fr;
-}
-
-.frame-phone .frame-tools {
-    justify-content: center;
 }
 
 .segmented {
@@ -978,10 +971,6 @@
 
 /* The preview's tools keep their words while there is room for them: the address
    gives way first. */
-.frame {
-    container-type: inline-size;
-}
-
 .frame-chrome {
     grid-template-columns: auto 1fr auto;
 }
@@ -989,15 +978,6 @@
 @container (max-width: 860px) {
     .frame-address {
         display: none;
-    }
-}
-
-@container (max-width: 470px) {
-    .segmented .tool-label {
-        display: none;
-    }
-    .segmented button {
-        padding: 0;
     }
 }
 
@@ -1252,27 +1232,6 @@
     display: none;
 }
 
-/* Room is found for the words on Back and Forward before anything else: the
-   size chooser names only the size in use, then the page name gives way. */
-@container (max-width: 900px) {
-    .segmented button:not(.on) .tool-label {
-        display: none;
-    }
-    .segmented button:not(.on) {
-        padding: 0;
-    }
-}
-
-@container (max-width: 470px) {
-    .frame-nav .tool-label {
-        display: none;
-    }
-    .frame-nav .btn-sm {
-        width: 30px;
-        padding: 0;
-    }
-}
-
 /* ---- wording pop-up, ideas ---------------------------------------------------------- */
 
 .doc-body-roomy {
@@ -1431,4 +1390,22 @@
     text-align: center;
     box-shadow: var(--shadow-2);
     pointer-events: none;
+}
+
+/* The preview's tools never run off the end of their bar: with too little room
+   for one row they take a second, so every tool stays visible, with its word. */
+.bench > .frame-chrome {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 12px;
+    height: auto;
+    min-height: 44px;
+    padding-block: 5px;
+}
+
+.bench > .frame-chrome .frame-tools {
+    flex-wrap: wrap;
+    margin-left: auto;
 }
