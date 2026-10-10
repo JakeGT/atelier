@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p3.7` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #7 (P0–P3, BYOK, arrival, live activity and sharing). Open: [PR #8](https://github.com/JakeGT/atelier/pull/8) `preview-navigation` (Back and Forward in the preview).
+> Last updated 2026-10-10. Status: **`p4.3` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #8. Open: [PR #9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs only: the content studio plan) and [PR #10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates` (operator console, templates, ideas, wording pop-up).
 
 ## TL;DR
 
@@ -31,14 +31,14 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.7` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p4.3` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
-| Migrations | `0001`–`0011` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0012` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T131510Z` (before p3.6) |
+| Backups before deploys | in the infra repo's `backups/`; see the newest `postgres-*` folder (one is taken before every deploy that changes the database) |
 
 Verified after deploy:
 - `/healthz` returns 200;
