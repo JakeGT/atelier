@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p4.0` deployed**: P0, P1, P2 (multi-tenant) and BYOK (E4.1, brought forward).
+> Last updated 2026-10-10. Status: **`p4.1` deployed**: P0, P1, P2 (multi-tenant) and BYOK (E4.1, brought forward).
 > P1 is merged to `main`. P2 is [PR #3](https://github.com/JakeGT/atelier/pull/3) (`p2-multi-tenant`).
 > BYOK is [PR #4](https://github.com/JakeGT/atelier/pull/4) (`p4-byok`, stacked on #3). **Neither is merged yet.**
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p4.0` (built locally from `p4-byok`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p4.1` (built locally from `p4-byok`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), plus `atelier-ws-<projectId>` per project, created on demand and stopped when idle |
 | Migrations | `0001`–`0008` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
