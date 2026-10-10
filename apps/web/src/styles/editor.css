@@ -1464,3 +1464,50 @@
     background: var(--paper);
     border-top: 1px solid var(--line);
 }
+
+/* ---- pictures and files, in the editor ------------------------------------------------ */
+
+.menu-wrap.ideas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+}
+
+.side .tabs button {
+    padding-inline: 8px;
+}
+
+.side .media-head {
+    flex-direction: column;
+    gap: 12px;
+}
+
+.side .media-head .btn {
+    width: 100%;
+    justify-content: center;
+}
+
+.side .media-grid {
+    grid-template-columns: 1fr;
+    gap: 22px;
+}
+
+.side .media-actions .btn {
+    width: 100%;
+    justify-content: center;
+}
+
+.side .media-empty h3 {
+    font-size: 24px;
+}
+
+.side .tabs {
+    gap: 0;
+    padding-inline: 6px;
+}
+
+.side .tabs button {
+    padding-inline: 7px;
+    font-size: 13px;
+}

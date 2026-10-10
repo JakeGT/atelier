@@ -8,6 +8,7 @@ import {
     Eye,
     Globe,
     History,
+    LayoutList,
     MessageSquare,
     PanelRight,
     Rocket,
@@ -79,6 +80,13 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [reloadKey, setReloadKey] = useState(0);
     const [device, setDevice] = useStored<Device>("atelier.device", "desktop");
     const [tab, setTab] = useState<Tab>("versions");
+    // A file added beside the message box: show it in the panel's Pictures tab.
+    const [filesKey, setFilesKey] = useState(0);
+    const fileAdded = () => {
+        setFilesKey((k) => k + 1);
+        setTab("files");
+        setSideOpen(true);
+    };
     const [sideOpen, setSideOpen] = useStored("atelier.side", true);
     const [pane, setPane] = useState<Pane>("chat");
 
@@ -416,6 +424,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     )}
                 </div>
                 <div className="editor-bar-right">
+                    <button
+                        type="button"
+                        className="btn btn-ghost bar-wide"
+                        onClick={() => navigate(`/o/${org.slug}/p/${project.slug}/content`)}
+                        title="All of this website's wording, pictures and files, on a page of their own"
+                    >
+                        <LayoutList /> <span className="bar-label">Content</span>
+                    </button>
                     <button type="button" className="btn btn-ghost bar-wide" onClick={() => openAddress(false)}>
                         <Globe /> <span className="bar-label">Address</span>
                     </button>
@@ -429,9 +445,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         className={`btn btn-ghost side-toggle ${sideOpen ? "on" : ""}`}
                         onClick={() => setSideOpen((o) => !o)}
                         aria-pressed={sideOpen}
-                        title="Show or hide the panel with saved versions, what is published, and your wording"
+                        title="Show or hide the panel with saved versions, what is published, your wording, and your pictures and files"
                     >
-                        <PanelRight /> <span className="bar-label">Versions and wording</span>
+                        <PanelRight /> <span className="bar-label">Versions, wording, pictures</span>
                     </button>
                     {canPublish && (
                         <button
@@ -449,6 +465,11 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         theme={theme}
                         onToggleTheme={onToggleTheme}
                         items={[
+                            {
+                                label: "Content: wording, pictures and files",
+                                icon: <LayoutList />,
+                                onClick: () => navigate(`/o/${org.slug}/p/${project.slug}/content`),
+                            },
                             { label: "Address and domains", icon: <Globe />, onClick: () => openAddress(false) },
                             ...(mayManage
                                 ? [{ label: "Website settings", icon: <SlidersHorizontal />, onClick: () => setSettingsOpen(true) }]
@@ -461,6 +482,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
             <div className="editor-body">
                 <Chat
+                    onFileAdded={fileAdded}
                     messages={[...(messages ?? []), ...pending]}
                     loading={messages === null}
                     run={activeRun}
@@ -499,6 +521,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     working={running}
                 />
                 <Sidebar
+                    filesKey={filesKey}
                     contentHref={`/o/${org.slug}/p/${project.slug}/content`}
                     tab={tab}
                     onTab={setTab}

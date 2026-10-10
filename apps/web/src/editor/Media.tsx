@@ -193,6 +193,23 @@ function LocalPreview({ file }: { file: File }) {
     return url ? <img src={url} alt="" /> : null;
 }
 
+// "Add pictures or files", wherever it is useful to offer it (beside the message
+// box, say): opens the file chooser straight away.
+export function UploadButton({ label, className, onAdded }: { label: string; className?: string; onAdded?: (asset: MediaAsset) => void }) {
+    const scope = useMedia();
+    const added = useCallback((asset: MediaAsset) => onAdded?.(asset), [onAdded]);
+    const uploads = useUploads(scope, added);
+    if (!scope?.canEdit) return null;
+    return (
+        <>
+            {uploads.control}
+            <button type="button" className={className ?? "btn btn-sm btn-ghost"} onClick={uploads.choose} disabled={uploads.busy}>
+                <ImagePlus /> {label}
+            </button>
+        </>
+    );
+}
+
 const NotSetUp = () => (
     <div className="media-empty">
         <h3 className="display">Uploading files is not switched on yet.</h3>

@@ -2,9 +2,10 @@ import { ArrowRight, PencilLine, Undo2 } from "lucide-react";
 import { useState } from "react";
 import type { Checkpoint, ContentDocument, Release } from "../lib/api";
 import { navigate, timeAgo } from "../lib/hooks";
+import { MediaLibrary } from "./Media";
 import { documentName, fieldsOf, WordingDialog } from "./Wording";
 
-export type Tab = "versions" | "releases" | "content";
+export type Tab = "versions" | "releases" | "content" | "files";
 
 interface SidebarProps {
     tab: Tab;
@@ -15,6 +16,8 @@ interface SidebarProps {
     busy: boolean;
     canPublish: boolean;
     canEdit: boolean;
+    // Changes when a file is added outside this panel.
+    filesKey: number;
     // The page that manages all of a website's content.
     contentHref: string;
     onRestore: (sha: string) => void;
@@ -26,6 +29,7 @@ const TABS: { id: Tab; label: string }[] = [
     { id: "versions", label: "Versions" },
     { id: "releases", label: "Published" },
     { id: "content", label: "Wording" },
+    { id: "files", label: "Pictures" },
 ];
 
 // One line under the tabs saying what this list is and what you can do with it.
@@ -33,11 +37,12 @@ const ABOUT: Record<Tab, string> = {
     versions: "Every change your assistant makes is saved here. Choose one to go back to it. Nothing here is public until you publish.",
     releases: "Each time you publish, it is recorded here. You can put an earlier one back.",
     content: "The words on your website that you can change yourself, without asking your assistant.",
+    files: "",
 };
 
 export function Sidebar(props: SidebarProps) {
     const { tab, onTab, checkpoints, releases, documents } = props;
-    const counts: Record<Tab, number> = { versions: checkpoints.length, releases: releases.length, content: documents.length };
+    const counts: Record<Tab, number> = { versions: checkpoints.length, releases: releases.length, content: documents.length, files: 0 };
     return (
         <aside className="side">
             <div className="tabs" role="tablist">
@@ -56,10 +61,12 @@ export function Sidebar(props: SidebarProps) {
                 ))}
             </div>
             <div className="side-scroll">
-                <p className="side-about">{ABOUT[tab]}</p>
+                {ABOUT[tab] && <p className="side-about">{ABOUT[tab]}</p>}
                 {tab === "versions" && <Versions {...props} />}
                 {tab === "releases" && <Releases {...props} />}
                 {tab === "content" && <Content {...props} />}
+                {/* Remounted when a file is added from elsewhere (beside the message box), so it shows at once. */}
+                {tab === "files" && <MediaLibrary key={props.filesKey} />}
             </div>
         </aside>
     );
