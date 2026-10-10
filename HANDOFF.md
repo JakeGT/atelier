@@ -153,6 +153,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Retention:** `services/retention.ts`, daily; periods in docs/12 §5.
 - **On in production since p5.3 (2026-10-10):** the R2 bucket `atelier` (private, standard address: it is located in the EU but not in the EU jurisdiction, so `R2_JURISDICTION` is unset) and Resend (`MAIL_FROM` `noreply@notify.jaketalling.com`, operator alerts to the owner's address). Checked from inside the server: put, get and delete against the bucket, and one test e-mail accepted by Resend. Not checked: an upload through the signed-in interface.
 
+## Content a person can read and place (branch `content-clarity`)
+
+- The Content page never shows JSON: `editor/Wording.tsx` turns any stored value into fields (groups for nested objects, entries for arrays of objects).
+- `GET …/content/map` says which page shows which field. Each field has **Show me where**; the preview highlights it. Clicking the preview finds the field.
+- Wording no page shows is marked **Not on the website yet**, with **Ask my assistant to connect it** (opens the editor with the request written out). Websites made before p5.0 are all in this state until that is done.
+- The editor has a **Content** button, a **Pictures** tab and **Add pictures or files** by the message box.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

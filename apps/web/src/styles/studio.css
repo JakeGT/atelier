@@ -1272,3 +1272,165 @@ fieldset.starters legend {
 .picture-field .media-alt {
     margin-bottom: 8px;
 }
+
+/* ---- content: where each piece appears ---------------------------------------------- */
+
+.content-loose {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    width: min(1400px, 100% - 48px);
+    margin: 24px auto 0;
+    padding: 18px 20px;
+    border: 1px solid var(--seal);
+    border-radius: var(--radius-l);
+    background: var(--surface);
+}
+
+.content-loose > svg {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin-top: 2px;
+    color: var(--seal-deep);
+}
+
+.content-loose > div {
+    flex: 1;
+}
+
+.content-loose p {
+    margin: 4px 0 0;
+    max-width: 78ch;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-2);
+}
+
+.content-loose .btn {
+    flex: none;
+    align-self: center;
+}
+
+.content-on {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 10px 0 0;
+    font-size: 13.5px;
+}
+
+.content-pages {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.content-preview-hint {
+    margin-top: 8px;
+    font-size: 12.5px;
+}
+
+.field-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+    margin-bottom: 6px;
+}
+
+.wording-form .field-label label {
+    margin-bottom: 0;
+}
+
+.where {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    color: var(--ink-3);
+    cursor: pointer;
+}
+
+button.where:hover {
+    color: var(--seal-deep);
+    text-decoration: underline;
+}
+
+.where svg {
+    width: 13px;
+    height: 13px;
+}
+
+.where-none {
+    color: var(--seal-deep);
+    cursor: default;
+}
+
+.field-row {
+    margin-inline: -10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-m);
+    transition: background 0.3s;
+}
+
+.field-row + .field-row {
+    margin-top: 6px;
+}
+
+.field-row-on {
+    background: var(--line);
+}
+
+.wording-form .group {
+    margin: 0;
+    padding: 12px 14px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    min-width: 0;
+}
+
+.wording-form .group > legend {
+    padding: 0 6px;
+}
+
+.wording-form .group .field + .field,
+.wording-form .group .field + .group,
+.wording-form .group .group + .field {
+    margin-top: 12px;
+}
+
+.wording-form .check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14.5px;
+    cursor: pointer;
+}
+
+@media (max-width: 900px) {
+    .content-loose {
+        flex-direction: column;
+    }
+    .content-loose .btn {
+        align-self: flex-start;
+    }
+}
+
+.wording-form .check input {
+    display: inline-block;
+    flex: none;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+}
+
+.wording-form .check + .where {
+    margin-top: 6px;
+}

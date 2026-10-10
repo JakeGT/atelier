@@ -79,6 +79,13 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
     const [device, setDevice] = useStored<Device>("atelier.device", "desktop");
+    // "?ask=…": a request written for the person somewhere else in the app. It is put in
+    // the message box, not sent, and taken out of the address.
+    const [asked] = useState(() => {
+        const ask = new URLSearchParams(window.location.search).get("ask")?.slice(0, 2000) ?? "";
+        if (ask) window.history.replaceState(null, "", window.location.pathname);
+        return ask;
+    });
     const [tab, setTab] = useState<Tab>("versions");
     // A file added beside the message box: show it in the panel's Pictures tab.
     const [filesKey, setFilesKey] = useState(0);
@@ -482,6 +489,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
             <div className="editor-body">
                 <Chat
+                    draft={asked}
                     onFileAdded={fileAdded}
                     messages={[...(messages ?? []), ...pending]}
                     loading={messages === null}

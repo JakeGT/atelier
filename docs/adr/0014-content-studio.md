@@ -344,3 +344,35 @@ The owner chose Cloudflare R2 for storage on 2026-10-10.
 
 Still not built: number, date and yes/no fields; reordering by dragging; a
 focal point for images; poster images for video.
+
+## As built: content a person can read and place (branch `content-clarity`, 2026-10-10)
+
+The owner opened the Content page on websites made before fields and binding
+existed and found raw JSON, with no way to tell what any of it was or where it
+went. Three things changed.
+
+- **A person is never shown JSON.** Content is stored as JSON because that
+  suits the assistant. `editor/Wording.tsx` turns any saved value into fields:
+  a line, a paragraph, formatted text, a list, a picture, a link, a number, a
+  yes/no, a group of related fields (a nested object), or entries with parts (an
+  array of objects), to any depth. Edits keep the stored shape.
+- **Every piece says where it appears.** `GET …/content/map` reads the
+  website's pages and returns which fields each page's elements are bound to.
+  Beside each field the Content page shows **Show me where · Home page**;
+  choosing it (or just starting to edit the field) takes the preview to that
+  page, scrolls to the element and marks it. The preview on the Content page
+  outlines what can be edited: clicking a part of the page finds its field, and
+  a line of text can be typed in place.
+- **Wording no page shows is said to be so.** A field with no element is marked
+  **Not on the website yet**, a section with none says so in the list, and a
+  notice at the top explains that changing it will not change the website, with
+  **Ask my assistant to connect it**. That opens the editor with the request
+  written in the message box for the person to read and send. The assistant's
+  rules now say to keep fields flat and how to connect older wording (keep
+  every word, reshape nested values, describe every field, mark every element).
+  Tried once with the real assistant on a two-page website with nested content:
+  all twelve pieces were connected and every word was kept.
+
+Both ways of reaching things that could not be found were also fixed: a
+**Content** button in the editor's bar, a **Pictures** tab in its side panel,
+and **Add pictures or files** beside the message box.

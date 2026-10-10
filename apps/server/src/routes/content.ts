@@ -1,8 +1,9 @@
 import { type ContentField, contentFieldSchema } from "@atelier/shared";
 import type { Context } from "hono";
 import { z } from "zod";
+import { readTar } from "../runtime/tar.ts";
 import { type AgentTokenClaims, verifyAgentToken } from "../services/agentToken.ts";
-import { sanitizeRich } from "../services/fill.ts";
+import { boundRefs, sanitizeRich } from "../services/fill.ts";
 import { type Api, PROJECT, param } from "./kit.ts";
 
 const KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -130,6 +131,37 @@ export function contentRoutes(api: Api): void {
         });
         await audit(c, "content.restore", `content:${doc.id}`, { rev });
         return c.json({ document });
+    });
+
+    // Where each piece of wording appears: for every page of the website, the fields
+    // its elements are bound to. The Content page uses it to say "on the Home page"
+    // beside a field, to show it in the preview, and to say plainly when wording is
+    // not connected to any page (so changing it would change nothing).
+    const maps = new Map<string, { head: string; pages: { path: string; title: string; refs: string[] }[] }>();
+    route("get", `${PROJECT}/content/map`, "content.read", async (c) => {
+        const project = c.get("project");
+        if (project.archivedAt) return c.json({ pages: [] });
+        const head = await api.runtime.head(project.id).catch(() => null);
+        if (!head) return c.json({ pages: [] });
+        const cached = maps.get(project.id);
+        if (cached?.head === head) return c.json({ pages: cached.pages });
+        try {
+            const archive = Buffer.from(await api.runtime.exportTree(project.id, head));
+            const pages = readTar(archive, { maxEntries: 20_000 })
+                .filter((e) => e.type === "file" && /\.html?$/i.test(e.path) && !e.path.split("/").some((part) => part.startsWith(".")))
+                .slice(0, 300)
+                .map((e) => {
+                    const html = e.body.toString("utf8");
+                    const title = /<title[^>]*>([^<]{1,200})<\/title>/i.exec(html)?.[1]?.trim() ?? "";
+                    return { path: e.path, title, refs: [...new Set(boundRefs(html).map((r) => r.ref))] };
+                })
+                .sort((x, y) => (x.path === "index.html" ? -1 : y.path === "index.html" ? 1 : x.path.localeCompare(y.path)));
+            maps.set(project.id, { head, pages });
+            if (maps.size > 500) maps.delete(maps.keys().next().value ?? "");
+            return c.json({ pages });
+        } catch (err) {
+            return api.runtimeError(c, err);
+        }
     });
 
     // What the live release ships (the build input).

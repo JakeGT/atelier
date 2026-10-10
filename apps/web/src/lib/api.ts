@@ -518,6 +518,9 @@ export function orgApi(org: string) {
         checkDomain: (projectId: string, hostname: string) => post<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}/check`),
         removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}`),
 
+        // For each page of the website, the pieces of wording it shows ("page/home#headline").
+        contentMap: (projectId: string) =>
+            get<{ pages: { path: string; title: string; refs: string[] }[] }>(`${p(projectId)}/content/map`).then((b) => b.pages),
         listMedia: (projectId: string) => get<MediaLibrary>(`${p(projectId)}/media`),
         uploadMedia: (projectId: string, file: File, about: { alt: string; decorative: boolean }) => {
             const form = new FormData();

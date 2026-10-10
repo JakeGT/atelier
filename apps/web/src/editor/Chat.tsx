@@ -19,6 +19,8 @@ const SUGGESTIONS = [
 ];
 
 interface ChatProps {
+    // Words to start the message box with.
+    draft?: string;
     // A picture or file was added to the website's library from here.
     onFileAdded?: () => void;
     messages: Message[];
@@ -52,7 +54,9 @@ function names(list: string[]): string {
 
 export function Chat(props: ChatProps) {
     const { messages, loading, run, runBy, people, authors, me, ready, starting, locked, onSend, onTyping, onRetryWorkspace } = props;
-    const [input, setInput] = useState("");
+    // A request prepared elsewhere (the Content page's "Ask my assistant to connect it") arrives
+    // written out in the box, for the person to read, change and send.
+    const [input, setInput] = useState(props.draft ?? "");
     const scroller = useRef<HTMLDivElement>(null);
     const textarea = useRef<HTMLTextAreaElement>(null);
     const busy = run !== null;
