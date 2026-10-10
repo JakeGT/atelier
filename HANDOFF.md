@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p3.6` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has P0, P1, P2 and BYOK. Three stacked PRs are open, to merge in order: [#5](https://github.com/JakeGT/atelier/pull/5) `p3-hosting`, [#6](https://github.com/JakeGT/atelier/pull/6) `onboarding`, [#7](https://github.com/JakeGT/atelier/pull/7) `live-activity`.
+> Last updated 2026-10-10. Status: **`p3.7` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #7 (P0–P3, BYOK, arrival, live activity and sharing). Open: [PR #8](https://github.com/JakeGT/atelier/pull/8) `preview-navigation` (Back and Forward in the preview).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.6` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.7` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0011` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
