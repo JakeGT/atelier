@@ -139,6 +139,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - "Ideas for what to ask" is a list of ready-made requests in `apps/web/src/lib/ideas.ts`.
 - Wording items in the editor open a pop-up to edit.
 
+## Content (branch `p5-content-studio`)
+
+- A page's wording is bound to content with `data-content…` attributes and filled by the server: from drafts in the preview, from the release's content on publish (`services/fill.ts`). Unbound pages are untouched.
+- Three places to edit: **Edit text** in the preview, the pop-up from the side panel, and the Content page at `/o/<studio>/p/<website>/content`.
+- Documents describe their fields (label, type, help); the assistant is told to write them and to bind elements.
+- Not built: media (needs a storage decision), lists of multi-field items, publish-time limits. See ADR-0014 "As built".
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
@@ -153,7 +160,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 The order from here (docs/13):
 
-1. **P5, in progress:** the content studio (ADR-0014, steps b–h), then data retention and alerting.
+1. **P5, in progress:** content studio steps a–e are built. Next: media (steps f–h, after Jake decides where files are stored), then data retention (E5.2) and alerting (E5.3).
 2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
 3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
 

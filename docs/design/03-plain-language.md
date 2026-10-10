@@ -45,6 +45,7 @@ list. Before inventing a term, look for it here; when you add one, add it here.
 | **Put this one back** | Publish an earlier release again | Roll back |
 | **Unpublish** / **Take offline** | Stop the website being public; keep everything else | Undeploy, tear down |
 | **Wording** | Text on the website the person can edit directly | Content documents, CMS, drafts |
+| **Edit text** | The switch on the preview that lets wording be typed into the page | Inline editing, visual editing, WYSIWYG |
 | **Media** | Images, video, audio and documents uploaded to a website | Assets, blobs |
 | **Content** | Wording and media together; the name of the page that manages both (planned) | CMS, content store |
 | **Not published yet** | Changed since the last publish | Draft, dirty, staged |

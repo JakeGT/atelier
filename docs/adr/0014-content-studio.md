@@ -1,6 +1,6 @@
 # ADR-0014 — Content: one store, bound to the page, edited in three places; a media library
 
-- **Status:** Proposed (planned as P5 epic E5.0; nothing here is built)
+- **Status:** Accepted in practice: the owner said to continue with phase 5 on 2026-10-10. Steps a–e are built (see "As built"); media (f–h) is not.
 - **Date:** 2026-10-10
 - **Extends:** ADR-0002 (content store), ADR-0007 (releases pin content), docs/09
 
@@ -216,3 +216,54 @@ drafts but never publish.
 - Enonic, [Best practices for image handling](https://enonic.com/blog/best-practices-image-handling).
 - MDN, [The picture element](https://developer.mozilla.org/docs/Web/HTML/Element/picture).
 - Vercel, [Best practices for hosting videos](https://vercel.com/kb/guide/best-practices-for-hosting-videos-on-vercel-nextjs-mp4-gif).
+
+## As built: steps a–e (branch `p5-content-studio`, 2026-10-10)
+
+- **Binding and filling** (`services/fill.ts`): `data-content`,
+  `data-content-rich`, `data-content-list`, with references of the form
+  `kind/slug#field`. `parse5` parses and serialises. A value is placed as a
+  text node; rich text passes `sanitizeRich` (an allow-list of twelve elements
+  and safe `href`s) when saved and again when placed. A page with no binding is
+  never parsed: it is served and published byte for byte.
+- **Preview** (`/preview/…`): bound pages are filled from drafts on every
+  request.
+- **Publish:** the control plane sends the deployer the release's content
+  alongside the files (a form with `archive` and `content`); the deployer fills
+  each HTML file before hashing and uploading. The workspace's files are not
+  changed: wording travels with the release, so putting an earlier release back
+  puts its wording back.
+- **Fields** (`content_documents.fields`, migration 0013): key, label, type
+  (`text`, `long`, `rich`, `list`), help. Set by the assistant's
+  `content_upsert_draft` tool or `PUT …/content/:kind/:slug/fields`. A document
+  without them has its fields worked out from its values.
+- **House rules** now tell the assistant to save wording with described fields
+  and to mark the element that shows it.
+- **Three places to edit**, all saving through the same API with the same
+  conflict check:
+  - *In the preview:* **Edit text** on the preview bar. The bridge
+    (`assets/preview-bridge.js`) outlines bound elements; plain text is typed in
+    place and reported on Enter or on leaving the element; formatted text and
+    lists open the pop-up. The editor accepts only a well-formed reference and
+    a short string, and does the saving.
+  - *The pop-up* from the side panel (`editor/Wording.tsx`), with a small
+    formatting toolbar for rich text.
+  - *The Content page* (`/o/:studio/p/:website/content`): pages on the left
+    with search, the fields in the middle with earlier versions and "Go back to
+    this", the page's preview on the right, and a line listing what is not yet
+    published.
+
+**Differences from the decision above, and what is left:**
+
+- Lists are lists of short lines (each item is a copy of the first, with the
+  line as its text). Lists of items with several fields each ("services" with a
+  name, a summary and a price) are not built.
+- Links, numbers, dates and yes/no fields are not built: text, long text, rich
+  text and list are.
+- Images (`data-content-image`) wait for the media library.
+- Limits checked at publish (required, maximum length) are not built.
+- The Content page has no "lists" or "media" sections and no reordering.
+- Existing websites are not bound until the assistant is asked to do it
+  ("make the wording on this website editable").
+- Whether assistants bind reliably has not been measured against real models
+  (the first item under "To confirm"); it was exercised with pages written by
+  hand.

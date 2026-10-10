@@ -275,6 +275,25 @@ test("publishing: the website's files travel workspace -> control plane -> deplo
     assert.equal((await pagesState()).sites[site]?.files["/index.html"], "<h1>hello e2e</h1>");
 });
 
+test("wording: a bound page is filled from saved content in the preview and on the live website", async () => {
+    // A page whose headline is bound to content, with different wording saved for it.
+    inside(ws.container, `printf '<h1 data-content="page/home#headline">written in the file</h1>' > /workspace/index.html`);
+    assert.ok(commit(ws.container).ok);
+    await json(await call("PUT", `/projects/${ws.id}/content/page/home`, { headline: "Saved <wording> & more" }));
+
+    const { url } = await json<{ url: string }>(await call("GET", `/projects/${ws.id}/preview-url`));
+    const preview = await (await fetch(`${B}${url}index.html`)).text();
+    assert.match(preview, /<h1 data-content="page\/home#headline">Saved &lt;wording&gt; &amp; more<\/h1>/);
+
+    assert.equal((await publish(ws.id)).status, 200);
+    const live = (await pagesState()).sites[site]?.files["/index.html"] ?? "";
+    assert.match(live, />Saved &lt;wording&gt; &amp; more<\/h1>/);
+    // Finished HTML: nothing of the editor travels to the live website.
+    assert.ok(!live.includes("atelierPreview") && !live.includes("<script"));
+    // The file in the workspace is unchanged; the wording travelled with the release.
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /written in the file/);
+});
+
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
     const tokenOf = (name: string) =>
         inspect<Inspect>(name)
@@ -306,7 +325,7 @@ test("archiving stops the workspace; deleting removes it and its files", async (
     await json(await call("POST", `/projects/${ws.id}/sessions`));
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
     // (Rolling back changed what is live, not the working files.)
-    assert.equal(inside(ws.container, "cat /workspace/index.html").out, "<h1>version two</h1>");
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /written in the file/);
 
     await json(await call("POST", `/projects/${ws.id}/archive`));
     // Archived, the published website is still up; deleting takes it down.

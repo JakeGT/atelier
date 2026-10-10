@@ -395,8 +395,11 @@ current host. What needs the VPS is P6, which is last.
 
 ### E5.0 Content studio — breakdown
 
-Planned, not started. The design, and what must be confirmed first, are in
-ADR-0014. Each step is usable on its own and is a branch of its own.
+**Steps a–e are built** (a on `p4-operator-templates`; b–e on
+`p5-content-studio`, 2026-10-10; details in ADR-0014 "As built"). **Steps f–h
+(media) are not started** and wait for a decision on where files are stored.
+Lists of items with several fields, more field types, and limits checked at
+publish are also still to do.
 
 | Step | What it delivers | Depends on |
 | --- | --- | --- |

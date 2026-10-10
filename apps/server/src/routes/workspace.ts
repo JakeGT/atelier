@@ -2,16 +2,11 @@ import { randomUUID } from "node:crypto";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { agentInstructions } from "../services/instructions.ts";
+import { PREVIEW_BRIDGE } from "../services/previewBridge.ts";
 import { findProvider, parseModel, validModelRef } from "../services/providers.ts";
 import type { RunState } from "../services/runtime.ts";
 import { SHA_RE } from "../services/workspace.ts";
 import { type Api, type Ctx, PROJECT, param, startOfUtcDay } from "./kit.ts";
-
-// Appended to pages shown in the editor's preview frame. It reports the page being
-// shown (on every arrival, including Back and Forward) and moves through the
-// frame's own history when the editor asks. It can do nothing else: what it
-// tells the editor is treated as untrusted text.
-const PREVIEW_BRIDGE = `<script>(function(){try{var say=function(){parent.postMessage({atelierPreview:1,path:location.pathname.replace(/^\\/preview\\/[^/]+\\//,"")||"index.html"},"*")};addEventListener("pageshow",say);addEventListener("message",function(e){if(e.source!==parent||!e.data||e.data.atelierPreview!==1)return;if(e.data.go==="back")history.back();else if(e.data.go==="forward")history.forward()})}catch(e){}})()</script>`;
 
 const AGENT_TOKEN_TTL_S = 60 * 60;
 const PREVIEW_TOKEN_TTL_S = 2 * 60 * 60;
