@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Checkpoint, ContentDocument, Release } from "../lib/api";
 import { navigate, timeAgo } from "../lib/hooks";
 import { MediaLibrary } from "./Media";
-import { documentName, fieldsOf, WordingDialog } from "./Wording";
+import { countPieces, documentName, WordingDialog } from "./Wording";
 
 export type Tab = "versions" | "releases" | "content" | "files";
 
@@ -181,7 +181,7 @@ function Content({ documents, canEdit, onSaveDocument, contentHref }: SidebarPro
 
 function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boolean; onSave: SidebarProps["onSaveDocument"] }) {
     const [open, setOpen] = useState(false);
-    const count = fieldsOf(doc).length;
+    const count = countPieces(doc);
     const changed = JSON.stringify(doc.draft) !== JSON.stringify(doc.published);
     return (
         <li>

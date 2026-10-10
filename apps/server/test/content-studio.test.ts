@@ -206,3 +206,34 @@ test("the deployer fills pages from the content it is given, and leaves unbound 
     assert.notEqual(site.files.find((f) => f.path === "/index.html")?.hash, unfilled.files.find((f) => f.path === "/index.html")?.hash);
     assert.equal(site.files.find((f) => f.path === "/plain.html")?.hash, unfilled.files.find((f) => f.path === "/plain.html")?.hash);
 });
+
+test("the page map says which pages show which pieces of wording, and follows the website as it changes", async () => {
+    const { t, who, p } = await setup();
+    const map = async () =>
+        (await json<{ pages: { path: string; title: string; refs: string[] }[] }>(await get(t, who, `${p}/content/map`))).pages;
+    assert.deepEqual(await map(), [{ path: "index.html", title: "t", refs: ["page/home#headline", "page/home#story", "page/home#hours"] }]);
+    // A later version of the website: another page, and the home page no longer marks anything.
+    t.agent.run = async (input) => {
+        writeFileSync(join(input.workspaceDir, "index.html"), "<title>Home</title><h1>plain</h1>");
+        writeFileSync(
+            join(input.workspaceDir, "about.html"),
+            '<title>About us</title><h1 data-content="page/about#headline">x</h1><p data-content="page/shared#footer">y</p>',
+        );
+        return { text: "done", toolEvents: [] };
+    };
+    const { sessions } = await json<{ sessions: { id: string }[] }>(await get(t, who, `${p}/sessions`));
+    const { run } = await json<{ run: RunState }>(
+        await send(t, who, "POST", `${p}/sessions/${sessions[0]?.id}/messages`, { prompt: "again" }),
+    );
+    for (let i = 0; i < 200; i++) {
+        if ((await json<{ run: RunState }>(await get(t, who, `${p}/runs/${run.id}`))).run.status !== "running") break;
+        await new Promise((r) => setTimeout(r, 15));
+    }
+    assert.deepEqual(await map(), [
+        { path: "index.html", title: "Home", refs: [] },
+        { path: "about.html", title: "About us", refs: ["page/about#headline", "page/shared#footer"] },
+    ]);
+    // Someone outside the studio cannot read it.
+    const other = await signIn(t);
+    assert.equal((await get(t, other, `${other.api}/projects/${p.split("/").pop()}/content/map`)).status, 404);
+});

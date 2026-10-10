@@ -75,3 +75,57 @@ test("stop keeps the files; destroy asks the provisioner to purge them", async (
     assert.deepEqual(calls, [`DELETE provisioner/workspaces/${id}`, `DELETE provisioner/workspaces/${id}?purge=1`]);
     await assert.rejects(runtime.destroy("../../etc"), /invalid project id/);
 });
+
+test("a workspace still on an earlier runtime: its runs are made whole, and it is moved to the current runtime when idle", async () => {
+    const projectId = randomUUID();
+    const runId = randomUUID();
+    const calls: string[] = [];
+    let busy = false;
+    // What the runtime from before live activity answers: no steps, no deadline.
+    const old = {
+        id: runId,
+        status: "running",
+        startedAt: "2026-10-10T15:00:00.000Z",
+        finishedAt: null,
+        result: null,
+        error: null,
+        checkpoint: null,
+    };
+    const fetchFake = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        calls.push(`${init?.method ?? "GET"} ${url.host === "provisioner" ? "provisioner" : "workspace"}${url.pathname}`);
+        const json = (body: unknown, status = 200) =>
+            new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+        if (url.host === "provisioner") return json({ workspaceId: "x" });
+        if (url.pathname === "/status") return json({ busy });
+        if (url.pathname === "/healthz") return json({ ok: true });
+        return json(old, init?.method === "POST" ? 202 : 200);
+    }) as typeof fetch;
+    const runtime = new ContainerRuntime({
+        provisionerUrl: "http://provisioner",
+        provisionerSecret: "prov-secret",
+        secretsKey: KEY,
+        fetch: fetchFake,
+    });
+
+    const run = await runtime.getRun(projectId, runId);
+    assert.deepEqual(run?.steps, []);
+    assert.equal(run?.canExtend, false);
+    assert.equal(run?.lastActivityAt, old.startedAt);
+    assert.equal(run?.deadlineAt, "2026-10-10T15:15:00.000Z");
+
+    // Idle: the provisioner is asked to bring it up to date before the request starts.
+    calls.length = 0;
+    assert.deepEqual(
+        (await runtime.startRun(projectId, { prompt: "x", model: null, instructions: "", apiUrl: "", agentToken: "" })).steps,
+        [],
+    );
+    assert.deepEqual(calls.slice(0, 2), ["GET workspace/status", `PUT provisioner/workspaces/${projectId}`]);
+    assert.equal(calls.at(-1), "POST workspace/runs");
+
+    // Busy: it is left alone (replacing it would end what it is doing).
+    busy = true;
+    calls.length = 0;
+    await runtime.startRun(projectId, { prompt: "x", model: null, instructions: "", apiUrl: "", agentToken: "" });
+    assert.ok(!calls.some((c) => c.startsWith("PUT provisioner")));
+});

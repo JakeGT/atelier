@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { Safety } from "./ui/Safety";
 import "@fontsource/instrument-serif/400.css";
 import "@fontsource/instrument-serif/400-italic.css";
 import "@fontsource-variable/geist/wght.css";
@@ -16,6 +17,8 @@ if (!root) throw new Error("root element not found");
 
 createRoot(root).render(
     <StrictMode>
-        <App />
+        <Safety>
+            <App />
+        </Safety>
     </StrictMode>,
 );

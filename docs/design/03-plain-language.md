@@ -19,8 +19,24 @@ website. Nothing shown to them is something only we would understand.
 | JSON | Ordinary fields; a list is edited one per line |
 | Error codes, stack traces | What happened, in a sentence |
 
-If something structured genuinely cannot be shown as fields, say so plainly and
-point to the easier route ("structured: easier to ask your assistant").
+There is no exception for "structured" data: it is always shown as fields (see
+below). An earlier version of this rule allowed a code box with a note to ask
+the assistant instead; people met it on their real websites and could not use it.
+
+### Never show the format something is stored in
+
+Content is stored as JSON; a person sees fields. If the interface would have to
+show brackets, quotes, keys or a code box to let someone change something, the
+interface is not finished. Whatever shape the data has, it is turned into
+labelled fields (a line, a paragraph, a list, a group, entries with parts).
+"Structured: easier to ask your assistant" is not an answer either.
+
+### Say what a thing is and where it goes
+
+A label alone ("Title") does not tell someone what they are changing. Every
+piece of content says where on the website it appears, and can show it there.
+If it appears nowhere, say that plainly, say what it means ("changing it will
+not change the website") and offer the way to fix it.
 
 ## Use their word, not ours
 
