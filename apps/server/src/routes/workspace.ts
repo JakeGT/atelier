@@ -8,6 +8,7 @@ import { findProvider, parseModel, validModelRef } from "../services/providers.t
 import type { RunState } from "../services/runtime.ts";
 import { SHA_RE } from "../services/workspace.ts";
 import { type Api, type Ctx, PROJECT, param, startOfUtcDay } from "./kit.ts";
+import { STUDIO_PREFIX } from "./templates.ts";
 
 const AGENT_TOKEN_TTL_S = 60 * 60;
 const PREVIEW_TOKEN_TTL_S = 2 * 60 * 60;
@@ -42,8 +43,42 @@ export function workspaceRoutes(api: Api): void {
             const { workspaceId } = await runtime.ensure(projectId);
             // A website started from a template gets its files the first time it is opened.
             const project = c.get("project");
-            const template = project.template ? templates.find((t) => t.id === project.template) : undefined;
-            if (project.template) {
+            if (project.template?.startsWith(STUDIO_PREFIX)) {
+                // One of the studio's own: its files, the wording it was saved with, and the
+                // pictures it uses (copied from the website it came from, while that exists).
+                const own = await store.studioTemplates.get(org.id, project.template.slice(STUDIO_PREFIX.length));
+                if (own) {
+                    await runtime.seed(projectId, own.files, `Started from the ${own.name} template`);
+                    for (const d of own.content) {
+                        await store.content.upsertDraft({
+                            tenantId: org.id,
+                            projectId,
+                            kind: d.kind,
+                            slug: d.slug,
+                            draft: d.draft,
+                            updatedBy: null,
+                        });
+                        if (d.fields?.length) await store.content.setFields(org.id, projectId, d.kind, d.slug, d.fields);
+                    }
+                    if (storage && own.sourceProject && own.sourceProject !== projectId) {
+                        const used = `${own.files.map((f) => Buffer.from(f.content, "base64").toString("latin1")).join("\n")}\n${JSON.stringify(own.content)}`;
+                        for (const asset of await store.media.list(org.id, own.sourceProject).catch(() => [])) {
+                            if (!filesOf(asset).some((n) => used.includes(`media/${n}`))) continue;
+                            try {
+                                for (const name of filesOf(asset)) {
+                                    const body = await storage.get(storageKey(asset, name));
+                                    if (body) await storage.put(storageKey({ tenantId: org.id, projectId }, name), body, mimeOfName(name));
+                                }
+                                await store.media.create({ ...asset, id: randomUUID(), projectId, uploadedBy: c.get("user").id });
+                            } catch (err) {
+                                console.warn(`could not copy ${asset.name} into ${projectId}: ${(err as Error).message}`);
+                            }
+                        }
+                    }
+                }
+                await store.projects.clearTemplate(org.id, projectId);
+            } else if (project.template) {
+                const template = templates.find((t) => t.id === project.template);
                 if (template) await runtime.seed(projectId, template.files, `Started from the ${template.name} template`);
                 await store.projects.clearTemplate(org.id, projectId);
             }

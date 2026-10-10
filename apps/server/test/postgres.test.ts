@@ -926,3 +926,28 @@ test("per-website roles, usage by month, and deleting a studio, against the data
     assert.ok(await store.projects.findById(b.tenantId, b.projectId));
     assert.ok(await store.users.findById(a.userId), "the person outlives the studio");
 });
+
+test("a studio's own templates belong to it alone", { skip }, async () => {
+    const a = await studio("tpl-a");
+    const b = await studio("tpl-b");
+    const made = await store.studioTemplates.create({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        name: "Shop",
+        description: "A shop",
+        files: [{ path: "index.html", content: Buffer.from("<h1>x</h1>").toString("base64") }],
+        content: [{ kind: "page", slug: "home", draft: { headline: "x" }, fields: [{ key: "headline", label: "Headline", type: "text" }] }],
+        sourceProject: a.projectId,
+        createdBy: a.userId,
+    });
+    assert.deepEqual((await store.studioTemplates.get(a.tenantId, made.id))?.content[0]?.fields, [
+        { key: "headline", label: "Headline", type: "text" },
+    ]);
+    assert.equal((await store.studioTemplates.list(a.tenantId)).length, 1);
+    assert.equal((await store.studioTemplates.list(b.tenantId)).length, 0);
+    assert.equal(await store.studioTemplates.get(b.tenantId, made.id), null);
+    await store.studioTemplates.remove(b.tenantId, made.id);
+    assert.ok(await store.studioTemplates.get(a.tenantId, made.id));
+    await store.studioTemplates.remove(a.tenantId, made.id);
+    assert.equal(await store.studioTemplates.get(a.tenantId, made.id), null);
+});

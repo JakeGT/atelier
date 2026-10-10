@@ -38,6 +38,8 @@ import type {
     ProviderKeyStore,
     ReleaseStore,
     Store,
+    StudioTemplate,
+    StudioTemplateStore,
     UsageStore,
     UserStore,
 } from "./types.ts";
@@ -358,6 +360,7 @@ export class PostgresStore implements Store {
     domains: DomainStore;
     media: MediaStore;
     projectMembers: ProjectMemberStore;
+    studioTemplates: StudioTemplateStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
@@ -1079,6 +1082,53 @@ export class PostgresStore implements Store {
                         SELECT project_id, role FROM project_members WHERE user_id = ${userId}`;
                     return rows.map((r) => ({ projectId: r.project_id, role: r.role }));
                 }),
+        };
+
+        interface TemplateRow {
+            id: string;
+            tenant_id: string;
+            name: string;
+            description: string;
+            files: StudioTemplate["files"];
+            content: StudioTemplate["content"];
+            source_project: string | null;
+            created_at: Ts;
+        }
+        const rowToTemplate = (r: TemplateRow): StudioTemplate => ({
+            id: r.id,
+            tenantId: r.tenant_id,
+            name: r.name,
+            description: r.description,
+            files: r.files ?? [],
+            content: r.content ?? [],
+            sourceProject: r.source_project,
+            createdAt: isoNow(r.created_at),
+        });
+        const TEMPLATE_COLS = "id, tenant_id, name, description, files, content, source_project, created_at";
+        this.studioTemplates = {
+            create: async (t) =>
+                this.withTenant(t.tenantId, async (tx) => {
+                    const rows = await tx<TemplateRow[]>`
+                        INSERT INTO studio_templates (id, tenant_id, name, description, files, content, source_project, created_by)
+                        VALUES (${t.id}, ${t.tenantId}, ${t.name}, ${t.description}, ${json(t.files as unknown as Json)}, ${json(t.content as unknown as Json)},
+                                ${t.sourceProject}, ${t.createdBy})
+                        RETURNING ${tx.unsafe(TEMPLATE_COLS)}`;
+                    return rowToTemplate(firstRow(rows));
+                }),
+            list: async (tenantId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<TemplateRow[]>`SELECT ${tx.unsafe(TEMPLATE_COLS)} FROM studio_templates ORDER BY created_at`;
+                    return rows.map(rowToTemplate);
+                }),
+            get: async (tenantId, id) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<TemplateRow[]>`SELECT ${tx.unsafe(TEMPLATE_COLS)} FROM studio_templates WHERE id = ${id}`;
+                    const r = rows[0];
+                    return r ? rowToTemplate(r) : null;
+                }),
+            remove: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM studio_templates WHERE id = ${id}`);
+            },
         };
 
         const MEDIA_COLS =

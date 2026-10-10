@@ -1,10 +1,24 @@
-import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, CloudOff, Ellipsis, Globe, PencilLine, Plus, Trash2, Type } from "lucide-react";
+import {
+    Archive,
+    ArchiveRestore,
+    ArrowUp,
+    ArrowUpRight,
+    CloudOff,
+    Ellipsis,
+    Globe,
+    LayoutTemplate,
+    PencilLine,
+    Plus,
+    Trash2,
+    Type,
+} from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Org, Project, Session, Template } from "../lib/api";
 import { api, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
 import { Cover } from "../ui/Cover";
+import { Gallery } from "../ui/Gallery";
 import { Dialog, Dots, useToast } from "../ui/kit";
 import { StudioNav } from "../ui/StudioNav";
 
@@ -40,10 +54,41 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     // Starter templates: a finished small website to begin from, instead of an empty page.
     const [templates, setTemplates] = useState<Template[]>([]);
     const [template, setTemplate] = useState<string | null>(null);
+    const loadTemplates = useCallback(() => a.templates().then(setTemplates, () => api.templates().then(setTemplates, () => {})), [a]);
     useEffect(() => {
-        api.templates().then(setTemplates, () => {});
-    }, []);
+        void loadTemplates();
+    }, [loadTemplates]);
     const chosen = templates.find((t) => t.id === template);
+    const [choosing, setChoosing] = useState(false);
+    // Saving a website as one of the studio's own starting points.
+    const [saving, setSaving] = useState<Project | null>(null);
+    const [templateName, setTemplateName] = useState("");
+    const [templateAbout, setTemplateAbout] = useState("");
+    async function saveAsTemplate(e: FormEvent) {
+        e.preventDefault();
+        if (!saving) return;
+        setBusy(true);
+        try {
+            await a.saveTemplate(saving.id, templateName.trim(), templateAbout.trim());
+            toast(`“${templateName.trim()}” is now a starting point for new websites in this studio.`);
+            setSaving(null);
+            await loadTemplates();
+        } catch (err) {
+            toast((err as Error).message, "error");
+        } finally {
+            setBusy(false);
+        }
+    }
+    async function removeTemplate(t: Template) {
+        try {
+            await a.removeTemplate(t.id);
+            if (template === t.id) setTemplate(null);
+            toast(`“${t.name}” was removed. Websites already made from it are not affected.`);
+            await loadTemplates();
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    }
     const [deleting, setDeleting] = useState<Project | null>(null);
     const [unpublishing, setUnpublishing] = useState<Project | null>(null);
     const nameRef = useRef<HTMLInputElement>(null);
@@ -188,20 +233,13 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                     : "Your assistant builds the first page from your description, or you start in the editor with nothing."}
                             </p>
                             <div className="brief-foot">
-                                <fieldset className="starters">
-                                    <legend className="starters-label">Start from</legend>
-                                    {[{ id: null as string | null, name: "An empty page" }, ...templates].map((t) => (
-                                        <label key={t.id ?? "blank"} className={`starter ${template === t.id ? "on" : ""}`}>
-                                            <input
-                                                type="radio"
-                                                name="template"
-                                                checked={template === t.id}
-                                                onChange={() => setTemplate(t.id)}
-                                            />
-                                            {t.name}
-                                        </label>
-                                    ))}
-                                </fieldset>
+                                <div className="starters">
+                                    <span className="starters-label">Starts from</span>
+                                    <strong className="starter-chosen">{chosen ? chosen.name : "An empty page"}</strong>
+                                    <button type="button" className="btn btn-sm" onClick={() => setChoosing(true)}>
+                                        <LayoutTemplate /> Choose a starting point
+                                    </button>
+                                </div>
                                 <button type="submit" className="btn btn-seal" disabled={busy}>
                                     {busy ? (
                                         <Dots />
@@ -272,6 +310,11 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                         onUnpublish={() => setUnpublishing(p)}
                                         onArchive={() => void archive(p)}
                                         onDelete={() => setDeleting(p)}
+                                        onTemplate={() => {
+                                            setTemplateName(p.name);
+                                            setTemplateAbout("");
+                                            setSaving(p);
+                                        }}
                                     />
                                 </div>
                             ))}
@@ -343,6 +386,49 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                     </div>
                 </Dialog>
             )}
+            {choosing && (
+                <Gallery
+                    templates={templates}
+                    chosen={template}
+                    mayManage={mayManage}
+                    onChoose={setTemplate}
+                    onRemove={(t) => void removeTemplate(t)}
+                    onClose={() => setChoosing(false)}
+                />
+            )}
+            {saving && (
+                <Dialog onClose={() => setSaving(null)}>
+                    <form onSubmit={saveAsTemplate}>
+                        <p className="eyebrow">Save as a template</p>
+                        <h2>{saving.name}</h2>
+                        <p>
+                            New websites in this studio can then start as a copy of this one as it is now: its pages, its wording and the
+                            pictures it uses. Changing this website afterwards does not change the template.
+                        </p>
+                        <label className="field-line">
+                            <span className="eyebrow">Name of the template</span>
+                            <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} maxLength={80} required />
+                        </label>
+                        <label className="field-line">
+                            <span className="eyebrow">What it is good for</span>
+                            <input
+                                value={templateAbout}
+                                onChange={(e) => setTemplateAbout(e.target.value)}
+                                maxLength={240}
+                                placeholder="A one-page site for a restaurant, with a menu and opening hours"
+                            />
+                        </label>
+                        <div className="dialog-actions">
+                            <button type="button" className="btn" onClick={() => setSaving(null)} disabled={busy}>
+                                Cancel
+                            </button>
+                            <button type="submit" className="btn btn-primary" disabled={busy || !templateName.trim()}>
+                                {busy ? <Dots /> : "Save as a template"}
+                            </button>
+                        </div>
+                    </form>
+                </Dialog>
+            )}
             {deleting && <ConfirmDelete project={deleting} onCancel={() => setDeleting(null)} onConfirm={() => void remove(deleting)} />}
         </div>
     );
@@ -356,6 +442,7 @@ function CardMenu({
     onUnpublish,
     onArchive,
     onDelete,
+    onTemplate,
 }: {
     project: Project;
     href: string;
@@ -363,6 +450,7 @@ function CardMenu({
     onUnpublish: () => void;
     onArchive: () => void;
     onDelete: () => void;
+    onTemplate: () => void;
 }) {
     const [open, setOpen] = useState(false);
     // Opens upward when there is no room below (the last row of the shelf).
@@ -412,6 +500,9 @@ function CardMenu({
                     )}
                     {mayManage && (
                         <>
+                            <button type="button" role="menuitem" onClick={run(onTemplate)}>
+                                <LayoutTemplate /> Save as a template…
+                            </button>
                             <div className="menu-rule" />
                             {project.productionRef && (
                                 <button type="button" role="menuitem" onClick={run(onUnpublish)}>

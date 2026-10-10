@@ -4,6 +4,7 @@ import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
 import type { ProjectPatch } from "../store/types.ts";
 import { type Api, type Ctx, ORG, PROJECT, param, SLUG_RE, slugify } from "./kit.ts";
+import { STUDIO_PREFIX } from "./templates.ts";
 
 // Projects (websites): create, list, settings, archive, delete.
 export function projectRoutes(api: Api): void {
@@ -99,7 +100,12 @@ export function projectRoutes(api: Api): void {
             for (let n = 2; existing.some((p) => p.slug === slug); n++) slug = `${base}-${n}`;
         }
         const template = typeof body?.template === "string" && body.template ? body.template : null;
-        if (template && !templates.some((t) => t.id === template)) return c.json({ error: "that template isn't available" }, 400);
+        // A built-in template, or one of this studio's own ("studio:<id>").
+        const known = template?.startsWith(STUDIO_PREFIX)
+            ? /^[0-9a-f-]{36}$/.test(template.slice(STUDIO_PREFIX.length)) &&
+              (await store.studioTemplates.get(org.id, template.slice(STUDIO_PREFIX.length))) !== null
+            : templates.some((t) => t.id === template);
+        if (template && !known) return c.json({ error: "that template isn't available" }, 400);
         const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template });
         await audit(c, "project.create", `project:${created.id}`, { slug, name, ...(template ? { template } : {}) });
         return c.json({ project: created }, 201);

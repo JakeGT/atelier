@@ -172,10 +172,16 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **A whole studio:** download everything (`POST …/export` then the link), delete it (`DELETE /orgs/:org`, owner only, name typed), usage by month. See docs/12 §5.
 - **People are told:** an e-mail when invited (to the address, whether or not they have an account), a notification when they join, when their role on a website changes, and when a studio they belong to is deleted.
 
+## Starting points and showing a draft (branch `gallery-previews`)
+
+- **Template gallery:** "Choose a starting point" when making a website shows each template as a live, scaled-down copy (`ui/Gallery.tsx`, served from `/template-preview/<token>/`, sandboxed, no scripts), with "Look closer" at desktop and phone width.
+- **A studio's own templates:** "Save as a template…" on a website's card stores its files and wording (`studio_templates`, migration 0018). A website started from one gets the files, the wording with its labels, and the pictures it uses (copied from the source website's library while that exists).
+- **A link to show someone** (`POST …/share`, in the Publish dialog): a preview deployment at an unguessable, unlisted address. Nothing is published. Unpublishing or deleting the website removes these links too.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
-- **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
+- **`registry.npmjs.org` is still on the egress allow-list** (the engine installs its plugin package there on first use). GitHub came off on 2026-10-10: `ripgrep` is in the runtime image.
 - **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). Off-host backups are part of the VPS move, the last phase (P6); accepted until then.
 - **Workspaces keep the runtime they were created with** until their next request, when an idle one is recreated on the current runtime (`ContainerRuntime.bringUpToDate`, since p5.8). Until p5.8 they were never recreated, and one on p3.5 blanked the editor by reporting runs without `steps`; runs are now made whole (`wholeRun`) and the app has an error screen (`ui/Safety.tsx`).
 

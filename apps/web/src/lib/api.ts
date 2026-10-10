@@ -133,6 +133,10 @@ export interface Template {
     id: string;
     name: string;
     description: string;
+    // One of this studio's own (a website saved as a template).
+    own?: boolean;
+    // Where it can be looked at.
+    previewUrl?: string;
 }
 
 // What an operator sees of each studio.
@@ -508,6 +512,11 @@ export function orgApi(org: string) {
         update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
             patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
+        // Every starting point for a new website here: Atelier's own and this studio's.
+        templates: () => get<{ templates: Template[] }>(`${o}/templates`).then((b) => b.templates),
+        saveTemplate: (projectId: string, name: string, description: string) =>
+            post<{ template: Template }>(`${p(projectId)}/template`, { name, description }).then((b) => b.template),
+        removeTemplate: (id: string) => del<{ ok: true }>(`${o}/templates/${encodeURIComponent(id)}`),
         monthlyUsage: () => get<{ months: MonthUsage[] }>(`${o}/usage/monthly`).then((b) => b.months),
         // A link, good for five minutes, that downloads everything in the studio.
         exportStudio: () => post<{ url: string }>(`${o}/export`).then((b) => b.url),
@@ -616,6 +625,8 @@ export function orgApi(org: string) {
             const { release } = await post<{ release: Release }>(`${p(projectId)}/releases`);
             return (await post<{ release: Release }>(`${p(projectId)}/releases/${release.number}/publish`)).release;
         },
+        // A link that shows the website as it is now to anyone who has it, without publishing.
+        share: (projectId: string) => post<{ url: string }>(`${p(projectId)}/share`).then((b) => b.url),
         // Takes the website offline; its files and history stay.
         unpublish: (projectId: string) => post<{ ok: boolean }>(`${p(projectId)}/unpublish`),
         rollback: (projectId: string, number: number) =>

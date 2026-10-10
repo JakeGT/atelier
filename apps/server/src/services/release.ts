@@ -135,6 +135,60 @@ export class ReleaseService {
         return { media, mediaInfo };
     }
 
+    // A link to show someone the website as it is now, without publishing it: the
+    // current files and wording go to the host as a preview, at an address nobody
+    // can guess and that search engines are told not to list. The live website and
+    // the release history are untouched. Each call makes a new link.
+    async share(tenantId: string, projectId: string): Promise<{ url: string }> {
+        const hosting = this.hosting;
+        if (!hosting) throw new ReleaseError("a link to show someone needs hosting, which is not set up on this server", 409);
+        const project = await this.store.projects.findById(tenantId, projectId);
+        const head = project ? await this.runtime.head(projectId).catch(() => null) : null;
+        if (!project || !head) throw new ReleaseError("there is nothing to show yet: ask your assistant to build the website first", 409);
+        if (this.deploying.has(projectId)) throw new ReleaseError("this website is being published; try again in a moment", 409);
+        this.deploying.add(projectId);
+        try {
+            const archive = await this.runtime.exportTree(projectId, head);
+            const site = await this.site(tenantId, project);
+            const content = (await this.store.content.list(tenantId, projectId))
+                .filter((d) => d.draft !== null)
+                .map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }));
+            const result = await hosting.deploy({
+                site,
+                archive,
+                branch: "preview",
+                canonicalHost: null,
+                commit: head,
+                content,
+                ...(await this.mediaFor(tenantId, projectId, archive, content)),
+            });
+            const deployment = await this.store.deployments.create({
+                id: randomUUID(),
+                tenantId,
+                projectId,
+                releaseId: null,
+                kind: "preview",
+                provider: "cloudflare-pages",
+                url: result.url,
+                state: "building",
+            });
+            await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
+            // The website now has a project at the host, so that deleting or unpublishing it clears this too.
+            await this.store.projects.setHosting(tenantId, projectId, { hostingRef: site, productionRef: project.productionRef });
+            return { url: result.url };
+        } catch (err) {
+            if (err instanceof ReleaseError) throw err;
+            const site = err instanceof HostingError && err.kind === "site";
+            if (!site) console.error(`preview deploy failed for ${projectId}: ${(err as Error).message}`);
+            throw new ReleaseError(
+                site ? (err as Error).message : "the link could not be made just now; try again in a moment",
+                site ? 422 : 502,
+            );
+        } finally {
+            this.deploying.delete(projectId);
+        }
+    }
+
     // The website's project at the host, named once and kept.
     async site(tenantId: string, project: Project): Promise<string> {
         if (project.hostingRef) return project.hostingRef;

@@ -133,6 +133,24 @@ export interface UsageStore {
     monthly(tenantId: string, since: Date): Promise<{ month: string; kind: string; units: number }[]>;
 }
 
+// A website a studio saved to begin other websites from.
+export interface StudioTemplate {
+    id: string;
+    tenantId: string;
+    name: string;
+    description: string;
+    files: { path: string; content: string }[];
+    content: { kind: string; slug: string; draft: Record<string, unknown>; fields: ContentField[] | null }[];
+    sourceProject: string | null;
+    createdAt: string;
+}
+export interface StudioTemplateStore {
+    create(template: Omit<StudioTemplate, "createdAt"> & { createdBy: string | null }): Promise<StudioTemplate>;
+    list(tenantId: string): Promise<StudioTemplate[]>;
+    get(tenantId: string, id: string): Promise<StudioTemplate | null>;
+    remove(tenantId: string, id: string): Promise<void>;
+}
+
 // A member's role on one website where it differs from their role in the studio.
 export type ProjectRole = "admin" | "editor" | "viewer";
 export interface ProjectMemberStore {
@@ -352,6 +370,7 @@ export interface Store {
     domains: DomainStore;
     media: MediaStore;
     projectMembers: ProjectMemberStore;
+    studioTemplates: StudioTemplateStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
