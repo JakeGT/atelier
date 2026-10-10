@@ -77,6 +77,9 @@ its own model-provider key. Atelier never pays for or resells model usage.
   encrypted (the `triagent` pattern) and never exposed to the agent or browser.
 - Metering and quotas remain for **safety ceilings** and to attribute usage to
   the user's own key (e.g. "you consumed X tokens this month"), not for billing.
+- Hosting is planned to follow the same principle (ADR-0013): a studio can
+  connect its own Cloudflare account and host its websites there, so the
+  operator is not the host of record, or the payer, for other people's sites.
 - Invoice generation and a payment provider (e.g. Stripe) are out of scope for
   v1 and are revisited only if Atelier ever introduces platform-funded
   (non-BYOK) usage.

@@ -106,3 +106,26 @@ projects.
 
 - Build minutes and bandwidth are metered per project (see `12`).
 - Per-tenant caps on concurrent builds and total projects prevent runaway spend.
+
+## 8. A studio's own Cloudflare account (planned, P4)
+
+Proposed in ADR-0013 and broken down in docs/13 (E4.5). Not built.
+
+Everything above describes one Cloudflare account, the operator's, hosting
+every website. The plan adds a second case:
+
+| | Shared account (today) | The studio's own account (planned) |
+| --- | --- | --- |
+| Whose Cloudflare account | The operator's | The studio's |
+| How it is connected | One API token in the deployer's secrets | **Connect Cloudflare**: an OAuth consent screen, nothing to paste |
+| Stored credential | One, for the instance | One per studio, sealed like provider keys |
+| Who uploads | The deployer | The deployer, with that studio's credential |
+| A domain on that Cloudflare account | Record added by hand | Set up automatically, if DNS access was granted |
+| A domain elsewhere | Record added by hand | Record added by hand |
+
+What does not change: one Pages project per website, Direct Upload, the checks
+on what may be served (ADR-0010), the `atl-` name prefix, rollback, unpublish,
+and the rule that only the deployer talks to Cloudflare.
+
+Connecting is optional and reversible. A website says which account hosts it,
+and moving one between accounts is an explicit action.

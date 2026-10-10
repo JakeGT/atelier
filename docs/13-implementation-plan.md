@@ -266,11 +266,68 @@ give the operator control. (No billing.)
 - E4.3 Operator console: tenant list/status, suspend/restore, feature flags.
 - E4.4 Admin audit log view; per-tenant usage/cost dashboards (cost attributed
   to the user's own keys).
+- E4.5 Connect your own Cloudflare (ADR-0013, proposed 2026-10-10): a studio
+  connects its own Cloudflare account with one button and hosts its websites
+  there; domains on that account are set up for it. See the breakdown below.
 
 **E4.1 was brought forward** (branch `p4-byok`, 2026-10-10, at the owner's
 request, ahead of P3): provider keys per studio, the key-holding model proxy
 and a searchable model picker with computed recommendations. Details in
 ADR-0011 "As built". The rest of P4 is unchanged.
+
+### E4.5 Connect your own Cloudflare — breakdown
+
+Planned, not started. Design and open questions are in ADR-0013; this is the
+order of work. It depends on P3 (the deployer and custom domains) and reuses
+E4.1's sealed-secret storage.
+
+0. **Before any code: answer ADR-0013 "To confirm before building".** Register
+   a private OAuth client in the operator's Cloudflare account and try the flow
+   by hand: scope ids, token lifetime and refresh, account selection, whether
+   Direct Upload accepts the access token, whether attaching a domain creates
+   the DNS record, how to revoke. Start Cloudflare's process for making the
+   client public at the same time, since that sets the date.
+1. **Storage and model.** A studio's hosting connection: account id, account
+   name, sealed access and refresh tokens, granted scopes, connected by and
+   when. Each website records which account hosts it. Migration only adds.
+2. **Connect, reconnect, disconnect.** `GET …/hosting/connect` starts the OAuth
+   flow, the callback stores the grant, Disconnect revokes it at Cloudflare and
+   deletes it. `secrets.manage`, recent sign-in, activity record. A revoked or
+   expired grant shows as "Reconnect Cloudflare", in words, wherever hosting is
+   shown.
+3. **The deployer works per account.** It takes the credential with each
+   request instead of holding one. Its file checks and the `atl-` name prefix
+   are unchanged. The shared account becomes the case "no connection".
+4. **Publishing into the studio's account.** New websites in a connected studio
+   publish there. End-to-end test against the stand-in, extended with a second
+   account and an expired token.
+5. **Domains set up automatically.** When the connected account manages the
+   domain's DNS and DNS Write was granted: attach the domain and create the
+   record. Otherwise show the record to add, as now. The Address dialog says
+   which case it is.
+6. **Moving a website between accounts.** "Move to my Cloudflare": publish in
+   the new account, move domains, remove from the old. Disconnect is refused
+   while websites are hosted in the account.
+7. **Fallback: connect by token**, with Cloudflare's pre-filled token link, for
+   instances without a public OAuth client.
+8. **Interface, to `docs/design/`.** Studio settings gets a Hosting page: where
+   this studio's websites are hosted, a **Connect Cloudflare** button, what
+   Atelier will be able to do (in plain words, before leaving for Cloudflare),
+   and what it was granted (after). Audit the new screens against the
+   checklist.
+
+**Acceptance criteria (E4.5)**
+- An owner connects a Cloudflare account without seeing or pasting a token, and
+  the next publish puts the website in that account.
+- Adding a domain that is managed in the connected account needs nothing but
+  typing its name; the website answers at it once Cloudflare has verified it.
+- A studio that declined DNS access, or whose domain is elsewhere, is shown the
+  one record to add.
+- Revoking access at Cloudflare shows as "Reconnect Cloudflare" in Atelier, and
+  a publish says so instead of failing without a reason.
+- A studio that connects nothing works exactly as before.
+- The grant never reaches a workspace or the browser, and the deployer still
+  cannot touch a Pages project that is not Atelier's.
 
 **Acceptance criteria**
 - A user configures their own provider key and the editor runs on it end-to-end.

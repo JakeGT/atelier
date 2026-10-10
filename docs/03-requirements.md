@@ -76,6 +76,14 @@ Requirements are tagged with a phase (`P1`…`P5`) matching the roadmap in
 - **FR-F2 (Must, P2)** Custom domain + automated TLS per project.
 - **FR-F3 (Must, P2)** Per-project preview/staging deployments (distinct from
   production).
+- **FR-F4 (Should, P4)** A studio can connect its own Cloudflare account with
+  one button (OAuth, no token to copy) and host its websites there; a studio
+  that connects nothing uses the operator's account (ADR-0013).
+- **FR-F5 (Should, P4)** When a domain is managed in the studio's connected
+  Cloudflare account, Atelier sets it up end to end (attaches it and creates
+  the DNS record); otherwise it shows the one record to add.
+- **FR-F6 (Should, P4)** A website can be moved between the shared account and
+  the studio's own, with its domains.
 
 ### FR — Billing & quotas
 

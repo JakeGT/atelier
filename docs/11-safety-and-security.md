@@ -91,6 +91,11 @@ The current system's choice-card UX generalizes:
 
 - Secrets are encrypted at rest (AES-256-GCM under `ATELIER_SECRETS_KEY_FILE`,
   bound to tenant/project/name as AAD) — the `triagent` pattern.
+- A studio's Cloudflare connection (planned, ADR-0013) is such a secret: OAuth
+  tokens sealed per studio, used only by the deployer, never sent to a
+  workspace or the browser. DNS access is an optional scope because it is the
+  dangerous one: with it a leaked grant could redirect a studio's domains.
+  Disconnecting revokes the grant at Cloudflare as well as deleting it.
 - `audit_log` is append-only and not tenant-scoped (it outlives what it records).
 - Content/media are tenant-scoped and covered by backup (Postgres dump +
   object-storage versioning).

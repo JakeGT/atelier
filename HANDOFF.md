@@ -140,4 +140,6 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 2. **Review and merge PR #5.**
 3. **Then P4's remaining epics** (templates and skills library, operator console, usage dashboards) on a new branch, or P5. Carried forward: the remote git mirror of project code (workspace volumes are not backed up), preview deployments, a sandboxed build if frameworks are ever allowed, gVisor.
 
+Planned, not started: **Connect your own Cloudflare** (ADR-0013, docs/13 E4.5). A studio connects its own Cloudflare account by OAuth and has domains set up for it. The first step is answering the ADR's open questions against a real OAuth client and starting Cloudflare's approval for a public one.
+
 Cloudflare notes: the token is an account API token with **Pages Write**. A brand-new Pages project can answer 522 or fail TLS on per-deployment addresses for a minute or so after its first deployment.
