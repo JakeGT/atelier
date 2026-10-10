@@ -1,8 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p4.2` deployed**: P0, P1, P2 (multi-tenant) and BYOK (E4.1, brought forward).
-> P1 is merged to `main`. P2 is [PR #3](https://github.com/JakeGT/atelier/pull/3) (`p2-multi-tenant`).
-> BYOK is [PR #4](https://github.com/JakeGT/atelier/pull/4) (`p4-byok`, stacked on #3). **Neither is merged yet.**
+> Last updated 2026-10-10. Status: **`p3.0` deployed**, with hosting switched off until the Cloudflare secrets exist (see "Next steps").
+> `main` has P0, P1, P2 and BYOK. P3 (hosting) is [PR #5](https://github.com/JakeGT/atelier/pull/5) on `p3-hosting`, **not yet merged**.
 
 ## TL;DR
 
@@ -25,20 +24,20 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 | Web UI | `apps/web/` |
 | Platform infra | `~/Projects/jaketalling-com/jaketalling-platform-infrastructure/apps/atelier/` |
 
-**Git:** `main` has P0–P1. `p2-multi-tenant` (PR #3) has P2. The infra repo's Atelier commits are local only (its `main` is many commits ahead of origin and is not pushed).
+**Git:** `main` has P0–P2 and BYOK. `p3-hosting` (PR #5) has P3. The infra repo's Atelier commits are local only and not pushed.
 
 ## Current deployment
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p4.2` (built locally from `p4-byok`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.0` (built locally from `p3-hosting`). The deployer image is built but not running yet |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), plus `atelier-ws-<projectId>` per project, created on demand and stopped when idle |
-| Migrations | `0001`–`0008` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0009` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T005806Z` (before p4.0) |
+| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T103732Z` (before p3.0) |
 
 Verified after deploy:
 - `/healthz` returns 200;
@@ -129,6 +128,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 ## Next steps
 
-1. **Jake: try P2 in production.** Create a second studio, invite someone, open the settings pages, archive and restore a website, and run the assistant once (it now goes through the egress proxy).
-2. **Review and merge PR #3.**
-3. **P3 on a new branch (`p3-hosting`):** Cloudflare Pages per project, the build split into an untrusted build and a trusted upload (ADR-0010), custom domains, real rollback, and the remote mirror for project code (ADR-0009).
+1. **Switch hosting on in production.** Jake creates a Cloudflare API token (*Account → Cloudflare Pages → Edit*) and writes three secrets (`atelier_cloudflare_account_id`, `atelier_cloudflare_api_token`, `atelier_deployer_secret`) into `apps/atelier/secrets/`. Then add the `deployer` service to the infra `compose.yml` (copy it from `deploy/compose.example.yml`: networks `atelier-control` plus a new outbound one), give the server `DEPLOYER_URL=http://atelier-deployer:8092` and `DEPLOYER_SECRET_FILE`, and `docker compose up -d`.
+2. **First real publish.** Publishing has only run against a stand-in for Cloudflare. Publish a test website, open its `*.pages.dev` address, roll back, add and remove a domain.
+3. **Review and merge PR #5.**
+4. **Then P4's remaining epics** (templates and skills library, operator console, usage dashboards) on a new branch, or P5. Open items carried forward: the remote git mirror of project code (workspace volumes are not backed up), preview deployments, a sandboxed build if frameworks are ever allowed, gVisor.
