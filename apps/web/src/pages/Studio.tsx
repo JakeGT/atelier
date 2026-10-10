@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, CloudOff, Ellipsis, Globe, PencilLine, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, CloudOff, Ellipsis, Globe, PencilLine, Plus, Trash2, Type } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Org, Project, Session, Template } from "../lib/api";
@@ -398,6 +398,9 @@ function CardMenu({
                 <div className={`menu ${up ? "menu-up" : ""}`} role="menu">
                     <button type="button" role="menuitem" onClick={run(() => navigate(href))}>
                         <PencilLine /> Open in the editor
+                    </button>
+                    <button type="button" role="menuitem" onClick={run(() => navigate(`${href}/content`))}>
+                        <Type /> Manage its content
                     </button>
                     <button type="button" role="menuitem" onClick={run(() => window.open(href, "_blank", "noopener"))}>
                         <ArrowUpRight /> Open the editor in a new tab

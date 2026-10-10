@@ -986,7 +986,7 @@
     grid-template-columns: auto 1fr auto;
 }
 
-@container (max-width: 660px) {
+@container (max-width: 860px) {
     .frame-address {
         display: none;
     }
@@ -1316,4 +1316,119 @@
     min-width: 290px;
     max-height: min(420px, 60vh);
     overflow-y: auto;
+}
+
+/* ---- wording: the shared form, rich text, editing in the preview ------------------ */
+
+.wording-form {
+    margin-top: 18px;
+}
+
+.wording-form .field + .field {
+    margin-top: 16px;
+}
+
+.wording-form .field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 10.5px;
+}
+
+.wording-form input,
+.wording-form textarea,
+.rich-box {
+    display: block;
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    font-size: 15px;
+    line-height: 1.5;
+    outline: 0;
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+}
+
+.wording-form textarea {
+    resize: vertical;
+}
+
+.wording-form input:focus,
+.wording-form textarea:focus,
+.rich-box:focus {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 3px var(--line);
+}
+
+.wording-form .field-help {
+    margin-top: 5px;
+    font-size: 12.5px;
+}
+
+.wording-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.wording-foot .mono {
+    flex: 1;
+    font-size: 11.5px;
+}
+
+.rich-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-bottom: 6px;
+}
+
+.rich-box {
+    min-height: 120px;
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.rich-box p,
+.rich-box ul,
+.rich-box ol {
+    margin: 0 0 0.6em;
+}
+
+.rich-box ul,
+.rich-box ol {
+    padding-left: 1.3em;
+}
+
+.rich-box a {
+    color: var(--seal-deep);
+}
+
+.rich-readonly .rich-box {
+    opacity: 0.75;
+}
+
+.side-more {
+    margin-top: 14px;
+    width: 100%;
+    justify-content: center;
+}
+
+.frame-editing {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    max-width: calc(100% - 32px);
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 12.5px;
+    text-align: center;
+    box-shadow: var(--shadow-2);
+    pointer-events: none;
 }

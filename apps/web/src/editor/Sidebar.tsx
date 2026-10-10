@@ -1,8 +1,8 @@
-import { PencilLine, Undo2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowRight, PencilLine, Undo2 } from "lucide-react";
+import { useState } from "react";
 import type { Checkpoint, ContentDocument, Release } from "../lib/api";
-import { timeAgo } from "../lib/hooks";
-import { Dialog } from "../ui/kit";
+import { navigate, timeAgo } from "../lib/hooks";
+import { documentName, fieldsOf, WordingDialog } from "./Wording";
 
 export type Tab = "versions" | "releases" | "content";
 
@@ -15,6 +15,8 @@ interface SidebarProps {
     busy: boolean;
     canPublish: boolean;
     canEdit: boolean;
+    // The page that manages all of a website's content.
+    contentHref: string;
     onRestore: (sha: string) => void;
     onRollback: (number: number) => void;
     onSaveDocument: (doc: ContentDocument, draft: Record<string, unknown>) => Promise<void>;
@@ -137,7 +139,19 @@ function Releases({ releases, busy, canPublish, onRollback }: SidebarProps) {
     );
 }
 
-function Content({ documents, canEdit, onSaveDocument }: SidebarProps) {
+function Content({ documents, canEdit, onSaveDocument, contentHref }: SidebarProps) {
+    const more = (
+        <a
+            className="btn btn-sm side-more"
+            href={contentHref}
+            onClick={(e) => {
+                e.preventDefault();
+                navigate(contentHref);
+            }}
+        >
+            Manage all content on its own page <ArrowRight />
+        </a>
+    );
     if (documents.length === 0) {
         return (
             <Empty
@@ -147,182 +161,34 @@ function Content({ documents, canEdit, onSaveDocument }: SidebarProps) {
         );
     }
     return (
-        <ul className="docs">
-            {documents.map((d) => (
-                <Document key={d.id} doc={d} canEdit={canEdit} onSave={onSaveDocument} />
-            ))}
-        </ul>
+        <>
+            <ul className="docs">
+                {documents.map((d) => (
+                    <Document key={d.id} doc={d} canEdit={canEdit} onSave={onSaveDocument} />
+                ))}
+            </ul>
+            {more}
+        </>
     );
 }
-
-// "heroTitle" / "hero_title" -> "Hero title"
-function label(key: string): string {
-    const words = key
-        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-        .replace(/[_-]+/g, " ")
-        .trim()
-        .toLowerCase();
-    return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-// Each field is edited as text: plain strings as they are, anything structured
-// (lists, numbers, nested objects) as JSON, which is parsed back on save.
-// A list of plain strings (opening hours, say) is edited one per line.
-type Field = { key: string; text: string; kind: "text" | "lines" | "structured" };
-
-const isLines = (value: unknown): value is string[] => Array.isArray(value) && value.every((v) => typeof v === "string");
-
-const toFields = (draft: Record<string, unknown> | null): Field[] =>
-    Object.entries(draft ?? {}).map(([key, value]) =>
-        typeof value === "string"
-            ? { key, text: value, kind: "text" }
-            : isLines(value)
-              ? { key, text: value.join("\n"), kind: "lines" }
-              : { key, text: JSON.stringify(value, null, 2), kind: "structured" },
-    );
 
 function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boolean; onSave: SidebarProps["onSaveDocument"] }) {
     const [open, setOpen] = useState(false);
-    const [fields, setFields] = useState<Field[]>(() => toFields(doc.draft));
-    const [error, setError] = useState<string | null>(null);
-    const [saving, setSaving] = useState(false);
-    // When the document changes underneath (someone else or the assistant saved it):
-    // show the new wording, unless this person has unsaved edits. Those are kept,
-    // and they are told, instead of having their typing replaced.
-    const [based, setBased] = useState(doc.rev);
-    const fieldsRef = useRef(fields);
-    fieldsRef.current = fields;
-    const basedDraft = useRef(doc.draft);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: react only when the revision changes
-    useEffect(() => {
-        if (doc.rev === based) return;
-        // What is on screen already matches the new version (this person just saved it): nothing to resolve.
-        const same = JSON.stringify(fieldsRef.current) === JSON.stringify(toFields(doc.draft));
-        const unsaved = JSON.stringify(fieldsRef.current) !== JSON.stringify(toFields(basedDraft.current));
-        if (unsaved && !same) return;
-        setFields(toFields(doc.draft));
-        setBased(doc.rev);
-        basedDraft.current = doc.draft;
-        setError(null);
-    }, [doc.rev]);
-    const outdated = doc.rev !== based;
-    const useTheirs = () => {
-        setFields(toFields(doc.draft));
-        setBased(doc.rev);
-        basedDraft.current = doc.draft;
-        setError(null);
-    };
-
+    const count = fieldsOf(doc).length;
     const changed = JSON.stringify(doc.draft) !== JSON.stringify(doc.published);
-    const dirty = JSON.stringify(fields) !== JSON.stringify(toFields(outdated ? basedDraft.current : doc.draft));
-
-    async function save() {
-        const draft: Record<string, unknown> = {};
-        for (const f of fields) {
-            if (f.kind === "text") {
-                draft[f.key] = f.text;
-                continue;
-            }
-            if (f.kind === "lines") {
-                draft[f.key] = f.text
-                    .split("\n")
-                    .map((line) => line.trim())
-                    .filter(Boolean);
-                continue;
-            }
-            try {
-                draft[f.key] = JSON.parse(f.text);
-            } catch {
-                setError(
-                    `"${label(f.key)}" has a mistake in its brackets or quotes. If that is unclear, ask your assistant to change it instead.`,
-                );
-                return;
-            }
-        }
-        setSaving(true);
-        setError(null);
-        try {
-            await onSave(doc, draft);
-        } catch (err) {
-            setError((err as Error).message);
-        } finally {
-            setSaving(false);
-        }
-    }
-
     return (
         <li>
             <button type="button" className="doc-head" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Open to edit">
                 <PencilLine />
                 <span className="doc-name">
-                    <strong>{label(doc.slug)}</strong>
+                    <strong>{documentName(doc)}</strong>
                     <span className="mono muted">
-                        {fields.length} {fields.length === 1 ? "piece of wording" : "pieces of wording"}
+                        {count} {count === 1 ? "piece of wording" : "pieces of wording"}
                     </span>
                 </span>
                 <span className={`chip ${changed ? "chip-draft" : "chip-live"}`}>{changed ? "Not published yet" : "Published"}</span>
             </button>
-            {open && (
-                <Dialog onClose={() => setOpen(false)} wide>
-                    <p className="eyebrow">Wording</p>
-                    <h2>{label(doc.slug)}</h2>
-                    <p>Changes are saved to the preview when you press Save. They go public the next time you publish.</p>
-                    <div className="doc-body doc-body-roomy">
-                        {fields.length === 0 && <p className="muted">This document is empty.</p>}
-                        {fields.map((f, i) => (
-                            <label key={f.key} className="field">
-                                <span className="eyebrow">
-                                    {label(f.key)}
-                                    {f.kind === "lines" && <span className="field-note"> · one per line</span>}
-                                    {f.kind === "structured" && (
-                                        <span className="field-note"> · structured: easier to ask your assistant</span>
-                                    )}
-                                </span>
-                                <textarea
-                                    className={f.kind === "structured" ? "mono" : ""}
-                                    value={f.text}
-                                    spellCheck={f.kind !== "structured"}
-                                    readOnly={!canEdit}
-                                    rows={Math.min(
-                                        f.kind === "structured" ? 16 : 12,
-                                        Math.max(f.kind === "text" ? 1 : 3, Math.ceil(f.text.length / 60), f.text.split("\n").length),
-                                    )}
-                                    onChange={(e) =>
-                                        setFields((prev) => prev.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
-                                    }
-                                />
-                            </label>
-                        ))}
-                        {outdated && (
-                            <p className="doc-error">
-                                This was changed by someone else while you were editing. Your edits are still here but can't be saved over
-                                theirs.{" "}
-                                <button type="button" className="link" onClick={useTheirs}>
-                                    Show their version instead
-                                </button>
-                            </p>
-                        )}
-                        {error && !outdated && <p className="doc-error">{error}</p>}
-                        <div className="doc-foot">
-                            <span className="mono muted">Last changed {timeAgo(doc.updatedAt)}</span>
-                            <button type="button" className="btn btn-sm" onClick={() => setOpen(false)}>
-                                Close
-                            </button>
-                            {canEdit && (
-                                <button
-                                    type="button"
-                                    className="btn btn-sm btn-primary"
-                                    disabled={saving || !dirty || outdated}
-                                    onClick={save}
-                                    title="Saved changes show in the preview. They go public when you publish."
-                                >
-                                    Save
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </Dialog>
-            )}
+            {open && <WordingDialog doc={doc} canEdit={canEdit} onSave={onSave} onClose={() => setOpen(false)} />}
         </li>
     );
 }

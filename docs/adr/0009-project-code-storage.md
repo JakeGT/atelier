@@ -33,3 +33,6 @@ restart, and releases recorded `code_sha`s that no longer existed.
   (`docker run --rm -v atelier-ws-<id>:/w alpine tar -C /w -cz . > <id>.tgz`), or
   add a volume step to the platform backup script. This is a VPS go-live gate.
 - Deleting a project must also remove its volume (P2, project delete).
+
+**Sequencing (2026-10-10):** the VPS move is the last phase of the plan (P6 in
+docs/13), by the owner's decision. What this ADR leaves to the VPS waits for it.

@@ -3,6 +3,7 @@ import type {
     AgentSession,
     AuditEntry,
     ContentDocument,
+    ContentField,
     ContentRevision,
     Deployment,
     Invitation,
@@ -137,6 +138,8 @@ export interface ContentStore {
         draft: Record<string, unknown>;
         updatedBy: string | null;
     }): Promise<ContentDocument>;
+    // How the document's fields are shown and edited. Does not change its content or revision.
+    setFields(tenantId: string, projectId: string, kind: string, slug: string, fields: ContentField[]): Promise<ContentDocument | null>;
     get(tenantId: string, projectId: string, kind: string, slug: string): Promise<ContentDocument | null>;
     list(tenantId: string, projectId: string): Promise<ContentDocument[]>;
     // Published documents only: what the live release ships.

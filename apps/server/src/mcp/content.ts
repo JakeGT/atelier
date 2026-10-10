@@ -40,15 +40,24 @@ server.tool("content_get", "Get a content document by kind and slug", { kind: z.
     return json(result.document);
 });
 
+const field = z.object({
+    key: z.string().describe("The field's name in the draft, as used after # in data-content attributes"),
+    label: z.string().describe("What a person would call it: 'Headline', not 'heroTitle'"),
+    type: z
+        .enum(["text", "long", "rich", "list"])
+        .describe("text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings"),
+    help: z.string().optional().describe("One line saying where it appears, e.g. 'Shown at the top of the home page'"),
+});
+
 server.tool(
     "content_upsert_draft",
-    "Create or update a content document draft",
-    { kind: z.string(), slug: z.string(), draft: z.record(z.string(), z.unknown()) },
-    async ({ kind, slug, draft }) => {
-        const result = (await api(`/api/agent/content/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
-            method: "PUT",
-            body: JSON.stringify(draft),
-        })) as { document: unknown };
+    "Create or update the wording of a page. `kind` is 'page' and `slug` names the page ('home', 'about'), both lowercase letters, digits and hyphens. `draft` holds every field's value. Always pass `fields` too, describing each field in plain words, so the person sees proper labelled fields. The page shows a field wherever an element has data-content=\"<kind>/<slug>#<key>\".",
+    { kind: z.string(), slug: z.string(), draft: z.record(z.string(), z.unknown()), fields: z.array(field).optional() },
+    async ({ kind, slug, draft, fields }) => {
+        const path = `/api/agent/content/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`;
+        let result = (await api(path, { method: "PUT", body: JSON.stringify(draft) })) as { document: unknown };
+        if (fields?.length)
+            result = (await api(`${path}/fields`, { method: "PUT", body: JSON.stringify({ fields }) })) as { document: unknown };
         return json(result.document);
     },
 );

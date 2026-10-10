@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p4.3` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #8. Open: [PR #9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs only: the content studio plan) and [PR #10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates` (operator console, templates, ideas, wording pop-up).
+> Last updated 2026-10-10. Status: **`p5.0` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #8. Three PRs are open, to merge in this order: [#9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs), [#10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates`, [#11](https://github.com/JakeGT/atelier/pull/11) `p5-content-studio` (stacked on #10; includes #9).
 
 ## TL;DR
 
@@ -31,9 +31,9 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p4.3` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.0` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
-| Migrations | `0001`–`0012` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0013` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
@@ -139,11 +139,18 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - "Ideas for what to ask" is a list of ready-made requests in `apps/web/src/lib/ideas.ts`.
 - Wording items in the editor open a pop-up to edit.
 
+## Content (branch `p5-content-studio`)
+
+- A page's wording is bound to content with `data-content…` attributes and filled by the server: from drafts in the preview, from the release's content on publish (`services/fill.ts`). Unbound pages are untouched.
+- Three places to edit: **Edit text** in the preview, the pop-up from the side panel, and the Content page at `/o/<studio>/p/<website>/content`.
+- Documents describe their fields (label, type, help); the assistant is told to write them and to bind elements.
+- Not built: media (needs a storage decision), lists of multi-field items, publish-time limits. See ADR-0014 "As built".
+
 ## Known gaps
 
-- **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
+- **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
 - **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
-- **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). This is a VPS go-live gate; the P3 remote mirror fixes it properly.
+- **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). Off-host backups are part of the VPS move, the last phase (P6); accepted until then.
 - **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
 - **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
@@ -151,9 +158,11 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 ## Next steps
 
-1. **Jake: publish a real website from the editor** and open its `*.pages.dev` address. The deployer has been run against Cloudflare directly (deploy, redeploy, redeploy an earlier version, delete), but not yet through a signed-in Publish, and custom domains have not been tried against Cloudflare.
-2. **Review and merge PR #5.**
-3. **Then P4's remaining epics** (templates and skills library, operator console, usage dashboards) on a new branch, or P5. Carried forward: the remote git mirror of project code (workspace volumes are not backed up), preview deployments, a sandboxed build if frameworks are ever allowed, gVisor.
+The order from here (docs/13):
+
+1. **P5, in progress:** content studio steps a–e are built. Next: media (steps f–h, after Jake decides where files are stored), then data retention (E5.2) and alerting (E5.3).
+2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
+3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
 
 Planned, not started: **the content studio** (ADR-0014, docs/13 E5.0 steps a–h). Content becomes what the page shows, edited in the preview, in a pop-up and on a dedicated Content page, with a media library. Step a (pop-up editing from the side panel) needs nothing else.
 

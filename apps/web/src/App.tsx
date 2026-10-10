@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Org, Project, PublicConfig, Session } from "./lib/api";
 import { api, orgApi } from "./lib/api";
 import { navigate, usePath, useTheme } from "./lib/hooks";
+import { Content } from "./pages/Content";
 import { Editor } from "./pages/Editor";
 import { Landing } from "./pages/Landing";
 import { Login, safeNext } from "./pages/Login";
@@ -20,12 +21,13 @@ import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
 //   /o/:org                that organisation's websites
 //   /o/:org/settings/:tab  organisation settings (general, models, members, usage, activity)
 //   /o/:org/p/:project     the editor
+//   /o/:org/p/:project/content   everything the website says, to manage
 type Route =
     | { name: "landing" | "login" | "studio" | "welcome" | "missing" }
     | { name: "operator"; tab: OperatorTab }
     | { name: "org"; org: string }
     | { name: "settings"; org: string; tab: SettingsTab }
-    | { name: "editor"; org: string; project: string }
+    | { name: "editor" | "content"; org: string; project: string }
     | { name: "legacy-editor"; project: string };
 
 const SLUG = "([a-z0-9-]+)";
@@ -42,6 +44,8 @@ function match(path: string): Route {
     if (m?.[1]) return { name: "org", org: m[1] };
     m = path.match(new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`));
     if (m?.[1]) return { name: "settings", org: m[1], tab: TABS.includes(m[2] as SettingsTab) ? (m[2] as SettingsTab) : "general" };
+    m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/content/?$`));
+    if (m?.[1] && m[2]) return { name: "content", org: m[1], project: m[2] };
     m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/?$`));
     if (m?.[1] && m[2]) return { name: "editor", org: m[1], project: m[2] };
     // Links from before organisations were in the URL.
@@ -178,8 +182,8 @@ export function App() {
         page = <Studio key={org.id} session={session} org={org} orgs={orgs} onOrgsChanged={reloadOrgs} {...common} />;
     } else if (route.name === "settings") {
         page = <OrgSettings key={org.id} session={session} org={org} orgs={orgs} tab={route.tab} onOrgsChanged={reloadOrgs} {...common} />;
-    } else if (route.name === "editor") {
-        page = <ProjectRoute slug={route.project} session={session} org={org} {...common} />;
+    } else if (route.name === "editor" || route.name === "content") {
+        page = <ProjectRoute slug={route.project} view={route.name} session={session} org={org} {...common} />;
     } else {
         page = boot;
     }
@@ -192,7 +196,14 @@ export function App() {
     );
 }
 
-function ProjectRoute(props: { slug: string; session: Session; org: Org; theme: "paper" | "night"; onToggleTheme: () => void }) {
+function ProjectRoute(props: {
+    slug: string;
+    view: "editor" | "content";
+    session: Session;
+    org: Org;
+    theme: "paper" | "night";
+    onToggleTheme: () => void;
+}) {
     const [project, setProject] = useState<Project | null | undefined>(undefined);
     const orgSlug = props.org.slug;
 
@@ -214,6 +225,7 @@ function ProjectRoute(props: { slug: string; session: Session; org: Org; theme: 
     }
     if (project === null) return <Missing title="That website isn't" body="It may have been removed, or the link is wrong." />;
     // Keyed by project so switching projects resets all editor state.
+    if (props.view === "content") return <Content key={project.id} project={project} {...props} />;
     return <Editor key={project.id} project={project} onProjectChanged={setProject} {...props} />;
 }
 

@@ -97,6 +97,18 @@ export type Project = z.infer<typeof projectSchema>;
 
 // ---- P1 entities (content store + release workflow) ----
 
+// How one field of a content document is shown and edited (ADR-0014).
+export const FIELD_TYPES = ["text", "long", "rich", "list"] as const;
+export const contentFieldSchema = z.object({
+    key: z.string().regex(/^[A-Za-z][\w-]{0,63}$/),
+    // In the person's words: "Headline", not "heroTitle".
+    label: z.string().min(1).max(80),
+    // text: one line. long: several lines. rich: a little formatting. list: one item per line.
+    type: z.enum(FIELD_TYPES),
+    help: z.string().max(200).optional(),
+});
+export type ContentField = z.infer<typeof contentFieldSchema>;
+
 export const contentDocumentSchema = z.object({
     id: z.string().uuid(),
     projectId: z.string().uuid(),
@@ -108,6 +120,8 @@ export const contentDocumentSchema = z.object({
     published: z.record(z.string(), z.unknown()).nullable(),
     publishedAt: z.string().datetime().nullable(),
     rev: z.number().int().nonnegative(),
+    // How its fields are shown; null = worked out from the values.
+    fields: z.array(contentFieldSchema).nullable(),
     updatedBy: z.string().uuid().nullable(),
     updatedAt: z.string().datetime(),
 });

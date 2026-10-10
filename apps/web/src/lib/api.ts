@@ -223,7 +223,18 @@ export interface ContentDocument {
     published: Record<string, unknown> | null;
     publishedAt: string | null;
     rev: number;
+    // How its fields are shown; null = worked out from the values.
+    fields: ContentField[] | null;
     updatedAt: string;
+}
+
+// How one field of a piece of wording is shown and edited.
+export interface ContentField {
+    key: string;
+    label: string;
+    // text: one line. long: several lines. rich: a little formatting. list: one item per line.
+    type: "text" | "long" | "rich" | "list";
+    help?: string;
 }
 
 export interface ContentRevision {
@@ -445,6 +456,11 @@ export function orgApi(org: string) {
             post<{ hostname: string; target: string }>(`${p(projectId)}/domains`, { hostname }),
         checkDomain: (projectId: string, hostname: string) => post<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}/check`),
         removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}`),
+
+        contentHistory: (projectId: string, kind: string, slug: string) =>
+            get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${kind}/${slug}/revisions`).then((b) => b.revisions),
+        restoreContent: (projectId: string, kind: string, slug: string, rev: number) =>
+            post<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}/revisions/${rev}/restore`).then((b) => b.document),
 
         listReleases: (projectId: string) => get<{ releases: Release[] }>(`${p(projectId)}/releases`).then((b) => b.releases),
         // "Publish" = freeze the current drafts + code into a release, then make it live.

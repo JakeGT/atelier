@@ -77,3 +77,6 @@ provisioner supports it (`RUNTIME_OCI_RUNTIME=runsc`), but the spike could not
 be run: the current host is Docker Desktop, which has no `runsc` runtime. It
 moves to the VPS migration, where the runtime can be installed. Until then the
 shared kernel remains the residual risk named in ADR-0003.
+
+**Sequencing (2026-10-10):** the VPS move is the last phase of the plan (P6 in
+docs/13), by the owner's decision. What this ADR leaves to the VPS waits for it.

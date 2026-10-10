@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, ExternalLink, Monitor, RotateCw, Smartphone, Tablet } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Monitor, PencilLine, RotateCw, Smartphone, Tablet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { plainFile } from "../lib/activity";
 import { Dots } from "../ui/kit";
@@ -19,6 +19,12 @@ interface PreviewProps {
     onReload: () => void;
     hasPage: boolean;
     working: boolean;
+    // Whether this person may change wording (then the preview offers "Edit text").
+    canEdit: boolean;
+    // Text typed into a bound element of the page: its reference ("page/home#headline") and new value.
+    onWording: (ref: string, value: string) => void;
+    // A bound element that cannot be typed into in place (formatted text, a list) was clicked.
+    onOpenWording: (ref: string) => void;
 }
 
 // Where the person has been inside the preview, so Back and Forward know whether
@@ -31,11 +37,12 @@ interface Trail {
 }
 
 const HOME = "index.html";
+const REF = /^[a-z0-9][a-z0-9-]{0,63}\/[a-z0-9][a-z0-9-]{0,63}#[A-Za-z][\w-]{0,63}$/;
 // What a page says about itself is untrusted: only a plausible relative path is kept.
 const safePath = (v: unknown): string | null =>
     typeof v === "string" && v.length < 300 && !v.includes("..") && /^[\w\-./%~ ]+$/.test(v) ? v : null;
 
-export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, working }: PreviewProps) {
+export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, working, canEdit, onWording, onOpenWording }: PreviewProps) {
     const frame = useRef<HTMLIFrameElement>(null);
     const [trail, setTrail] = useState<Trail>({ pages: [HOME], at: 0 });
     // Set when Back or Forward was pressed: the next page to report is a move along the trail, not a new visit.
@@ -45,13 +52,45 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
     const current = trail.pages[trail.at] ?? HOME;
     const currentRef = useRef(current);
     currentRef.current = current;
+    // "Edit text": the page outlines what can be edited; text is typed in place.
+    const [editing, setEditing] = useState(false);
+    const editingRef = useRef(editing);
+    editingRef.current = editing;
+    const handlers = useRef({ onWording, onOpenWording });
+    handlers.current = { onWording, onOpenWording };
+    const tell = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ atelierPreview: 1, ...message }, "*");
+    const toggleEditing = () => {
+        setEditing((on) => {
+            tell({ edit: !on });
+            return !on;
+        });
+    };
 
     useEffect(() => {
         const onMessage = (e: MessageEvent) => {
             if (e.source !== frame.current?.contentWindow) return;
-            const data = e.data as { atelierPreview?: unknown; path?: unknown } | null;
-            const path = data?.atelierPreview === 1 ? safePath(data.path) : null;
+            const data = e.data as { atelierPreview?: unknown; path?: unknown; change?: unknown; open?: unknown } | null;
+            if (data?.atelierPreview !== 1) return;
+            // What the page says is untrusted: a reference of the right shape and a short string, or nothing.
+            const change = data.change as { ref?: unknown; value?: unknown } | undefined;
+            if (
+                change &&
+                typeof change.ref === "string" &&
+                REF.test(change.ref) &&
+                typeof change.value === "string" &&
+                change.value.length <= 5000
+            ) {
+                if (editingRef.current) handlers.current.onWording(change.ref, change.value);
+                return;
+            }
+            if (typeof data.open === "string" && REF.test(data.open)) {
+                if (editingRef.current) handlers.current.onOpenWording(data.open);
+                return;
+            }
+            const path = safePath(data.path);
             if (!path) return;
+            // Each page that arrives is told whether text is being edited.
+            if (editingRef.current) frame.current?.contentWindow?.postMessage({ atelierPreview: 1, edit: true }, "*");
             const move = moving.current;
             moving.current = null;
             setTrail((t) => {
@@ -76,7 +115,7 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
 
     const go = (direction: "back" | "forward") => {
         moving.current = direction;
-        frame.current?.contentWindow?.postMessage({ atelierPreview: 1, go: direction }, "*");
+        tell({ go: direction });
         // If the page never answers (it has no bridge), forget the request.
         setTimeout(() => {
             if (moving.current === direction) moving.current = null;
@@ -133,6 +172,17 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
                                 </button>
                             ))}
                         </div>
+                        {canEdit && hasPage && (
+                            <button
+                                type="button"
+                                className={`btn btn-sm ${editing ? "btn-primary" : "btn-ghost"}`}
+                                onClick={toggleEditing}
+                                aria-pressed={editing}
+                                title="Click a piece of text in the page and type to change it"
+                            >
+                                <PencilLine /> <span className="tool-label">{editing ? "Done editing" : "Edit text"}</span>
+                            </button>
+                        )}
                         <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} title="Reload the preview">
                             <RotateCw /> <span className="tool-label">Reload</span>
                         </button>
@@ -169,6 +219,11 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
                             </svg>
                             <h3 className="display">Nothing on the easel yet.</h3>
                             <p className="muted">Ask your assistant for a first page and it will appear here.</p>
+                        </div>
+                    )}
+                    {editing && (
+                        <div className="frame-editing">
+                            Click any outlined text and type. Press Enter or click away to save it; Esc to leave it as it was.
                         </div>
                     )}
                     {working && (

@@ -16,6 +16,7 @@
     "@noble/hashes": "^2.4.0",
     "hono": "^4.13.13",
     "openid-client": "^6.8.8",
+    "parse5": "^8.0.1",
     "postgres": "^3.4.9",
     "zod": "^4.6.5"
   }

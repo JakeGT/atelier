@@ -19,6 +19,7 @@ import { Chat, type Message } from "../editor/Chat";
 import { type Device, Preview } from "../editor/Preview";
 import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
+import { WordingDialog } from "../editor/Wording";
 import { changedFiles } from "../lib/activity";
 import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Pulse, Release, Run, Session } from "../lib/api";
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
@@ -351,6 +352,32 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         }
     }, [a, pid]);
 
+    // Text typed into the page in the preview ("Edit text"). The page only says what
+    // changed; the saving, with the same conflict check as everywhere else, is here.
+    const saveFromPreview = async (ref: string, value: string) => {
+        const [docRef = "", field = ""] = ref.split("#");
+        const [kind = "", slug = ""] = docRef.split("/");
+        const doc = documents.find((d) => d.kind === kind && d.slug === slug);
+        if (doc?.draft?.[field] === value) return;
+        try {
+            await a.saveContent(pid, kind, slug, { ...(doc?.draft ?? {}), [field]: value }, doc?.rev);
+            toast("Saved. It goes public when you publish.");
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+        await refresh();
+        reloadPreview();
+    };
+    // A formatted piece or a list was clicked in the preview: it is edited in the pop-up.
+    const [editingRef, setEditingRef] = useState<{ doc: ContentDocument; field: string } | null>(null);
+    const openFromPreview = (ref: string) => {
+        const [docRef = "", field = ""] = ref.split("#");
+        const [kind, slug] = docRef.split("/");
+        const doc = documents.find((d) => d.kind === kind && d.slug === slug);
+        if (doc) setEditingRef({ doc, field });
+        else toast("That part of the page has no saved wording yet. Ask your assistant to make it editable.", "error");
+    };
+
     const saveDocument = async (doc: ContentDocument, draft: Record<string, unknown>) => {
         await a.saveContent(pid, doc.kind, doc.slug, draft, doc.rev);
         toast("Saved. It shows in the preview, and goes public when you publish.");
@@ -465,10 +492,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     device={device}
                     onDevice={setDevice}
                     onReload={reloadPreview}
+                    canEdit={mayEdit}
+                    onWording={(ref, value) => void saveFromPreview(ref, value)}
+                    onOpenWording={openFromPreview}
                     hasPage={checkpoints.length > 0 || (activeRun?.steps.some(changedFiles) ?? false)}
                     working={running}
                 />
                 <Sidebar
+                    contentHref={`/o/${org.slug}/p/${project.slug}/content`}
                     tab={tab}
                     onTab={setTab}
                     checkpoints={checkpoints}
@@ -514,6 +545,16 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             )}
 
             {published && <Published project={project} published={published} onClose={() => setPublished(null)} />}
+
+            {editingRef && (
+                <WordingDialog
+                    doc={documents.find((d) => d.id === editingRef.doc.id) ?? editingRef.doc}
+                    focus={editingRef.field}
+                    canEdit={mayEdit}
+                    onSave={saveDocument}
+                    onClose={() => setEditingRef(null)}
+                />
+            )}
 
             {settingsOpen && (
                 <ProjectSettings
