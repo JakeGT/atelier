@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, realpath } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -95,6 +95,24 @@ export class Workspace {
         await git(this.dir, ["read-tree", "-u", "--reset", sha]);
         await git(this.dir, ["clean", "-fdq"]);
         return this.checkpoint(`Restored version ${sha.slice(0, 7)}`);
+    }
+
+    // Puts a starter template's files in place, as the website's first version.
+    // Only into an empty website: it never overwrites someone's work.
+    async seed(files: { path: string; content: string }[], message: string): Promise<string | null> {
+        await this.init();
+        if (await this.head()) return null;
+        const base = resolve(this.dir);
+        for (const f of files) {
+            const target = resolve(join(base, f.path));
+            const parts = f.path.split("/");
+            if (!target.startsWith(`${base}/`) || parts.some((p) => p === ".." || p.startsWith(".") || p === "")) {
+                throw new Error(`invalid template path: ${f.path}`);
+            }
+            await mkdir(dirname(target), { recursive: true });
+            await writeFile(target, Buffer.from(f.content, "base64"));
+        }
+        return this.checkpoint(message);
     }
 
     // The files of one saved version, as a tar archive: what publishing ships.

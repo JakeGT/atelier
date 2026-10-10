@@ -35,7 +35,20 @@ export const organizationSchema = z.object({
     dailyTokenLimit: z.number().int().positive().nullable(),
     // Whose personal studio this is, if it is one. Everyone has exactly one.
     personalOf: z.string().uuid().nullable(),
+    // Parts of Atelier the operator has switched off for this studio (absent = on).
+    flags: z.object({ assistant: z.boolean().optional(), publishing: z.boolean().optional() }),
 });
+
+// What the operator sees of each studio.
+export interface StudioSummary extends z.infer<typeof organizationSchema> {
+    members: number;
+    websites: number;
+    liveWebsites: number;
+    // Assistant tokens in the last 30 days.
+    tokens: number;
+    owners: string[];
+    createdAt: string;
+}
 
 export const userSchema = z.object({
     id: z.string().uuid(),
@@ -67,6 +80,8 @@ export const projectSchema = z.object({
     productionRef: z.string().nullable(),
     // The website's project at the hosting provider, once it has been published there.
     hostingRef: z.string().nullable(),
+    // The starter template still to be put in place (cleared once its files are there).
+    template: z.string().nullable(),
     // Guidance the owner gives the assistant for this website, and an optional model.
     agentInstructions: z.string().nullable(),
     agentModel: z.string().nullable(),

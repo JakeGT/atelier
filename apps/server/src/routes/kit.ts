@@ -18,6 +18,7 @@ import { ReleaseService } from "../services/release.ts";
 import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
 import { SecretBox } from "../services/secrets.ts";
 import type { SessionStore } from "../services/sessions.ts";
+import { loadTemplates, type Template } from "../services/templates.ts";
 import type { Store } from "../store/types.ts";
 
 export interface DeclaredRoute {
@@ -42,6 +43,8 @@ export interface ApiDeps {
     providerFetch?: typeof fetch;
     // Where published websites are served from; null or absent when there is no hosting.
     hosting?: Hosting | null;
+    // Starter templates; read from apps/server/templates unless given.
+    templates?: Template[];
 }
 
 // Everything under an organisation, and under one of its projects.
@@ -98,6 +101,7 @@ export function createApi(deps: ApiDeps) {
         catalog: deps.catalog ?? new ModelCatalog(),
         providerFetch: deps.providerFetch ?? fetch,
         hosting: deps.hosting ?? null,
+        templates: deps.templates ?? loadTemplates(),
         presence,
         releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix),
         box: new SecretBox(deps.secretsKey),

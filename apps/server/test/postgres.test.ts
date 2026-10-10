@@ -704,3 +704,41 @@ test("personal studios: one per person; someone here before they existed keeps t
     assert.deepEqual([claimed.id, claimed.personalOf], [theirs.id, old.id]);
     assert.equal((await store.organizations.listForUser(old.id)).length, 1);
 });
+
+test("the operator's view lists every studio with its own figures; status and switches are stored", { skip }, async () => {
+    const a = await seedTenant("tenant-ops-a");
+    const email = `ops-owner-${suffix}@example.com`;
+    const owner = await store.users.upsertIdentity({ issuer: "https://idp/", subject: email, email, name: "Owner", admin: false });
+    await store.memberships.add({ tenantId: a.tenantId, userId: owner.id, role: "owner" });
+    await store.usage.record({
+        tenantId: a.tenantId,
+        projectId: a.project.id,
+        kind: "agent.output_tokens",
+        units: 900,
+        sourceId: `ops-${suffix}`,
+    });
+    await store.projects.setHosting(a.tenantId, a.project.id, { hostingRef: "atl-ops", productionRef: "https://atl-ops.pages.dev" });
+
+    const all = await store.organizations.listAll();
+    const mine = all.find((s) => s.id === a.tenantId);
+    assert.deepEqual([mine?.members, mine?.websites, mine?.liveWebsites, mine?.tokens, mine?.owners], [1, 1, 1, 900, [email]]);
+    // Other studios' figures are their own, not this one's.
+    assert.ok(all.filter((s) => s.id !== a.tenantId).every((s) => !s.owners.includes(email)));
+
+    const changed = await store.organizations.update(a.tenantId, { status: "suspended", flags: { assistant: false }, maxProjects: 3 });
+    assert.deepEqual([changed.status, changed.flags, changed.maxProjects], ["suspended", { assistant: false }, 3]);
+    // Changing something else leaves them alone.
+    const renamed = await store.organizations.update(a.tenantId, { name: "Renamed" });
+    assert.deepEqual([renamed.status, renamed.flags, renamed.maxProjects], ["suspended", { assistant: false }, 3]);
+
+    const withTemplate = await store.projects.create({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        slug: "from-template",
+        name: "T",
+        template: "cafe",
+    });
+    assert.equal(withTemplate.template, "cafe");
+    await store.projects.clearTemplate(a.tenantId, withTemplate.id);
+    assert.equal((await store.projects.findById(a.tenantId, withTemplate.id))?.template, null);
+});

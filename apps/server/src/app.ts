@@ -13,6 +13,7 @@ import type { Hosting } from "./services/hosting.ts";
 import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
+import type { Template } from "./services/templates.ts";
 import type { Store } from "./store/types.ts";
 
 export interface Deps {
@@ -28,6 +29,7 @@ export interface Deps {
     providerFetch?: typeof fetch;
     // Where published websites are served from; null when no deployer is configured.
     hosting?: Hosting | null;
+    templates?: Template[];
 }
 
 // Baseline headers for everything the app serves (the preview route adds a

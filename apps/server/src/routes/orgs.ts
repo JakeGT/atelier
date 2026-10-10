@@ -205,5 +205,4 @@ export function orgRoutes(api: Api): void {
     });
 
     route("get", `${ORG}/audit`, "org.manage", async (c) => c.json({ entries: await store.audit.list({ tenantId: c.get("org").id }) }));
-    route("get", "/api/v1/admin/audit", "admin.audit", async (c) => c.json({ entries: await store.audit.list({ limit: 500 }) }));
 }

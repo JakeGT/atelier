@@ -746,3 +746,127 @@
 .welcome-skip .link {
     color: var(--ink-2);
 }
+
+/* ---- starting points, operator console ---------------------------------------------- */
+
+fieldset.starters {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    align-items: center;
+}
+
+fieldset.starters legend {
+    float: left;
+    margin-right: 10px;
+    padding: 0;
+    line-height: 28px;
+}
+
+.starter {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s;
+}
+
+.starter input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.starter:hover {
+    border-color: var(--ink);
+}
+
+.starter.on {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+}
+
+.starter:has(input:focus-visible) {
+    box-shadow: 0 0 0 3px var(--line);
+}
+
+.brief-start {
+    margin: 0;
+    padding: 0 22px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink-3);
+}
+
+.figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 20px;
+    margin: 0 0 8px;
+}
+
+.figures dd {
+    margin: 4px 0 0;
+    font-size: 40px;
+    line-height: 1;
+}
+
+.operator-rows {
+    margin-top: 20px;
+}
+
+.operator-facts {
+    margin-top: 3px;
+    font-size: 12.5px;
+    white-space: normal;
+}
+
+.switches {
+    margin: 24px 0 0;
+    padding: 0;
+    border: 0;
+}
+
+.switches legend {
+    padding: 0;
+    margin-bottom: 8px;
+}
+
+.switches label {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    cursor: pointer;
+}
+
+.switches input {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    accent-color: var(--ink);
+}
+
+.switches span span {
+    display: block;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.switches strong {
+    font-weight: 500;
+}
+
+.limit-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}

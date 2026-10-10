@@ -13,6 +13,7 @@ import type {
     Project,
     Release,
     ReleaseDocument,
+    StudioSummary,
     UsageKind,
     User,
 } from "@atelier/shared";
@@ -41,7 +42,19 @@ export interface OrganizationStore {
     findById(id: string): Promise<Organization | null>;
     // With the caller's role in each, oldest membership first.
     listForUser(userId: string): Promise<(Organization & { role: OrgRole })[]>;
-    update(id: string, patch: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }): Promise<Organization>;
+    update(
+        id: string,
+        patch: {
+            name?: string;
+            defaultModel?: string | null;
+            dailyTokenLimit?: number | null;
+            maxProjects?: number | null;
+            status?: Organization["status"];
+            flags?: Organization["flags"];
+        },
+    ): Promise<Organization>;
+    // Every studio, for the operator. Not tenant-scoped: only operator routes may call it.
+    listAll(): Promise<StudioSummary[]>;
 }
 
 export interface MembershipStore {
@@ -72,7 +85,9 @@ export interface ProjectPatch {
 }
 
 export interface ProjectStore {
-    create(input: { id: string; tenantId: string; slug: string; name: string }): Promise<Project>;
+    create(input: { id: string; tenantId: string; slug: string; name: string; template?: string | null }): Promise<Project>;
+    // The template's files are in place: stop asking for them.
+    clearTemplate(tenantId: string, id: string): Promise<void>;
     findById(tenantId: string, id: string): Promise<Project | null>;
     findBySlug(tenantId: string, slug: string): Promise<Project | null>;
     list(tenantId: string): Promise<Project[]>;

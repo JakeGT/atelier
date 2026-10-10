@@ -1,3 +1,4 @@
+import { adminRoutes } from "./admin.ts";
 import { contentRoutes } from "./content.ts";
 import { hostingRoutes } from "./hosting.ts";
 import { type ApiDeps, createApi, type DeclaredRoute, type Env } from "./kit.ts";
@@ -21,5 +22,6 @@ export function apiRoutes(deps: ApiDeps): { app: import("hono").Hono<Env>; decla
     releaseRoutes(api);
     modelRoutes(api);
     hostingRoutes(api);
+    adminRoutes(api);
     return { app: api.app, declared: api.declared };
 }

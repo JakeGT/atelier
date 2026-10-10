@@ -111,7 +111,9 @@ export class MemoryStore implements Store {
                 maxProjects: null,
                 dailyTokenLimit: null,
                 personalOf: input.personalOf ?? null,
+                flags: {},
             };
+            this.orgCreated.set(input.id, now());
             this.orgMap.set(input.id, org);
             return org;
         },
@@ -120,6 +122,25 @@ export class MemoryStore implements Store {
             if (!org || org.personalOf || [...this.orgMap.values()].some((o) => o.personalOf === userId)) return false;
             this.orgMap.set(id, { ...org, personalOf: userId });
             return true;
+        },
+        listAll: async () => {
+            const since = Date.now() - 30 * 86_400_000;
+            return [...this.orgMap.values()].map((org) => {
+                const members = [...this.membershipMap.values()].filter((m) => m.tenantId === org.id);
+                const projects = [...this.projectMap.values()].filter((p) => p.tenantId === org.id);
+                const users = [...this.userMap.values()];
+                return {
+                    ...org,
+                    members: members.length,
+                    websites: projects.length,
+                    liveWebsites: projects.filter((p) => p.productionRef).length,
+                    tokens: this.usageLog
+                        .filter((e) => e.tenantId === org.id && e.at >= since && e.kind.endsWith("_tokens"))
+                        .reduce((n, e) => n + e.units, 0),
+                    owners: members.filter((m) => m.role === "owner").map((m) => users.find((u) => u.id === m.userId)?.email ?? ""),
+                    createdAt: this.orgCreated.get(org.id) ?? now(),
+                };
+            });
         },
         findById: async (id) => this.orgMap.get(id) ?? null,
         listForUser: async (userId) => {
@@ -139,6 +160,9 @@ export class MemoryStore implements Store {
                 name: patch.name ?? org.name,
                 defaultModel: patch.defaultModel === undefined ? org.defaultModel : patch.defaultModel,
                 dailyTokenLimit: patch.dailyTokenLimit === undefined ? org.dailyTokenLimit : patch.dailyTokenLimit,
+                maxProjects: patch.maxProjects === undefined ? org.maxProjects : patch.maxProjects,
+                status: patch.status ?? org.status,
+                flags: patch.flags ?? org.flags,
             };
             this.orgMap.set(id, next);
             return next;
@@ -218,6 +242,8 @@ export class MemoryStore implements Store {
         },
     };
 
+    private readonly orgCreated = new Map<string, string>();
+
     providerKeys: ProviderKeyStore = {
         list: async (tenantId) =>
             [...this.providerKeyMap.entries()]
@@ -276,6 +302,7 @@ export class MemoryStore implements Store {
                 previewRef: null,
                 productionRef: null,
                 hostingRef: null,
+                template: input.template ?? null,
                 agentInstructions: null,
                 agentModel: null,
                 archivedAt: null,
@@ -283,6 +310,10 @@ export class MemoryStore implements Store {
             };
             this.projectMap.set(input.id, p);
             return p;
+        },
+        clearTemplate: async (tenantId, id) => {
+            const p = this.projectMap.get(id);
+            if (p && p.tenantId === tenantId) this.projectMap.set(id, { ...p, template: null });
         },
         setHosting: async (tenantId, id, hosting) => {
             const p = this.projectMap.get(id);

@@ -113,6 +113,23 @@ app.post("/restore", async (c) => {
     }
 });
 
+// A starter template's files, into an empty website only.
+app.post("/seed", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { files?: unknown; message?: unknown } | null;
+    const files = Array.isArray(body?.files)
+        ? body.files.filter((f): f is { path: string; content: string } => typeof f?.path === "string" && typeof f?.content === "string")
+        : null;
+    if (!files || files.length === 0 || files.length > 200) return c.json({ error: "files required" }, 400);
+    const message = typeof body?.message === "string" ? body.message.slice(0, 120) : "Started from a template";
+    try {
+        const result = await runs.exclusive(() => workspace.seed(files, message));
+        if (result === "busy") return c.json({ error: "busy" }, 409);
+        return c.json({ sha: result });
+    } catch (err) {
+        return c.json({ error: (err as Error).message }, 400);
+    }
+});
+
 app.get("/head", async (c) => c.json({ sha: await workspace.head() }));
 
 // One saved version's files as a tar archive, for publishing (ADR-0010).

@@ -12,7 +12,7 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | P1 | Single-tenant vertical slice (one project) | One tenant, one project, edit → preview → publish end-to-end | ✅ done |
 | P2 | Multi-tenant + multi-project | Many tenants, many projects, hard isolation, RBAC, quotas | ✅ done (gVisor spike and two items deferred, see P2) |
 | P3 | Hosting & domains | Per-project Cloudflare Pages + custom domains + rollback | ✅ built on `p3-hosting` (needs a Cloudflare token to switch on; see P3) |
-| P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | pending |
+| P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | ✅ built (E4.1–E4.4); E4.5 "connect your own Cloudflare" is planned, not started |
 | P5 | Direct content editor & hardening | First-party CMS, gVisor, retention, alerting, VPS go-live gates | pending |
 
 **Interface rule for every phase:** anything a person sees follows
@@ -282,6 +282,32 @@ give the operator control. (No billing.)
 - E4.5 Connect your own Cloudflare (ADR-0013, proposed 2026-10-10): a studio
   connects its own Cloudflare account with one button and hosts its websites
   there; domains on that account are set up for it. See the breakdown below.
+
+### P4 as built: E4.2–E4.4 (branch `p4-operator-templates`, 2026-10-10)
+
+- **E4.2 Starter templates.** Four small finished websites (Café, Consultancy,
+  Invitation, Portfolio) in `apps/server/templates/`: plain HTML and CSS,
+  nothing loaded from elsewhere, no scripts. One can be chosen when a website
+  is made; its files become the website's first version the first time it is
+  opened, without the assistant (`Workspace.seed`, only into an empty website).
+- **E4.2 "Skills" became ready-made requests.** "Ideas for what to ask" beside
+  the message box: nine common requests, worded so the assistant does them
+  well, that fill the message box to change or send (`lib/ideas.ts`). Nothing
+  runs on the server: a skill here is a good prompt, not code.
+- **E4.3 Operator console** (`/admin`, the identity provider's admin group
+  only): every studio with its owners, members, websites, published websites
+  and tokens; suspend and restore; switch the assistant or publishing off for
+  one studio (`organizations.flags`); set its website and daily token limits.
+  A suspended studio tells its members so. Published websites stay up when a
+  studio is suspended: taking a website offline remains a separate act.
+- **E4.4 Activity across studios** on the console's second tab. Per-studio
+  usage was already on each studio's Usage page (P2); the console adds the
+  cross-studio totals.
+- **Also done here, from E5.0 (step a):** each item in the editor's Wording
+  panel opens a pop-up with room to edit.
+- **Not done:** per-tenant feature flags beyond those two switches; cost in
+  money (only tokens are known; prices belong to each studio's provider); a
+  template gallery with previews; templates supplied by a studio.
 
 **E4.1 was brought forward** (branch `p4-byok`, 2026-10-10, at the owner's
 request, ahead of P3): provider keys per studio, the key-holding model proxy

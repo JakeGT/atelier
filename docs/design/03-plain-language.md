@@ -54,6 +54,9 @@ list. Before inventing a term, look for it here; when you add one, add it here.
 | **API key** | The password-like code a provider gives you | Secret, credential, token |
 | **Paused** | A request that ran out of time; its work is kept | Timed out, killed |
 | **Carry on from here** | Continue a request that was stopped or paused | Resume, retry |
+| **Start from** / **starting point** | A finished small website to begin a new one from | Template (fine in passing), boilerplate, scaffold |
+| **Ideas for what to ask** | Ready-made requests that fill the message box | Skills, prompts, recipes |
+| **Suspended** | A studio the operator has paused | Disabled, deactivated, banned |
 | **Archive** | Hide a website and stop its assistant; nothing is deleted | Disable, deactivate |
 | **Member** | Someone who can open a studio | User, principal |
 

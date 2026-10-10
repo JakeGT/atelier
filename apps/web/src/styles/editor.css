@@ -1272,3 +1272,48 @@
         padding: 0;
     }
 }
+
+/* ---- wording pop-up, ideas ---------------------------------------------------------- */
+
+.doc-body-roomy {
+    margin-top: 18px;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+
+.doc-body-roomy .field textarea {
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.doc-body-roomy .doc-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.doc-body-roomy .doc-foot .mono {
+    flex: 1;
+}
+
+.doc-head svg {
+    width: 14px;
+    height: 14px;
+    color: var(--ink-3);
+}
+
+.ideas {
+    padding: 0 2px 4px;
+}
+
+.ideas .btn {
+    color: var(--ink-2);
+}
+
+.ideas .menu {
+    min-width: 290px;
+    max-height: min(420px, 60vh);
+    overflow-y: auto;
+}

@@ -1,8 +1,8 @@
 import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, CloudOff, Ellipsis, Globe, PencilLine, Plus, Trash2 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Org, Project, Session } from "../lib/api";
-import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
+import type { Org, Project, Session, Template } from "../lib/api";
+import { api, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
 import { Cover } from "../ui/Cover";
 import { Dialog, Dots, useToast } from "../ui/kit";
@@ -10,16 +10,6 @@ import { StudioNav } from "../ui/StudioNav";
 
 // Where a brief typed on the dashboard waits for the editor to pick it up.
 export const FIRST_PROMPT_KEY = "atelier.first-prompt";
-
-const STARTERS = [
-    {
-        name: "Portfolio",
-        brief: "A portfolio for a photographer: a full-bleed hero image, a grid of selected work, and a short about section.",
-    },
-    { name: "Café", brief: "A one-page site for a neighbourhood café: opening hours, a short menu, and where to find us." },
-    { name: "Consultancy", brief: "A landing page for an independent consultant: what I do, three services, and a contact section." },
-    { name: "Invitation", brief: "A wedding invitation page: the date, the venue, a schedule for the day, and an RSVP note." },
-];
 
 function greeting(): string {
     const h = new Date().getHours();
@@ -47,6 +37,13 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     const [name, setName] = useState("");
     const [brief, setBrief] = useState("");
     const [busy, setBusy] = useState(false);
+    // Starter templates: a finished small website to begin from, instead of an empty page.
+    const [templates, setTemplates] = useState<Template[]>([]);
+    const [template, setTemplate] = useState<string | null>(null);
+    useEffect(() => {
+        api.templates().then(setTemplates, () => {});
+    }, []);
+    const chosen = templates.find((t) => t.id === template);
     const [deleting, setDeleting] = useState<Project | null>(null);
     const [unpublishing, setUnpublishing] = useState<Project | null>(null);
     const nameRef = useRef<HTMLInputElement>(null);
@@ -77,7 +74,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
         }
         setBusy(true);
         try {
-            const project = await a.createProject(name.trim());
+            const project = await a.createProject(name.trim(), template);
             if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
             navigate(`/o/${org.slug}/p/${project.slug}`);
         } catch (err) {
@@ -185,29 +182,32 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 rows={3}
                                 aria-label="Describe the website"
                             />
+                            <p className="brief-start">
+                                {chosen
+                                    ? `${chosen.description} It is there the moment you open the website; then ask your assistant to make it yours.`
+                                    : "Your assistant builds the first page from your description, or you start in the editor with nothing."}
+                            </p>
                             <div className="brief-foot">
-                                <div className="starters">
-                                    <span className="starters-label">Or start from an idea:</span>
-                                    {STARTERS.map((s) => (
-                                        <button
-                                            key={s.name}
-                                            type="button"
-                                            className="btn btn-sm"
-                                            onClick={() => {
-                                                setBrief(s.brief);
-                                                if (!name.trim()) nameRef.current?.focus();
-                                            }}
-                                        >
-                                            {s.name}
-                                        </button>
+                                <fieldset className="starters">
+                                    <legend className="starters-label">Start from</legend>
+                                    {[{ id: null as string | null, name: "An empty page" }, ...templates].map((t) => (
+                                        <label key={t.id ?? "blank"} className={`starter ${template === t.id ? "on" : ""}`}>
+                                            <input
+                                                type="radio"
+                                                name="template"
+                                                checked={template === t.id}
+                                                onChange={() => setTemplate(t.id)}
+                                            />
+                                            {t.name}
+                                        </label>
                                     ))}
-                                </div>
+                                </fieldset>
                                 <button type="submit" className="btn btn-seal" disabled={busy}>
                                     {busy ? (
                                         <Dots />
                                     ) : (
                                         <>
-                                            {brief.trim() ? "Start building" : "Create"} <ArrowUp />
+                                            {brief.trim() ? "Create and start building" : "Create"} <ArrowUp />
                                         </>
                                     )}
                                 </button>

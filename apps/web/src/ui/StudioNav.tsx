@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Plus, Settings } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Settings, Wrench } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
 import type { Org, Session } from "../lib/api";
@@ -100,7 +100,12 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                 >
                     <Settings /> Studio settings
                 </button>
-                <UserMenu session={session} theme={theme} onToggleTheme={onToggleTheme} />
+                <UserMenu
+                    session={session}
+                    theme={theme}
+                    onToggleTheme={onToggleTheme}
+                    items={session.admin ? [{ label: "Operator console", icon: <Wrench />, onClick: () => navigate("/admin") }] : []}
+                />
             </nav>
 
             {creating && <NewStudio onClose={() => setCreating(false)} onOrgsChanged={onOrgsChanged} />}

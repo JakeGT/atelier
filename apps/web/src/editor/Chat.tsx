@@ -1,8 +1,10 @@
-import { ArrowUp, Clock, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, Clock, Lightbulb, Play, RotateCcw, Square } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clock, stepDone, stepList, summary } from "../lib/activity";
 import type { Pulse, Run, ThreadMessage } from "../lib/api";
+import { useClickOutside } from "../lib/hooks";
+import { IDEAS } from "../lib/ideas";
 import { Dots } from "../ui/kit";
 import { Prose } from "./Prose";
 
@@ -52,6 +54,8 @@ export function Chat(props: ChatProps) {
     const textarea = useRef<HTMLTextAreaElement>(null);
     const busy = run !== null;
     const steps = run?.steps.length ?? 0;
+    const [ideasOpen, setIdeasOpen] = useState(false);
+    const ideasRef = useClickOutside(useCallback(() => setIdeasOpen(false), []));
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the conversation grows or the work moves on
     useEffect(() => {
@@ -210,6 +214,38 @@ export function Chat(props: ChatProps) {
                         Send <ArrowUp />
                     </button>
                 </div>
+                {ready && (
+                    <div className="menu-wrap ideas" ref={ideasRef}>
+                        <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            onClick={() => setIdeasOpen((o) => !o)}
+                            aria-haspopup="menu"
+                            aria-expanded={ideasOpen}
+                        >
+                            <Lightbulb /> Ideas for what to ask
+                        </button>
+                        {ideasOpen && (
+                            <div className="menu menu-left menu-up" role="menu">
+                                <p className="menu-label eyebrow">Choose one, then change it or send it</p>
+                                {IDEAS.map((idea) => (
+                                    <button
+                                        key={idea.name}
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => {
+                                            setIdeasOpen(false);
+                                            change(idea.request);
+                                            textarea.current?.focus();
+                                        }}
+                                    >
+                                        {idea.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
                 <p className="composer-hint mono muted">
                     {busy
                         ? "You can write your next request now and send it when this one finishes."

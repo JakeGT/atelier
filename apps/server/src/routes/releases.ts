@@ -16,7 +16,11 @@ export function releaseRoutes(api: Api): void {
     });
 
     const refuseArchived = (c: Ctx) =>
-        c.get("project").archivedAt ? c.json({ error: "this website is archived; restore it first" }, 409) : null;
+        c.get("project").archivedAt
+            ? c.json({ error: "this website is archived; restore it first" }, 409)
+            : c.get("org").flags.publishing === false
+              ? c.json({ error: "publishing has been switched off for this studio" }, 403)
+              : null;
 
     // Creating a release is the first half of publishing, so it needs the same
     // recent sign-in: otherwise a refused publish leaves a planned release behind.

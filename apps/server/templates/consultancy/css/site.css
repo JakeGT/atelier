@@ -1,0 +1,149 @@
+:root {
+    --display: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ink: #0f1a24;
+    --paper: #f7f9fb;
+    --accent: #1f5eff;
+    --on-accent: #fff;
+    --line: rgba(15, 26, 36, 0.12);
+}
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+html {
+    -webkit-text-size-adjust: 100%;
+}
+body {
+    margin: 0;
+    font-family: var(--body);
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.6;
+    font-size: 17px;
+}
+img,
+svg {
+    max-width: 100%;
+    display: block;
+}
+a {
+    color: inherit;
+}
+.wrap {
+    width: min(1080px, 100% - 48px);
+    margin-inline: auto;
+}
+header.site {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    padding: 28px 0;
+}
+header.site .name {
+    font-family: var(--display);
+    font-size: 1.5rem;
+    text-decoration: none;
+}
+header.site nav {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-size: 0.95rem;
+}
+header.site nav a {
+    text-decoration: none;
+    opacity: 0.75;
+}
+header.site nav a:hover {
+    opacity: 1;
+}
+h1,
+h2,
+h3 {
+    font-family: var(--display);
+    font-weight: 400;
+    line-height: 1.08;
+    margin: 0;
+}
+h1 {
+    font-size: clamp(2.6rem, 7vw, 5rem);
+    letter-spacing: -0.02em;
+}
+h2 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+h3 {
+    font-size: 1.3rem;
+}
+p {
+    margin: 0;
+}
+.eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.65;
+}
+.button {
+    display: inline-block;
+    padding: 0.85em 1.5em;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+section {
+    padding: 72px 0;
+}
+footer.site {
+    padding: 40px 0 56px;
+    border-top: 1px solid var(--line);
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+.grid {
+    display: grid;
+    gap: 28px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+h1,
+h2,
+h3 {
+    font-weight: 650;
+    letter-spacing: -0.03em;
+}
+.hero {
+    padding: 72px 0 56px;
+}
+.hero p {
+    max-width: 52ch;
+    margin: 22px 0 30px;
+    font-size: 1.2rem;
+    opacity: 0.8;
+}
+.card {
+    padding: 28px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+}
+.card p {
+    margin-top: 10px;
+    opacity: 0.8;
+}
+.contact {
+    background: var(--ink);
+    color: #fff;
+    border-radius: 20px;
+    padding: 56px;
+    text-align: center;
+}
+.contact p {
+    margin: 14px auto 26px;
+    max-width: 46ch;
+    opacity: 0.85;
+}

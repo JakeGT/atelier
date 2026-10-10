@@ -15,6 +15,8 @@ export interface Org {
     slug: string;
     name: string;
     defaultModel: string | null;
+    // "suspended": the operator has paused this studio; nothing in it works until it is restored.
+    status: "active" | "suspended" | "archived";
     // The id of the person whose personal studio this is, if it is one.
     personalOf: string | null;
     // The signed-in person's role in this organisation.
@@ -103,6 +105,35 @@ export interface ModelList {
     providers: { id: string; name: string; connected: boolean }[];
     models: CatalogModel[];
     unavailable: boolean;
+}
+
+export interface Template {
+    id: string;
+    name: string;
+    description: string;
+}
+
+// What an operator sees of each studio.
+export interface StudioSummary {
+    id: string;
+    slug: string;
+    name: string;
+    status: "active" | "suspended" | "archived";
+    personalOf: string | null;
+    maxProjects: number | null;
+    dailyTokenLimit: number | null;
+    flags: { assistant?: boolean; publishing?: boolean };
+    members: number;
+    websites: number;
+    liveWebsites: number;
+    tokens: number;
+    owners: string[];
+    createdAt: string;
+}
+
+export interface OperatorOverview {
+    studios: StudioSummary[];
+    totals: { studios: number; people: number; websites: number; liveWebsites: number; tokens: number };
 }
 
 export const can = {
@@ -329,6 +360,19 @@ export const api = {
         const body = await post<{ redirect: string | null }>("/auth/logout");
         window.location.assign(body.redirect ?? "/");
     },
+    templates: () => get<{ templates: Template[] }>("/api/v1/templates").then((b) => b.templates),
+    // Operators only.
+    operatorOverview: () => get<OperatorOverview>("/api/v1/admin/studios"),
+    operatorUpdate: (
+        id: string,
+        changes: {
+            status?: "active" | "suspended";
+            maxProjects?: number | null;
+            dailyTokenLimit?: number | null;
+            flags?: StudioSummary["flags"];
+        },
+    ) => patch<{ studio: StudioSummary }>(`/api/v1/admin/studios/${id}`, changes),
+    operatorActivity: () => get<{ entries: AuditEntry[] }>("/api/v1/admin/audit").then((b) => b.entries),
     // The introduction is finished or skipped: it is not shown again.
     finishOnboarding: () => post<{ ok: boolean }>("/api/v1/me/onboarded"),
     listOrgs: () => get<{ orgs: Org[] }>("/api/v1/orgs").then((b) => b.orgs),
@@ -360,7 +404,8 @@ export function orgApi(org: string) {
 
         listProjects: (archived = false) =>
             get<{ projects: Project[] }>(`${o}/projects${archived ? "?archived=1" : ""}`).then((b) => b.projects),
-        createProject: (name: string) => post<{ project: Project }>(`${o}/projects`, { name }).then((b) => b.project),
+        createProject: (name: string, template?: string | null) =>
+            post<{ project: Project }>(`${o}/projects`, { name, ...(template ? { template } : {}) }).then((b) => b.project),
         updateProject: (projectId: string, changes: { name?: string; agentInstructions?: string | null; agentModel?: string | null }) =>
             patch<{ project: Project }>(p(projectId), changes).then((b) => b.project),
         archiveProject: (projectId: string) => post<{ project: Project }>(`${p(projectId)}/archive`).then((b) => b.project),
