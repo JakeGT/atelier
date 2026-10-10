@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.2` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> Last updated 2026-10-10. Status: **`p5.3` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
 > `main` has everything through PR #8. Four PRs are open, to merge in this order: [#9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs), [#10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates`, [#11](https://github.com/JakeGT/atelier/pull/11) `p5-content-studio`, [#12](https://github.com/JakeGT/atelier/pull/12) `p5-media` (each stacked on the one before).
 
 ## TL;DR
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.2` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.3` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0015` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -151,7 +151,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Media library:** uploads are prepared in `services/media.ts` (type from bytes, photographs re-encoded and given smaller copies, SVG sanitised) and kept in Cloudflare R2 (`services/mediaStorage.ts`, signed S3 requests; `MEDIA_STORAGE=disk` in development). Pages refer to `media/<name>`; `data-content-image` binds an `<img>` to a field. The release service sends the deployer the files a release mentions.
 - **Notifications:** `services/notifier.ts`, table `notifications` (one person's rows only, by RLS). In the app always; by e-mail through Resend when configured. Events and recipients are in docs/12 §6.
 - **Retention:** `services/retention.ts`, daily; periods in docs/12 §5.
-- Production needs four secrets for these to be on: the R2 access key id and secret, and a Resend key (see `apps/atelier/README.md` in the infrastructure repo). Without them the library says it is not switched on and notifications stay in the app.
+- **On in production since p5.3 (2026-10-10):** the R2 bucket `atelier` (private, standard address: it is located in the EU but not in the EU jurisdiction, so `R2_JURISDICTION` is unset) and Resend (`MAIL_FROM` `noreply@notify.jaketalling.com`, operator alerts to the owner's address). Checked from inside the server: put, get and delete against the bucket, and one test e-mail accepted by Resend. Not checked: an upload through the signed-in interface.
 
 ## Known gaps
 
