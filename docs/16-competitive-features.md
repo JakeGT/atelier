@@ -83,7 +83,9 @@ Key: **[B]** = baseline, **[D]** = delighter. Phase from `13-implementation-plan
 | --- | --- | --- | --- |
 | Collections + dynamic pages (content store) | B | P1 | already planned (ADR-0002) |
 | Direct content editing without an agent | B | P5 | Webflow Edit / Framer CMS / 10Web Edit; already the planned first-party CMS |
-| Media library + image optimization + alt text | B | P2 | Framer/Webflow/Durable Studio; part of content store |
+| Media library + image optimization + alt text | B | P5 (E5.0 f–g) | Framer/Webflow/Durable Studio; specified in ADR-0014 |
+| Click on the page to edit its text; a dedicated content page | B | P5 (E5.0 c–e) | Sanity, Storyblok, DatoCMS, Framer all offer visual editing; ADR-0014 |
+| Short video clips and embedded video | D | P5 (E5.0 h) | Hosted video waits for a studio's own Cloudflare (ADR-0013) |
 
 ### 2.6 Templates
 

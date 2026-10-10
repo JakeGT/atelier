@@ -16,6 +16,8 @@
 | R10 | Provisioner compromise (holds the Docker socket = host root) | Low | High | Private network reachable only from the control plane, shared secret, fixed container spec, UUID-only input, refuses unmanaged containers |
 | R11 | A studio's Cloudflare grant leaks (planned E4.5); with DNS access an attacker could redirect its domains | Low | High | ADR-0013: sealed per studio, used only by the deployer, DNS access optional and off unless granted, revoked at Cloudflare on disconnect |
 | R12 | Cloudflare does not approve a public OAuth client, or takes long (E4.5 cannot reach people outside the operator's account) | Med | Med | Start the approval before building; connect-by-token fallback with a pre-filled link works without approval |
+| R13 | Filling pages with content lets a field inject markup or script into a published page (planned E5.0) | Low | High | ADR-0014: a real HTML parser, text inserted as text, rich text through an allow-list on the way in and out, the same code for preview and publish, in the trusted deployer |
+| R14 | Uploaded files: malicious SVG, oversized images, private location data in photographs (planned E5.0) | Med | Med | ADR-0014: type checked from the file, SVG sanitised, location data stripped, size limits, originals never served directly |
 
 ## 2. Open questions — resolved at sign-off (2026-10-08)
 
@@ -45,6 +47,7 @@
 | `13` | Phase ordering P0–P5; parallelize after groundwork | Accepted |
 | ADR-0006…0011 | Runtime containment, release model, DB roles, code storage, build isolation, BYOK proxy | Accepted 2026-10-09 (P1 review) |
 | ADR-0012 | Egress proxy and workspace lifecycle | Accepted 2026-10-10 (P2) |
+| ADR-0014 | Content bound to the page, three places to edit, media library (E5.0) | **Proposed 2026-10-10; awaiting sign-off.** Open questions listed in the ADR |
 | ADR-0013 | A studio connects its own Cloudflare by OAuth (E4.5) | **Proposed 2026-10-10; awaiting sign-off.** Open questions listed in the ADR |
 
 ## 4. Status

@@ -73,6 +73,28 @@ The agent writes only `draft` through the content MCP (`content_write_draft`),
 never `published`, and never deletes — the exact permission boundary the current
 Strapi MCP token enforced, now expressed in Atelier's own permission table.
 
+## 3a. The content studio (planned, P5)
+
+ADR-0014 (proposed 2026-10-10) turns the store into what the page actually
+shows, and gives it proper places to edit. In short:
+
+- **Bound to the page.** `data-content="page/home#headline"` on an element; the
+  preview fills it from drafts, the deployer from the release. Wording changes
+  need no assistant and cannot drift from the page.
+- **Three places to edit, one store:** in the preview (click and type), a pop-up
+  from the editor's side panel, and a dedicated Content page per website with
+  pages, lists, media, history and "not yet published".
+- **Typed fields** with plain labels and help; no JSON.
+- **A media library:** images, documents, short clips; alt text at upload;
+  images sized and converted on publish; long video by link.
+
+The work is broken into steps a–h in docs/13 (E5.0). The first, pop-up editing
+from the side panel, needs nothing else and can be done at once.
+
+This replaces two statements below: "no requirement (v1) for a standalone
+human-facing CMS admin UI" (§3 point 1) held for v1 and no longer holds, and the
+"lightweight CMS UI" in §4 is now specified by ADR-0014.
+
 ## 4. Future work
 
 - **Build the first-party direct content editor** (approved at sign-off): a

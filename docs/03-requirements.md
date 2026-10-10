@@ -54,7 +54,21 @@ Requirements are tagged with a phase (`P1`…`P5`) matching the roadmap in
   never hard-coded in code.
 - **FR-D4 (Should, P2)** Per-project content schema extensions (add/remove fields
   for a project) without affecting other projects.
-- **FR-D5 (Should, P2)** Media library per project with safe (non-destructive)
+- **FR-D6 (Must, P5)** Content is the source of truth for a page's wording: an
+  element bound to a field shows the stored value in the preview (drafts) and
+  on the published website (the release's content), with no script on the
+  published page (ADR-0014).
+- **FR-D7 (Must, P5)** Three places to edit the same content: in the preview
+  (click and type), in a pop-up from the editor, and on a dedicated Content
+  page per website.
+- **FR-D8 (Must, P5)** Fields have a type, a plain-language label and help; no
+  JSON is shown; limits are checked at publish.
+- **FR-D9 (Must, P5)** Upload images, documents and short video/audio clips to
+  a per-website media library; alt text asked for at upload; unsafe files
+  refused or cleaned; originals kept.
+- **FR-D10 (Should, P5)** Images are produced in suitable sizes and modern
+  formats on publish. Long video is embedded by link.
+- **FR-D5 (Should, P2 → specified in FR-D9/D10, P5)** Media library per project with safe (non-destructive)
   attachment model.
 
 ### FR — Release / publish
