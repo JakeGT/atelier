@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { INVITABLE_ROLES, ORG_ROLES, type OrgRole } from "@atelier/shared";
-import { acceptInvitations } from "../services/bootstrap.ts";
+import { acceptInvitations, ensurePersonalStudio } from "../services/bootstrap.ts";
 import { validModelRef } from "../services/providers.ts";
 import { SlugTakenError } from "../store/types.ts";
 import { type Api, ORG, param, slugify, startOfUtcDay } from "./kit.ts";
@@ -18,7 +18,17 @@ export function orgRoutes(api: Api): void {
     route("get", "/api/v1/orgs", "signed-in", async (c) => {
         const user = c.get("user");
         await acceptInvitations(store, user);
-        return c.json({ orgs: await store.organizations.listForUser(user.id) });
+        let orgs = await store.organizations.listForUser(user.id);
+        // Everyone has a personal studio. Sign-in makes sure of it; this covers
+        // someone whose session began before personal studios existed.
+        if (!orgs.some((o) => o.personalOf === user.id)) {
+            const full = await store.users.findById(user.id);
+            if (full) {
+                await ensurePersonalStudio(store, full);
+                orgs = await store.organizations.listForUser(user.id);
+            }
+        }
+        return c.json({ orgs });
     });
 
     // The introduction has been finished or skipped: do not show it again.

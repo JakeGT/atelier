@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentSession, Invitation, Member, Organization, Project } from "@atelier/shared";
+import { cookieName } from "../src/services/cookies.ts";
 import type { RunState } from "../src/services/runs.ts";
 import { json, makeApp, signIn, type TestApp } from "./helpers.ts";
 
@@ -367,4 +368,25 @@ test("a studio's own daily limit stops new runs with a clear message; the projec
     const third = await post(t, owner, `${owner.api}/projects`, { name: "Three" });
     assert.equal(third.status, 409);
     assert.match((await json<{ error: string }>(third)).error, /limit of 2 websites/);
+});
+
+test("someone signed in since before personal studios existed gets theirs on the next page load: the studio they already own", async () => {
+    const t = await makeApp();
+    const user = await t.store.users.upsertIdentity({
+        issuer: "https://idp/",
+        subject: "old",
+        email: "old@example.com",
+        name: "Old Hand",
+        admin: false,
+    });
+    await t.store.users.setOnboarded(user.id);
+    const org = await t.store.organizations.create({ id: crypto.randomUUID(), slug: "old-co", name: "Old Co" });
+    await t.store.memberships.add({ tenantId: org.id, userId: user.id, role: "owner" });
+    const { id } = await t.sessions.createSession(user.id);
+    const headers = { cookie: `${cookieName("session", t.config.cookieSecure)}=${id}` };
+    const { orgs } = await json<{ orgs: { id: string; personalOf: string | null }[] }>(await t.app.request("/api/v1/orgs", { headers }));
+    assert.deepEqual(
+        orgs.map((o) => [o.id, o.personalOf]),
+        [[org.id, user.id]],
+    );
 });
