@@ -56,6 +56,8 @@ export interface Project {
     slug: string;
     name: string;
     status: string;
+    // The website's public address, once it has been published to a host.
+    productionRef: string | null;
     agentInstructions: string | null;
     agentModel: string | null;
     archivedAt: string | null;
@@ -173,6 +175,24 @@ export interface ContentRevision {
     rev: number;
     draft: Record<string, unknown> | null;
     createdAt: string;
+}
+
+export interface HostedDomain {
+    hostname: string;
+    // "active" once the DNS record is verified and the certificate issued; "unknown" if the host could not be asked.
+    status: string;
+    error: string | null;
+    createdAt: string;
+}
+
+export interface Hosting {
+    // False when this server has no hosting set up: publishing then records releases only.
+    enabled: boolean;
+    url: string | null;
+    // What a custom domain's DNS record must point at.
+    target: string | null;
+    domains: HostedDomain[];
+    lastDeployment: { state: string; error: string | null; createdAt: string } | null;
 }
 
 export interface Overview {
@@ -337,6 +357,12 @@ export function orgApi(org: string) {
         listContent: (projectId: string) => get<{ documents: ContentDocument[] }>(`${p(projectId)}/content`).then((b) => b.documents),
         saveContent: (projectId: string, kind: string, slug: string, draft: Record<string, unknown>) =>
             put<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}`, draft).then((b) => b.document),
+
+        hosting: (projectId: string) => get<Hosting>(`${p(projectId)}/hosting`),
+        addDomain: (projectId: string, hostname: string) =>
+            post<{ hostname: string; target: string }>(`${p(projectId)}/domains`, { hostname }),
+        checkDomain: (projectId: string, hostname: string) => post<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}/check`),
+        removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}`),
 
         listReleases: (projectId: string) => get<{ releases: Release[] }>(`${p(projectId)}/releases`).then((b) => b.releases),
         // "Publish" = freeze the current drafts + code into a release, then make it live.

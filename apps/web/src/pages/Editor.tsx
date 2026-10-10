@@ -1,5 +1,6 @@
-import { ArrowLeft, Eye, History, MessageSquare, PanelRight, Rocket, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Eye, Globe, History, MessageSquare, PanelRight, Rocket, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Address } from "../editor/Address";
 import { Chat, type Message } from "../editor/Chat";
 import { type Device, Preview } from "../editor/Preview";
 import { ProjectSettings } from "../editor/ProjectSettings";
@@ -61,6 +62,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const [acting, setActing] = useState(false);
     const [confirmPublish, setConfirmPublish] = useState(false);
+    const [addressOpen, setAddressOpen] = useState(false);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
     const loadThread = useCallback(async () => {
@@ -238,7 +240,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             async () => {
                 const r = await a.publish(pid);
                 setTab("releases");
-                return `Release ${r.number} is live.`;
+                const { url } = await a.hosting(pid).catch(() => ({ url: null }));
+                return url ? `Release ${r.number} is live at ${new URL(url).host}.` : `Release ${r.number} is live.`;
             },
             { action: "publish" },
             resuming,
@@ -279,6 +282,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const running = activeRun !== null;
     const live = overview?.liveRelease ?? null;
+    const liveUrl = live ? (overview?.project.productionRef ?? null) : null;
     const hasChanges = overview?.hasChanges ?? false;
     const nothingToPublish = overview !== null && !hasChanges;
 
@@ -306,9 +310,22 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     ) : (
                         <span className="chip chip-plain">Not published</span>
                     )}
+                    {liveUrl && (
+                        <a className="live-link mono" href={liveUrl} target="_blank" rel="noreferrer" title="Open the live website">
+                            {new URL(liveUrl).host} <ArrowUpRight />
+                        </a>
+                    )}
                 </div>
                 <div className="editor-bar-right">
                     <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+                    <button
+                        type="button"
+                        className="btn btn-ghost btn-icon"
+                        onClick={() => setAddressOpen(true)}
+                        title="Address and domains"
+                    >
+                        <Globe />
+                    </button>
                     {mayManage && (
                         <button
                             type="button"
@@ -398,6 +415,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     </button>
                 ))}
             </nav>
+
+            {addressOpen && <Address project={project} api={a} mayManage={mayManage} onClose={() => setAddressOpen(false)} />}
 
             {settingsOpen && (
                 <ProjectSettings

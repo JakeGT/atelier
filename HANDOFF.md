@@ -95,7 +95,7 @@ docker run -d --rm --name atelier-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:5543
 TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # all tests, incl. RLS/role suite
 scripts/e2e.sh      # the real images end to end (sandbox, network boundaries); E2E_AGENT=1 adds a real assistant run
 
-for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:<tag> .; done
+for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:<tag> .; done
 cd ~/Projects/jaketalling-com/jaketalling-platform-infrastructure && sh scripts/backup.sh
 cd apps/atelier && sed -i 's/^ATELIER_VERSION=.*/ATELIER_VERSION=<tag>/' .env && docker compose up -d
 docker logs atelier-server --tail 20 && curl -fsS https://atelier.jaketalling.com/healthz
@@ -109,6 +109,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Keys are sealed in `provider_keys` and never reach a workspace. The assistant calls `/internal/model/<provider>/…` on the server with its run token; the server swaps in the real key (ADR-0011 "As built").
 - The model picker's list and its recommendations come from models.dev, computed in `services/catalog.ts`. Nothing is hard-coded per model.
 - To try it locally without real keys: `PROVIDER_UPSTREAMS` can point a provider at a stand-in server.
+
+## Hosting (branch `p3-hosting`)
+
+- Publish exports the release's files from the workspace and hands them to the `deployer` service, which validates them and uploads them to Cloudflare Pages. Only the deployer holds the Cloudflare token (ADR-0004 and ADR-0010, "As built").
+- Hosting is on only when the server has `DEPLOYER_URL`. Without it, publishing records releases and serves nothing, as before.
+- Custom domains are per website (the globe button in the editor).
+- Tested against a stand-in for Cloudflare (`scripts/fake-pages.ts`), not yet against Cloudflare itself.
 
 ## Known gaps
 

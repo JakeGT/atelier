@@ -1,11 +1,11 @@
 # 10 — Build, deploy & hosting (per project)
 
-> **Implementation status (P1 + hardening):** the build/deploy is a stub.
-> Publishing a planned release records a `deployments` row (`provider: static`)
-> and then goes live atomically (ADR-0007). Real Cloudflare Pages is P3, and
-> the build is **split into an untrusted sandboxed build and a trusted upload**
-> (ADR-0010, which supersedes §4's single worker). The in-editor preview serves
-> the workspace's static files via a signed, sandboxed URL.
+> **Implementation status (P3, branch `p3-hosting`):** publishing deploys to
+> Cloudflare Pages through the `deployer` service; custom domains and rollback
+> work. See "As built" in ADR-0004 (hosting) and ADR-0010 (what is accepted and
+> why there is no build stage yet). Sections below describe the original design;
+> where they differ, the ADRs are right. Without a deployer configured,
+> publishing records releases and serves nothing.
 
 Each project produces a website that needs preview and production hosting with
 per-project custom domains and TLS. This is the "one deploy target per project"

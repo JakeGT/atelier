@@ -44,3 +44,32 @@ Atelier are Pages projects.
 additional hosting providers (Vercel, Netlify, AWS Amplify, self-hosted) is a
 **V2** decision; the deploy-target abstraction exists specifically to make that
 possible without re-platforming.
+
+## As built (branch `p3-hosting`, 2026-10-10)
+
+- One Pages project per website, created on first publish and named
+  `atl-<slug>-<10 hex of the project id>` (`projects.hosting_ref`). Its
+  `*.pages.dev` address is the website's stable address
+  (`projects.production_ref`).
+- **Publish** uploads with Direct Upload, the same steps and asset hash as
+  `wrangler pages deploy` (upload token, check-missing, upload, upsert-hashes,
+  create deployment), to the production branch. Cloudflare switches production
+  to a deployment only once it is complete, so a failed upload changes nothing;
+  the release is marked `failed` and the previous one stays live (ADR-0007).
+- **Rollback** creates a new deployment from the earlier release's files. The
+  host already holds them (assets are addressed by hash), so nothing is
+  uploaded again. This replaces "re-point to the prior deployment": one code
+  path, and history only grows.
+- **Custom domains** are attached to the Pages project; Cloudflare validates
+  the DNS record and issues the certificate. A hostname belongs to one website
+  platform-wide (`project_domains`). Whether it is verified is asked of
+  Cloudflare each time, not stored.
+- **Canonical origin:** every deployment carries a generated `_headers` file.
+  Preview addresses are always `noindex`; the `*.pages.dev` address becomes
+  `noindex` once a custom domain is verified (it takes effect at the next
+  publish). The website's own `_headers` and `_redirects` are kept.
+- **The seam for another host** is `services/hosting.ts` (`Hosting`).
+- **Not built:** preview deployments as a feature (the deployer accepts a
+  branch, nothing offers it yet); the published content snapshot (websites
+  carry their own wording until the P5 content editor); the remote git mirror
+  of ADR-0009.
