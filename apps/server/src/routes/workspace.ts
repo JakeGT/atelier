@@ -28,7 +28,7 @@ const PREVIEW_HEADERS = {
 
 // The assistant and its workspace: sessions, runs, the conversation, versions, preview.
 export function workspaceRoutes(api: Api): void {
-    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence } = api;
+    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates } = api;
     const previewKey = `${secretsKey}:preview`;
     const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
 
@@ -43,6 +43,13 @@ export function workspaceRoutes(api: Api): void {
         let session = await store.agentSessions.create({ id: randomUUID(), tenantId: org.id, projectId, model: null });
         try {
             const { workspaceId } = await runtime.ensure(projectId);
+            // A website started from a template gets its files the first time it is opened.
+            const project = c.get("project");
+            const template = project.template ? templates.find((t) => t.id === project.template) : undefined;
+            if (project.template) {
+                if (template) await runtime.seed(projectId, template.files, `Started from the ${template.name} template`);
+                await store.projects.clearTemplate(org.id, projectId);
+            }
             session = await store.agentSessions.updateStatus(org.id, session.id, "ready", workspaceId);
         } catch (err) {
             console.error(`workspace provisioning failed: ${(err as Error).message}`);
@@ -64,6 +71,7 @@ export function workspaceRoutes(api: Api): void {
         const session = await store.agentSessions.get(org.id, param(c, "sessionId"));
         if (!session || session.projectId !== project.id) return c.json({ error: "not found" }, 404);
         const body = await c.req.json().catch(() => null);
+        if (org.flags.assistant === false) return c.json({ error: "the assistant has been switched off for this studio" }, 403);
         // "Carry on": pick up the request that was stopped or ran out of time.
         const resume = body?.resume === true;
         let prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";

@@ -59,7 +59,10 @@ export function loadOrg(store: Store) {
         const slug = c.req.param("org") ?? "";
         const orgs = await store.organizations.listForUser(c.get("user").id);
         const org = orgs.find((o) => o.slug === slug);
-        if (org?.status !== "active") return c.json({ error: "not found" }, 404);
+        if (!org || org.status === "archived") return c.json({ error: "not found" }, 404);
+        // A suspended studio is shown as suspended to its members, and does nothing until restored.
+        if (org.status === "suspended")
+            return c.json({ error: "this studio has been suspended; contact whoever runs Atelier for you" }, 403);
         const { role, ...organization } = org;
         c.set("org", organization);
         c.set("role", role);

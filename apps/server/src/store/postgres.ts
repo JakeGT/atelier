@@ -13,6 +13,7 @@ import type {
     Project,
     Release,
     ReleaseDocument,
+    StudioSummary,
     User,
 } from "@atelier/shared";
 import postgres from "postgres";
@@ -59,6 +60,7 @@ interface OrgRow {
     max_projects: number | null;
     daily_token_limit: number | string | null;
     personal_of: string | null;
+    flags: Organization["flags"] | null;
 }
 
 interface InvitationRow {
@@ -87,6 +89,7 @@ interface ProjectRow {
     preview_ref: string | null;
     production_ref: string | null;
     hosting_ref: string | null;
+    template: string | null;
     agent_instructions: string | null;
     agent_model: string | null;
     archived_at: Ts | null;
@@ -190,10 +193,10 @@ const firstRow = <T>(rows: readonly T[]): T => {
     return row;
 };
 
-const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of";
+const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of, flags";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
-    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, agent_instructions, agent_model, archived_at, created_at";
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, archived_at, created_at";
 const CONTENT_COLS = "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
 const RELEASE_COLS = "id, project_id, tenant_id, number, state, code_sha, content_rev, actor_id, rollback_of, deployed_at, created_at";
@@ -219,6 +222,7 @@ const rowToOrg = (r: OrgRow): Organization => ({
     maxProjects: r.max_projects,
     dailyTokenLimit: r.daily_token_limit === null ? null : Number(r.daily_token_limit),
     personalOf: r.personal_of,
+    flags: r.flags ?? {},
 });
 
 const rowToInvitation = (r: InvitationRow): Invitation => ({
@@ -241,6 +245,7 @@ const rowToProject = (r: ProjectRow): Project => ({
     previewRef: r.preview_ref,
     productionRef: r.production_ref,
     hostingRef: r.hosting_ref,
+    template: r.template,
     agentInstructions: r.agent_instructions,
     agentModel: r.agent_model,
     archivedAt: iso(r.archived_at),
@@ -435,10 +440,48 @@ export class PostgresStore implements Store {
                             name = COALESCE(${patch.name ?? null}, name),
                             default_model = CASE WHEN ${patch.defaultModel !== undefined} THEN ${patch.defaultModel ?? null} ELSE default_model END,
                             daily_token_limit = CASE WHEN ${patch.dailyTokenLimit !== undefined} THEN ${patch.dailyTokenLimit ?? null}::bigint ELSE daily_token_limit END,
+                            max_projects = CASE WHEN ${patch.maxProjects !== undefined} THEN ${patch.maxProjects ?? null}::int ELSE max_projects END,
+                            status = COALESCE(${patch.status ?? null}, status),
+                            flags = CASE WHEN ${patch.flags !== undefined} THEN ${json((patch.flags ?? {}) as Json)} ELSE flags END,
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(ORG_COLS)}`;
+                    if (patch.status) await tx`UPDATE control.tenants SET status = ${patch.status} WHERE id = ${id}`;
                     return rowToOrg(firstRow(rows));
                 }),
+            // The operator's view. `control.tenants` lists every studio (it is not
+            // tenant-scoped); each studio's own figures are then read inside its tenant.
+            listAll: async () => {
+                const ids = await this.sql<
+                    { id: string; created_at: Ts }[]
+                >`SELECT id, created_at FROM control.tenants ORDER BY created_at`;
+                const out: StudioSummary[] = [];
+                for (const t of ids) {
+                    const row = await this.withTenant(t.id, async (tx) => {
+                        const orgs = await tx<OrgRow[]>`SELECT ${tx.unsafe(ORG_COLS)} FROM organizations WHERE id = ${t.id}`;
+                        const org = orgs[0];
+                        if (!org) return null;
+                        const [counts] = await tx<{ members: number; websites: number; live: number; tokens: string | null }[]>`
+                            SELECT
+                                (SELECT count(*)::int FROM memberships) AS members,
+                                (SELECT count(*)::int FROM projects) AS websites,
+                                (SELECT count(*)::int FROM projects WHERE production_ref IS NOT NULL) AS live,
+                                (SELECT sum(units) FROM usage_events WHERE kind LIKE '%_tokens' AND occurred_at >= now() - interval '30 days') AS tokens`;
+                        const owners = await tx<{ email: string }[]>`
+                            SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.role = 'owner' ORDER BY m.created_at`;
+                        return {
+                            ...rowToOrg(org),
+                            members: counts?.members ?? 0,
+                            websites: counts?.websites ?? 0,
+                            liveWebsites: counts?.live ?? 0,
+                            tokens: Number(counts?.tokens ?? 0),
+                            owners: owners.map((o) => o.email),
+                            createdAt: isoNow(t.created_at),
+                        };
+                    });
+                    if (row) out.push(row);
+                }
+                return out;
+            },
         };
 
         this.memberships = {
@@ -585,7 +628,8 @@ export class PostgresStore implements Store {
             create: async (input) =>
                 this.withTenant(input.tenantId, async (tx) => {
                     const rows = await tx<ProjectRow[]>`
-                        INSERT INTO projects (id, tenant_id, slug, name) VALUES (${input.id}, ${input.tenantId}, ${input.slug}, ${input.name})
+                        INSERT INTO projects (id, tenant_id, slug, name, template)
+                        VALUES (${input.id}, ${input.tenantId}, ${input.slug}, ${input.name}, ${input.template ?? null})
                         RETURNING ${tx.unsafe(PROJECT_COLS)}`;
                     return rowToProject(firstRow(rows));
                 }),
@@ -606,6 +650,9 @@ export class PostgresStore implements Store {
                     const rows = await tx<ProjectRow[]>`SELECT ${tx.unsafe(PROJECT_COLS)} FROM projects ORDER BY created_at`;
                     return rows.map(rowToProject);
                 }),
+            clearTemplate: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`UPDATE projects SET template = NULL WHERE id = ${id}`);
+            },
             setHosting: async (tenantId, id, hosting) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<ProjectRow[]>`

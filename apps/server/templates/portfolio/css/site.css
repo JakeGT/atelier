@@ -1,0 +1,138 @@
+:root {
+    --display: Georgia, "Times New Roman", serif;
+    --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ink: #16130f;
+    --paper: #f6f3ee;
+    --accent: #16130f;
+    --on-accent: #f6f3ee;
+    --line: rgba(22, 19, 15, 0.14);
+}
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+html {
+    -webkit-text-size-adjust: 100%;
+}
+body {
+    margin: 0;
+    font-family: var(--body);
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.6;
+    font-size: 17px;
+}
+img,
+svg {
+    max-width: 100%;
+    display: block;
+}
+a {
+    color: inherit;
+}
+.wrap {
+    width: min(1080px, 100% - 48px);
+    margin-inline: auto;
+}
+header.site {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    padding: 28px 0;
+}
+header.site .name {
+    font-family: var(--display);
+    font-size: 1.5rem;
+    text-decoration: none;
+}
+header.site nav {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-size: 0.95rem;
+}
+header.site nav a {
+    text-decoration: none;
+    opacity: 0.75;
+}
+header.site nav a:hover {
+    opacity: 1;
+}
+h1,
+h2,
+h3 {
+    font-family: var(--display);
+    font-weight: 400;
+    line-height: 1.08;
+    margin: 0;
+}
+h1 {
+    font-size: clamp(2.6rem, 7vw, 5rem);
+    letter-spacing: -0.02em;
+}
+h2 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+h3 {
+    font-size: 1.3rem;
+}
+p {
+    margin: 0;
+}
+.eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.65;
+}
+.button {
+    display: inline-block;
+    padding: 0.85em 1.5em;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+section {
+    padding: 72px 0;
+}
+footer.site {
+    padding: 40px 0 56px;
+    border-top: 1px solid var(--line);
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+.grid {
+    display: grid;
+    gap: 28px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.hero {
+    padding: 56px 0 72px;
+}
+.hero p {
+    max-width: 34ch;
+    margin-top: 20px;
+    font-size: 1.15rem;
+    opacity: 0.8;
+}
+.shot {
+    aspect-ratio: 4 / 5;
+    border-radius: 6px;
+}
+.work figure {
+    margin: 0;
+}
+.work figcaption {
+    margin-top: 12px;
+    font-size: 0.95rem;
+}
+.about {
+    display: grid;
+    gap: 40px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    border-top: 1px solid var(--line);
+}

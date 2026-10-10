@@ -47,6 +47,7 @@ COPY packages/shared packages/shared
 COPY apps/server/package.json apps/server/
 COPY apps/server/src apps/server/src
 COPY apps/server/db apps/server/db
+COPY apps/server/templates apps/server/templates
 
 # ---- server (control plane) ----------------------------------------------------------------------------
 FROM app AS server

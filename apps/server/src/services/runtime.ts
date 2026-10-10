@@ -49,6 +49,9 @@ export interface WorkspaceRuntime {
     restore(projectId: string, sha: string): Promise<string | null>;
     head(projectId: string): Promise<string | null>;
     readFile(projectId: string, rel: string): Promise<PreviewFile | null>;
+    // Puts a starter template's files into an empty website as its first version.
+    // Returns the version, or null if the website already had one.
+    seed(projectId: string, files: { path: string; content: string }[], message: string): Promise<string | null>;
     // One saved version's files as a tar archive (what publishing ships).
     exportTree(projectId: string, sha: string): Promise<Uint8Array>;
     // Stops the workspace; its files and history stay, and it starts again on next use.
@@ -164,6 +167,12 @@ export class LocalRuntime implements WorkspaceRuntime {
 
     exportTree(projectId: string, sha: string) {
         return this.ws(projectId).archive(sha);
+    }
+
+    async seed(projectId: string, files: { path: string; content: string }[], message: string) {
+        const out = await this.tracker(projectId).exclusive(() => this.ws(projectId).seed(files, message));
+        if (out === "busy") throw new RuntimeBusyError();
+        return out;
     }
 
     async stop(): Promise<void> {}
@@ -356,6 +365,9 @@ export class ContainerRuntime implements WorkspaceRuntime {
     }
     async head(projectId: string) {
         return (await this.json<{ sha: string | null }>(projectId, "GET", "/head")).sha;
+    }
+    async seed(projectId: string, files: { path: string; content: string }[], message: string) {
+        return (await this.json<{ sha: string | null }>(projectId, "POST", "/seed", { files, message })).sha;
     }
     async exportTree(projectId: string, sha: string): Promise<Uint8Array> {
         let res: Response;

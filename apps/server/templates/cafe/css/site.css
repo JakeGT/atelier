@@ -1,0 +1,146 @@
+:root {
+    --display: Georgia, "Times New Roman", serif;
+    --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ink: #2a1d14;
+    --paper: #fbf4e9;
+    --accent: #a8432a;
+    --on-accent: #fff8f1;
+    --line: rgba(42, 29, 20, 0.15);
+}
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+html {
+    -webkit-text-size-adjust: 100%;
+}
+body {
+    margin: 0;
+    font-family: var(--body);
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.6;
+    font-size: 17px;
+}
+img,
+svg {
+    max-width: 100%;
+    display: block;
+}
+a {
+    color: inherit;
+}
+.wrap {
+    width: min(1080px, 100% - 48px);
+    margin-inline: auto;
+}
+header.site {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    padding: 28px 0;
+}
+header.site .name {
+    font-family: var(--display);
+    font-size: 1.5rem;
+    text-decoration: none;
+}
+header.site nav {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-size: 0.95rem;
+}
+header.site nav a {
+    text-decoration: none;
+    opacity: 0.75;
+}
+header.site nav a:hover {
+    opacity: 1;
+}
+h1,
+h2,
+h3 {
+    font-family: var(--display);
+    font-weight: 400;
+    line-height: 1.08;
+    margin: 0;
+}
+h1 {
+    font-size: clamp(2.6rem, 7vw, 5rem);
+    letter-spacing: -0.02em;
+}
+h2 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+h3 {
+    font-size: 1.3rem;
+}
+p {
+    margin: 0;
+}
+.eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.65;
+}
+.button {
+    display: inline-block;
+    padding: 0.85em 1.5em;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+section {
+    padding: 72px 0;
+}
+footer.site {
+    padding: 40px 0 56px;
+    border-top: 1px solid var(--line);
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+.grid {
+    display: grid;
+    gap: 28px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.hero {
+    text-align: center;
+    padding: 72px 0;
+}
+.hero p {
+    max-width: 44ch;
+    margin: 20px auto 30px;
+    font-size: 1.15rem;
+}
+.menu dl {
+    margin: 0;
+    display: grid;
+    gap: 14px;
+}
+.menu div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px dotted var(--line);
+    padding-bottom: 10px;
+}
+.menu dt {
+    font-weight: 500;
+}
+.menu dd {
+    margin: 0;
+    white-space: nowrap;
+}
+.band {
+    background: #f1e4d0;
+}
+.hours td {
+    padding: 6px 24px 6px 0;
+}

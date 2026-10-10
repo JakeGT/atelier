@@ -6,7 +6,7 @@ import { type Api, type Ctx, ORG, PROJECT, SLUG_RE, slugify } from "./kit.ts";
 
 // Projects (websites): create, list, settings, archive, delete.
 export function projectRoutes(api: Api): void {
-    const { route, store, runtime, stepUp, audit, limits, hosting } = api;
+    const { route, store, runtime, stepUp, audit, limits, hosting, templates } = api;
 
     // Archived projects are listed only when asked for.
     route("get", `${ORG}/projects`, "project.read", async (c) => {
@@ -16,6 +16,11 @@ export function projectRoutes(api: Api): void {
     });
 
     // A project needs only a name; the slug is derived (and made unique) unless given.
+    // Starter templates a new website can begin from.
+    route("get", "/api/v1/templates", "signed-in", async (c) =>
+        c.json({ templates: templates.map(({ id, name, description }) => ({ id, name, description })) }),
+    );
+
     route("post", `${ORG}/projects`, "project.create", async (c) => {
         const org = c.get("org");
         const body = await c.req.json().catch(() => null);
@@ -37,8 +42,10 @@ export function projectRoutes(api: Api): void {
             slug = base;
             for (let n = 2; existing.some((p) => p.slug === slug); n++) slug = `${base}-${n}`;
         }
-        const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name });
-        await audit(c, "project.create", `project:${created.id}`, { slug });
+        const template = typeof body?.template === "string" && body.template ? body.template : null;
+        if (template && !templates.some((t) => t.id === template)) return c.json({ error: "that template isn't available" }, 400);
+        const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template });
+        await audit(c, "project.create", `project:${created.id}`, { slug, name, ...(template ? { template } : {}) });
         return c.json({ project: created }, 201);
     });
 
