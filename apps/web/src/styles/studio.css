@@ -1434,3 +1434,11 @@ button.where:hover {
 .wording-form .check + .where {
     margin-top: 6px;
 }
+
+.content-quiet {
+    border-color: var(--line-strong);
+}
+
+.content-quiet > svg {
+    color: var(--ink-3);
+}

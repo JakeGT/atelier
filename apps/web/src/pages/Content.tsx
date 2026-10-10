@@ -41,6 +41,10 @@ export function pageName(path: string): string {
 const CONNECT_REQUEST =
     "Connect all of this website's saved wording to its pages, so I can edit it myself on the Content page. Keep every word and the design exactly as they are. Give every piece a plain label and mark where it appears on each page.";
 
+// The request that gives older wording proper labels.
+const LABEL_REQUEST =
+    "Describe every piece of this website's saved wording so it is easy for me to edit: give each one a plain label, the right type, and a line saying where it appears. Do not change any wording or any page.";
+
 // Everything a website says, in one place. Each piece of wording has a plain
 // label and says where on the website it appears; choosing it shows that place
 // in the preview beside it, and clicking something in the preview finds its
@@ -181,6 +185,8 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
     const waiting = (documents ?? []).filter(unpublished);
     const loose = (documents ?? []).filter((d) => connected(d) < fieldsOf(d).length);
     const askToConnect = () => navigate(`${editor}?ask=${encodeURIComponent(CONNECT_REQUEST)}`);
+    // Wording whose names were worked out from how it is stored, rather than given by the assistant.
+    const unlabelled = (documents ?? []).filter((d) => !d.fields?.length && fieldsOf(d).length > 0);
 
     // Choosing a section shows a page it is on.
     const choose = (d: ContentDocument) => {
@@ -305,6 +311,27 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                                 {canEdit && (
                                     <button type="button" className="btn btn-primary" onClick={askToConnect}>
                                         Ask my assistant to connect it
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                        {loose.length === 0 && unlabelled.length > 0 && (
+                            <div className="content-loose content-quiet" role="status">
+                                <Type />
+                                <div>
+                                    <strong>The names of these pieces were worked out automatically.</strong>
+                                    <p>
+                                        They come from how the wording was saved, so some may be vague ("Title", "Intro"). Your assistant
+                                        can give each one a clearer name and a line saying what it is. No wording or page is changed.
+                                    </p>
+                                </div>
+                                {canEdit && (
+                                    <button
+                                        type="button"
+                                        className="btn"
+                                        onClick={() => navigate(`${editor}?ask=${encodeURIComponent(LABEL_REQUEST)}`)}
+                                    >
+                                        Ask my assistant to name them
                                     </button>
                                 )}
                             </div>
