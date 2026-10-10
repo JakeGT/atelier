@@ -64,7 +64,7 @@ export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onT
                         </button>
                     ))}
                 </div>
-                {current === "general" && <General org={org} onOrgsChanged={onOrgsChanged} />}
+                {current === "general" && <General org={org} session={session} onOrgsChanged={onOrgsChanged} />}
                 {current === "models" && <Models org={org} onOrgsChanged={onOrgsChanged} />}
                 {current === "members" && <Members org={org} session={session} onOrgsChanged={onOrgsChanged} />}
                 {current === "usage" && <UsagePanel org={org} />}
@@ -90,7 +90,7 @@ function useReauth() {
 
 // ---- general -------------------------------------------------------------------------
 
-function General({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise<Org[]> }) {
+function General({ org, session, onOrgsChanged }: { org: Org; session: Session; onOrgsChanged: () => Promise<Org[]> }) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [name, setName] = useState(org.name);
@@ -118,6 +118,9 @@ function General({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promis
                 <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
             </label>
             <div className="field-line">
+                {org.personalOf === session.id && (
+                    <p className="field-help">This is your personal studio. Everyone has one, and it is always theirs.</p>
+                )}
                 <span className="eyebrow">Link to this studio</span>
                 <p className="mono field-static">
                     {window.location.origin}/o/{org.slug}
@@ -367,7 +370,7 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
         try {
             await a.invite(email.trim(), role);
             setEmail("");
-            toast("Invitation ready. They join the next time they sign in with that address.");
+            toast("Added. This studio appears for them the next time they open Atelier.");
             await load();
         } catch (err) {
             toast((err as Error).message, "error");
@@ -398,7 +401,11 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
 
     return (
         <div className="panel">
-            <p className="field-help panel-lede">Everyone who can open this studio, and what each may do.</p>
+            <p className="field-help panel-lede">
+                Everyone who can open this studio, and what each may do.
+                {org.personalOf === session.id &&
+                    " This is your personal studio: it is always yours, so you can't leave it or hand it over."}
+            </p>
             {members === null ? (
                 <div className="panel-loading">
                     <Dots />
@@ -407,9 +414,11 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                 <ul className="rows">
                     {members.map((m) => {
                         const self = m.userId === session.id;
+                        // A personal studio's own person always stays its owner.
+                        const personal = org.personalOf === m.userId;
                         const lastOwner = m.role === "owner" && owners === 1;
                         // Admins manage everyone but owners; owners manage everyone.
-                        const editable = mayManage && !lastOwner && (org.role === "owner" || m.role !== "owner");
+                        const editable = mayManage && !lastOwner && !personal && (org.role === "owner" || m.role !== "owner");
                         return (
                             <li key={m.userId}>
                                 <span className="avatar avatar-static" aria-hidden="true">
@@ -444,7 +453,9 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                                     )}
                                     {self ? (
                                         // A control that cannot be used says why, in place, instead of sitting there greyed out.
-                                        lastOwner ? (
+                                        personal ? (
+                                            <span className="row-note">Your personal studio</span>
+                                        ) : lastOwner ? (
                                             <span className="row-note">
                                                 You're the only owner, so you can't leave. Make someone else an owner first.
                                             </span>
@@ -483,7 +494,7 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                         ))}
                     </dl>
 
-                    <h2 className="panel-title">Invite someone</h2>
+                    <h2 className="panel-title">Add someone to this studio</h2>
                     <form className="invite" onSubmit={invite}>
                         <input
                             type="email"
@@ -503,12 +514,13 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                             <option value="viewer">Viewer</option>
                         </select>
                         <button type="submit" className="btn btn-primary" disabled={busy || !email.trim()}>
-                            <Mail /> Invite
+                            <Mail /> Add
                         </button>
                     </form>
                     <p className="field-help">
-                        {ROLE_HELP[role]}. Atelier doesn't send e-mail: tell them yourself. They join this studio the next time they sign in
-                        with that address.
+                        {ROLE_HELP[role]}. They need to have access to Atelier already (whoever runs it for you gives that); enter the
+                        e-mail address they sign in with. This studio then appears for them the next time they open Atelier. No e-mail is
+                        sent, so let them know.
                     </p>
 
                     {invitations.length > 0 && (
@@ -518,7 +530,7 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                                     <span className="row-main">
                                         <strong>{i.email}</strong>
                                         <span className="mono muted">
-                                            invited as {i.role} · expires {timeAgo(i.expiresAt)}
+                                            added as {i.role}; waiting for them to open Atelier · expires {timeAgo(i.expiresAt)}
                                         </span>
                                     </span>
                                     <span className="row-actions">

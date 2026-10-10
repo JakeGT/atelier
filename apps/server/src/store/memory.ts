@@ -84,17 +84,24 @@ export class MemoryStore implements Store {
                       email: input.email,
                       name: input.name,
                       admin: input.admin,
+                      onboardedAt: null,
                       createdAt: now(),
                   };
             this.userMap.set(k, user);
             return user;
         },
         count: async () => this.userMap.size,
+        setOnboarded: async (id) => {
+            for (const [k, u] of this.userMap) if (u.id === id && !u.onboardedAt) this.userMap.set(k, { ...u, onboardedAt: now() });
+        },
     };
 
     organizations: OrganizationStore = {
         create: async (input) => {
             if ([...this.orgMap.values()].some((o) => o.slug === input.slug)) throw new SlugTakenError();
+            if (input.personalOf && [...this.orgMap.values()].some((o) => o.personalOf === input.personalOf)) {
+                throw new Error("that person already has a personal studio");
+            }
             const org: Organization = {
                 id: input.id,
                 slug: input.slug,
@@ -103,9 +110,16 @@ export class MemoryStore implements Store {
                 defaultModel: null,
                 maxProjects: null,
                 dailyTokenLimit: null,
+                personalOf: input.personalOf ?? null,
             };
             this.orgMap.set(input.id, org);
             return org;
+        },
+        setPersonal: async (id, userId) => {
+            const org = this.orgMap.get(id);
+            if (!org || org.personalOf || [...this.orgMap.values()].some((o) => o.personalOf === userId)) return false;
+            this.orgMap.set(id, { ...org, personalOf: userId });
+            return true;
         },
         findById: async (id) => this.orgMap.get(id) ?? null,
         listForUser: async (userId) => {

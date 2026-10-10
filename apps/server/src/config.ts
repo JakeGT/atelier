@@ -22,7 +22,10 @@ const envSchema = z.object({
     OIDC_ADMIN_GROUP: z.string().default("platform-admin"),
     OIDC_TRUST_EMAIL: z.string().optional(),
     OIDC_SCOPES: z.string().default("openid email profile"),
-    SIGNUP_MODE: z.enum(["invite", "open"]).default("invite"),
+    // "open": anyone the identity provider lets sign in may use Atelier (the provider
+    // decides who that is, with its groups and policies). "invite": Atelier itself
+    // also refuses anyone a studio has not added by e-mail.
+    SIGNUP_MODE: z.enum(["invite", "open"]).default("open"),
     INVITE_HINT: z.string().optional(),
     COOKIE_SECURE: z.string().optional(),
     SESSION_IDLE_MINUTES: z.coerce.number().default(480),

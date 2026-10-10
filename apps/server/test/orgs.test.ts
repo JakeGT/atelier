@@ -97,9 +97,32 @@ test("members: roles, who may change them, and the last owner", async () => {
     // The only owner cannot step down or leave...
     assert.equal((await patch(t, owner, `${members}/${owner.user.id}`, { role: "admin" })).status, 409);
     assert.equal((await del(t, owner, `${members}/${owner.user.id}`)).status, 409);
-    // ...until there is a second one.
+    // ...and in their own personal studio, not even once there is a second owner.
     assert.equal((await patch(t, owner, `${members}/${admin.user.id}`, { role: "owner" })).status, 200);
-    assert.equal((await patch(t, owner, `${members}/${owner.user.id}`, { role: "admin" })).status, 200);
+    const stay = await patch(t, owner, `${members}/${owner.user.id}`, { role: "admin" });
+    assert.equal(stay.status, 409);
+    assert.match((await json<{ error: string }>(stay)).error, /personal studio/);
+    assert.equal((await del(t, admin, `${members}/${owner.user.id}`)).status, 409);
+    assert.equal((await del(t, owner, `${members}/${owner.user.id}`)).status, 409);
+
+    // In a shared studio an owner can hand over and step down once there is another owner.
+    const team = (await json<{ org: Organization }>(await post(t, owner, "/api/v1/orgs", { name: "Team" }))).org;
+    assert.equal(team.personalOf, null);
+    const teamMembers = `/api/v1/orgs/${team.slug}/members`;
+    const second = await signIn(t, { tenantId: team.id, role: "admin" });
+    assert.equal((await patch(t, owner, `${teamMembers}/${owner.user.id}`, { role: "admin" })).status, 409);
+    assert.equal((await patch(t, owner, `${teamMembers}/${second.user.id}`, { role: "owner" })).status, 200);
+    assert.equal((await patch(t, owner, `${teamMembers}/${owner.user.id}`, { role: "admin" })).status, 200);
+});
+
+test("being added to a studio shows up on the next page load, without signing in again", async () => {
+    const t = await makeApp();
+    const owner = await signIn(t);
+    const other = await signIn(t, { email: "maren@example.com" });
+    assert.equal((await post(t, owner, `${owner.api}/invitations`, { email: "maren@example.com", role: "editor" })).status, 201);
+    const { orgs } = await json<{ orgs: { id: string; role: string }[] }>(await get(t, other, "/api/v1/orgs"));
+    assert.deepEqual(orgs.map((o) => o.role).sort(), ["editor", "owner"]);
+    assert.ok(orgs.some((o) => o.id === owner.org.id));
 });
 
 test("removing a member takes effect at once; anyone may leave; removal needs a recent sign-in", async () => {

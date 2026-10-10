@@ -33,6 +33,8 @@ export const organizationSchema = z.object({
     // Safety ceilings; null = the server's default.
     maxProjects: z.number().int().positive().nullable(),
     dailyTokenLimit: z.number().int().positive().nullable(),
+    // Whose personal studio this is, if it is one. Everyone has exactly one.
+    personalOf: z.string().uuid().nullable(),
 });
 
 export const userSchema = z.object({
@@ -42,6 +44,8 @@ export const userSchema = z.object({
     email: z.string().email(),
     name: z.string(),
     admin: z.boolean().default(false),
+    // When they finished (or skipped) the introduction; null until then.
+    onboardedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
 });
 

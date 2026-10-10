@@ -117,12 +117,19 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Custom domains are per website (the globe button in the editor).
 - Tested against a stand-in for Cloudflare (`scripts/fake-pages.ts`), not yet against Cloudflare itself.
 
+## Arrival (branch `onboarding`)
+
+- **Who gets in is decided in Authentik**, by group. Atelier admits anyone who completes a sign-in (`SIGNUP_MODE=open`).
+- **Everyone has one personal studio** from their first sign-in, and sees a three-step introduction once (`/welcome`).
+- **Shared studios**: owners and admins add people by e-mail under Studio settings → Members; it shows up the next time that person opens Atelier.
+- Details: `docs/07-auth-and-rbac.md` §3.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
 - **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
 - **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). This is a VPS go-live gate; the P3 remote mirror fixes it properly.
-- **Invitations don't send e-mail.** The inviter tells the person; they join at their next sign-in. They must also be on the platform's Authentik allowlist.
+- **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
 - **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
 - **One old workspace container** (from before p2.0) keeps its old network until it is next used or reaped; it is then recreated in proxy mode.

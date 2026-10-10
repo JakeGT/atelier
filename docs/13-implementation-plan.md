@@ -242,6 +242,15 @@ Goal: one real deploy target + custom domain per project.
 
 ---
 
+### Arrival and personal studios (branch `onboarding`, 2026-10-10)
+
+Asked for by the owner after P3. Access to Atelier is now decided entirely by
+the identity provider's groups; Atelier admits whoever signs in. Everyone gets
+one personal studio from the start and a three-step introduction the first
+time. Adding people to shared studios stays in Atelier. Details in docs/07 §3.
+
+---
+
 ## P4 — BYOK providers, templates & operator console
 
 Goal: let users bring their own AI provider keys and start from templates, and

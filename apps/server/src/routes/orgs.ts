@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { INVITABLE_ROLES, ORG_ROLES, type OrgRole } from "@atelier/shared";
+import { acceptInvitations } from "../services/bootstrap.ts";
 import { validModelRef } from "../services/providers.ts";
 import { SlugTakenError } from "../store/types.ts";
 import { type Api, ORG, param, slugify, startOfUtcDay } from "./kit.ts";
@@ -12,7 +13,19 @@ export function orgRoutes(api: Api): void {
 
     // ---- the caller's organisations ---------------------------------------------------
 
-    route("get", "/api/v1/orgs", "signed-in", async (c) => c.json({ orgs: await store.organizations.listForUser(c.get("user").id) }));
+    // Listing your studios also takes up any you have been added to since you
+    // signed in, so being added shows up on the next page load, not the next sign-in.
+    route("get", "/api/v1/orgs", "signed-in", async (c) => {
+        const user = c.get("user");
+        await acceptInvitations(store, user);
+        return c.json({ orgs: await store.organizations.listForUser(user.id) });
+    });
+
+    // The introduction has been finished or skipped: do not show it again.
+    route("post", "/api/v1/me/onboarded", "signed-in", async (c) => {
+        await store.users.setOnboarded(c.get("user").id);
+        return c.json({ ok: true });
+    });
 
     route("post", "/api/v1/orgs", "signed-in", async (c) => {
         const body = await c.req.json().catch(() => null);
@@ -95,6 +108,10 @@ export function orgRoutes(api: Api): void {
         if ((role === "owner" || current === "owner") && c.get("role") !== "owner") {
             return c.json({ error: "only an owner can change who the owners are" }, 403);
         }
+        // A personal studio always belongs to its person.
+        if (c.get("org").personalOf === userId && role !== "owner") {
+            return c.json({ error: "this is their personal studio, so they stay its owner" }, 409);
+        }
         if (current === "owner" && role !== "owner" && (await lastOwner(tenantId, userId))) {
             return c.json({ error: "an organisation needs at least one owner" }, 409);
         }
@@ -113,6 +130,9 @@ export function orgRoutes(api: Api): void {
         const current = await store.memberships.roleOf(tenantId, userId);
         if (!current) return c.json({ error: "not found" }, 404);
         if (!self && current === "owner" && actorRole !== "owner") return c.json({ error: "only an owner can remove an owner" }, 403);
+        if (c.get("org").personalOf === userId) {
+            return c.json({ error: self ? "this is your personal studio, so you can't leave it" : "this is their personal studio" }, 409);
+        }
         if (current === "owner" && (await lastOwner(tenantId, userId))) {
             return c.json({ error: "an organisation needs at least one owner" }, 409);
         }
