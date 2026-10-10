@@ -22,6 +22,7 @@ function Thumb({ template }: { template: Template }) {
 
 export function Gallery({
     templates,
+    looks,
     chosen,
     mayManage,
     onChoose,
@@ -29,6 +30,8 @@ export function Gallery({
     onClose,
 }: {
     templates: Template[];
+    // Looks an empty website can start in ("look:<id>").
+    looks: Template[];
     chosen: string | null;
     mayManage: boolean;
     onChoose: (id: string | null) => void;
@@ -147,6 +150,17 @@ export function Gallery({
                     <p className="eyebrow gallery-group">From this studio</p>
                     <ul className="gallery">{own.map(card)}</ul>
                     <p className="eyebrow gallery-group">From Atelier</p>
+                </>
+            )}
+            {looks.length > 0 && (
+                <>
+                    <p className="eyebrow gallery-group">Start simply, in a look</p>
+                    <p className="muted">
+                        A first page in a finished design: colours, lettering and spacing chosen for you. You can change the look at any
+                        time without losing a word.
+                    </p>
+                    <ul className="gallery">{looks.map(card)}</ul>
+                    <p className="eyebrow gallery-group">Or start from a finished website</p>
                 </>
             )}
             <ul className="gallery">{[blank, ...builtIn].map(card)}</ul>

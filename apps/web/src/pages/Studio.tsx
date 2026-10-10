@@ -58,7 +58,23 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     useEffect(() => {
         void loadTemplates();
     }, [loadTemplates]);
-    const chosen = templates.find((t) => t.id === template);
+    // Looks an empty website can start in, offered beside the templates.
+    const [looks, setLooks] = useState<Template[]>([]);
+    useEffect(() => {
+        a.design().then(
+            (d) =>
+                setLooks(
+                    d.looks.map((l) => ({
+                        id: `look:${l.id}`,
+                        name: `${l.name} look`,
+                        description: l.description,
+                        previewUrl: l.previewUrl,
+                    })),
+                ),
+            () => {},
+        );
+    }, [a]);
+    const chosen = [...templates, ...looks].find((t) => t.id === template);
     const [choosing, setChoosing] = useState(false);
     // Saving a website as one of the studio's own starting points.
     const [saving, setSaving] = useState<Project | null>(null);
@@ -389,6 +405,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             {choosing && (
                 <Gallery
                     templates={templates}
+                    looks={looks}
                     chosen={template}
                     mayManage={mayManage}
                     onChoose={setTemplate}

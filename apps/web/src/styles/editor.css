@@ -1615,3 +1615,21 @@
     overflow-wrap: anywhere;
     user-select: all;
 }
+
+/* ---- design: looks and sections ------------------------------------------------------- */
+
+.design-tabs {
+    margin: 14px 0 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.design-about {
+    margin-top: 16px;
+    max-width: 70ch;
+}
+
+.gallery > li .muted.design-place {
+    font-size: 11px;
+    min-height: 0;
+}

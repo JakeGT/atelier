@@ -178,6 +178,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **A studio's own templates:** "Save as a template…" on a website's card stores its files and wording (`studio_templates`, migration 0018). A website started from one gets the files, the wording with its labels, and the pictures it uses (copied from the source website's library while that exists).
 - **A link to show someone** (`POST …/share`, in the Publish dialog): a preview deployment at an unguessable, unlisted address. Nothing is published. Unpublishing or deleting the website removes these links too.
 
+## The design kit (branch `design-kit`, ADR-0016)
+
+- **Looks** (`design/looks.ts`, eight): a design language as CSS variables in a website's `theme.css`. **Layouts** (`design/layouts.ts`, fourteen sections): HTML using `assets/kit.css` classes, already editable.
+- Changing a look replaces `theme.css` as a new version (`PUT …/look`, `runtime.write`). The preview can show a website in another look (`preview+look:<id>` tokens).
+- New websites can start in a look (`template: "look:<id>"`). The editor has a **Design** button (Looks, Sections).
+- The assistant has `design_kit`, `design_section`, `design_use_look`, and rules to take every colour and font from the variables.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

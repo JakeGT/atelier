@@ -107,6 +107,13 @@ export class Workspace {
     async seed(files: { path: string; content: string }[], message: string): Promise<string | null> {
         await this.init();
         if (await this.head()) return null;
+        return this.write(files, message);
+    }
+
+    // Puts files in place (replacing any of the same name) and saves that as a version.
+    // For changes the platform makes itself, such as changing a website's look.
+    async write(files: { path: string; content: string }[], message: string): Promise<string | null> {
+        await this.init();
         const base = resolve(this.dir);
         for (const f of files) {
             const target = resolve(join(base, f.path));
