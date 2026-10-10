@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.7` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> Last updated 2026-10-10. Status: **`p5.8` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
 > `main` has everything through PR #12. Two PRs are open, to merge in this order: [#13](https://github.com/JakeGT/atelier/pull/13) `p5-finish`, [#14](https://github.com/JakeGT/atelier/pull/14) `content-clarity` (stacked on #13).
 
 ## TL;DR
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.7` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.8` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0015` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -168,7 +168,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
 - **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
-- **One old workspace container** (from before p2.0) keeps its old network until it is next used or reaped; it is then recreated in proxy mode.
+- **Workspaces keep the runtime they were created with** until their next request, when an idle one is recreated on the current runtime (`ContainerRuntime.bringUpToDate`, since p5.8). Until p5.8 they were never recreated, and one on p3.5 blanked the editor by reporting runs without `steps`; runs are now made whole (`wholeRun`) and the app has an error screen (`ui/Safety.tsx`).
 
 ## Next steps
 
