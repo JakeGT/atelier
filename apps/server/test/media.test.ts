@@ -165,3 +165,22 @@ test("library files a release uses are published under /media/; a website's own 
     assert.equal(site.files.find((f) => f.path === "/media/own.png")?.body.toString(), "the website's own");
     assert.equal(site.files.find((f) => f.path === "/media/photo-abc123.jpg")?.contentType, "image/jpeg");
 });
+
+test("configuration: R2 needs all four values; a bucket alone is refused clearly; none means the library is off", async () => {
+    const { loadConfig } = await import("../src/config.ts");
+    const base = { AUTH_MODE: "off", PUBLIC_ORIGIN: "http://localhost:8080" };
+    assert.equal(loadConfig(base).mediaStorage, "off");
+    assert.equal(loadConfig(base).r2, null);
+    assert.throws(() => loadConfig({ ...base, R2_BUCKET: "atelier-media" }), /MEDIA_STORAGE=r2 requires/);
+    const on = loadConfig({
+        ...base,
+        R2_BUCKET: "b",
+        R2_ACCOUNT_ID: "a",
+        R2_ACCESS_KEY_ID: "k",
+        R2_SECRET_ACCESS_KEY: "s",
+        R2_ENDPOINT: "https://a.eu.r2.cloudflarestorage.com",
+    });
+    assert.equal(on.mediaStorage, "r2");
+    assert.equal(on.r2?.endpoint, "https://a.eu.r2.cloudflarestorage.com");
+    assert.throws(() => loadConfig({ ...base, RESEND_API_KEY: "k" }), /requires MAIL_FROM/);
+});

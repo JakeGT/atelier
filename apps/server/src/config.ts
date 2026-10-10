@@ -65,6 +65,8 @@ const envSchema = z.object({
     R2_ACCOUNT_ID: z.string().optional(),
     R2_ACCOUNT_ID_FILE: z.string().optional(),
     R2_BUCKET: z.string().optional(),
+    // Only for a bucket created in a jurisdiction: https://<account>.eu.r2.cloudflarestorage.com
+    R2_ENDPOINT: z.string().url().optional(),
     R2_ACCESS_KEY_ID: z.string().optional(),
     R2_ACCESS_KEY_ID_FILE: z.string().optional(),
     R2_SECRET_ACCESS_KEY: z.string().optional(),
@@ -118,6 +120,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         bucket: e.R2_BUCKET,
         accessKeyId: fromFile(e.R2_ACCESS_KEY_ID, e.R2_ACCESS_KEY_ID_FILE),
         secretAccessKey: fromFile(e.R2_SECRET_ACCESS_KEY, e.R2_SECRET_ACCESS_KEY_FILE),
+        endpoint: e.R2_ENDPOINT,
     };
     const mediaStorage = e.MEDIA_STORAGE ?? (r2.bucket ? "r2" : "off");
     if (mediaStorage === "r2" && !(r2.accountId && r2.bucket && r2.accessKeyId && r2.secretAccessKey))
@@ -195,7 +198,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         },
         mediaStorage,
         mediaDir: e.MEDIA_DIR,
-        r2: mediaStorage === "r2" ? (r2 as { accountId: string; bucket: string; accessKeyId: string; secretAccessKey: string }) : null,
+        r2:
+            mediaStorage === "r2"
+                ? (r2 as { accountId: string; bucket: string; accessKeyId: string; secretAccessKey: string; endpoint?: string })
+                : null,
         runtimeApiUrl: e.RUNTIME_API_URL,
         authMode: e.AUTH_MODE,
         oidc,
