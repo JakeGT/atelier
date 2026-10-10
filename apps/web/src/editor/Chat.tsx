@@ -165,8 +165,8 @@ export function Chat({ messages, loading, runningSince, ready, starting, locked,
                         disabled={!ready}
                         aria-label="Message the assistant"
                     />
-                    <button type="submit" className="send" disabled={!ready || busy || !input.trim()} aria-label="Send">
-                        <ArrowUp />
+                    <button type="submit" className="send" disabled={!ready || busy || !input.trim()}>
+                        Send <ArrowUp />
                     </button>
                 </div>
                 <p className="composer-hint mono muted">Enter to send · Shift + Enter for a new line</p>

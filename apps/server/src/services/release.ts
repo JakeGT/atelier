@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { Release } from "@atelier/shared";
+import type { Project, Release } from "@atelier/shared";
 import type { Store } from "../store/types.ts";
+import { type Hosting, HostingError, siteName } from "./hosting.ts";
 import type { WorkspaceRuntime } from "./runtime.ts";
 
 export class ReleaseError extends Error {
-    readonly status: 404 | 409;
-    constructor(message: string, status: 404 | 409) {
+    readonly status: 404 | 409 | 422 | 502;
+    constructor(message: string, status: 404 | 409 | 422 | 502) {
         super(message);
         this.status = status;
     }
@@ -13,21 +14,36 @@ export class ReleaseError extends Error {
 
 // The release state machine (ADR-0007). A release is created from the project's
 // current drafts + code HEAD and *pins* them: its manifest freezes each document's
-// revision and body. Publishing a planned release runs the build (a stub until
-// P3) and, only if it succeeds, makes it live — which is the single moment
+// revision and body. Publishing a planned release deploys it and, only if that
+// succeeds, makes it live — which is the single moment
 // `content_documents.published` changes, so the database matches the live site.
 // Rolling back creates a new release from an earlier one's manifest and code.
+//
+// Deploying (ADR-0010): the release's files are exported from the workspace as
+// an archive and handed to the deployer, which checks them and uploads them to
+// the host. Websites are static files with no build step, so no project code
+// runs anywhere on the way. A failed deployment marks the release failed and
+// leaves the previous one live. Rollback deploys the earlier release's files
+// again; the host already holds them, so nothing is re-uploaded.
 export class ReleaseService {
     private readonly store: Store;
     private readonly runtime: WorkspaceRuntime;
+    private readonly hosting: Hosting | null;
+    private readonly prefix: string;
+    // One deployment per website at a time.
+    private readonly deploying = new Set<string>();
 
-    constructor(store: Store, runtime: WorkspaceRuntime) {
+    constructor(store: Store, runtime: WorkspaceRuntime, hosting: Hosting | null = null, prefix = "atl-") {
         this.store = store;
         this.runtime = runtime;
+        this.hosting = hosting;
+        this.prefix = prefix;
     }
 
     async create(tenantId: string, projectId: string, actorId: string): Promise<Release> {
         const codeSha = await this.runtime.head(projectId).catch(() => null);
+        if (this.hosting && !codeSha)
+            throw new ReleaseError("there is nothing to publish yet: ask your assistant to build the website first", 409);
         const docs = await this.store.content.list(tenantId, projectId);
         const documents = docs
             .filter((d) => d.draft !== null)
@@ -61,11 +77,72 @@ export class ReleaseService {
         return this.deploy(tenantId, projectId, release);
     }
 
-    // Build + upload, then go live atomically. P1 has no hosting yet (P3,
-    // ADR-0004/0010), so the "build" always succeeds and records a static
-    // deployment; a real build that fails leaves the previous release live.
-    private async deploy(tenantId: string, projectId: string, release: Release): Promise<Release> {
+    // The website's project at the host, named once and kept.
+    async site(tenantId: string, project: Project): Promise<string> {
+        if (project.hostingRef) return project.hostingRef;
+        const name = siteName(this.prefix, project);
+        await this.store.projects.setHosting(tenantId, project.id, { hostingRef: name });
+        return name;
+    }
+
+    // The custom domain search engines should see, if one is verified: the first added that is active.
+    private async canonicalHost(tenantId: string, projectId: string, site: string): Promise<string | null> {
+        if (!this.hosting) return null;
+        const mine = await this.store.domains.list(tenantId, projectId);
+        if (mine.length === 0) return null;
+        const active = new Set((await this.hosting.listDomains(site)).filter((d) => d.status === "active").map((d) => d.name));
+        return mine.find((d) => active.has(d.hostname))?.hostname ?? null;
+    }
+
+    // Domains the website has that the host does not (it was taken offline and is
+    // back, say) are attached again. A domain that cannot be attached must not fail
+    // a publish that has already succeeded: it shows as unverified in the editor.
+    private async attachDomains(tenantId: string, projectId: string, site: string): Promise<void> {
+        if (!this.hosting) return;
+        const mine = await this.store.domains.list(tenantId, projectId);
+        if (mine.length === 0) return;
         try {
+            const attached = new Set((await this.hosting.listDomains(site)).map((d) => d.name));
+            for (const d of mine) if (!attached.has(d.hostname)) await this.hosting.addDomain(site, d.hostname);
+        } catch (err) {
+            console.error(`could not reattach domains for ${projectId}: ${(err as Error).message}`);
+        }
+    }
+
+    // Takes the website offline: nothing is served at its address or its domains
+    // until it is published again. Files, versions and release history stay. The
+    // host's project is removed (so nothing is left answering) and created again,
+    // under the same name, by the next publish.
+    async unpublish(tenantId: string, projectId: string): Promise<Release> {
+        const live = await this.store.releases.findLive(tenantId, projectId);
+        if (!live) throw new ReleaseError("this website is not published", 409);
+        if (this.deploying.has(projectId)) throw new ReleaseError("this website is being published; try again in a moment", 409);
+        this.deploying.add(projectId);
+        try {
+            const project = await this.store.projects.findById(tenantId, projectId);
+            if (this.hosting && project?.hostingRef) {
+                try {
+                    await this.hosting.deleteSite(project.hostingRef);
+                } catch (err) {
+                    // Still up: say so, and change nothing here.
+                    console.error(`could not take down ${project.hostingRef}: ${(err as Error).message}`);
+                    throw new ReleaseError(
+                        "the website could not be taken offline just now, so it is still live; try again in a moment",
+                        502,
+                    );
+                }
+                await this.store.projects.setHosting(tenantId, projectId, { hostingRef: project.hostingRef, productionRef: null });
+            }
+            return (await this.store.releases.takeDown(tenantId, projectId)) ?? live;
+        } finally {
+            this.deploying.delete(projectId);
+        }
+    }
+
+    private async deploy(tenantId: string, projectId: string, release: Release): Promise<Release> {
+        const hosting = this.hosting;
+        if (!hosting) {
+            // No hosting configured: record the release as live without serving it anywhere.
             await this.store.deployments.create({
                 id: randomUUID(),
                 tenantId,
@@ -76,10 +153,53 @@ export class ReleaseService {
                 url: null,
                 state: "live",
             });
-        } catch (err) {
-            await this.store.releases.markFailed(tenantId, release.id);
-            throw err;
+            return this.store.releases.goLive(tenantId, projectId, release.id);
         }
-        return this.store.releases.goLive(tenantId, projectId, release.id);
+        if (this.deploying.has(projectId)) throw new ReleaseError("this website is already being published; try again in a moment", 409);
+        this.deploying.add(projectId);
+        const deployment = await this.store.deployments
+            .create({
+                id: randomUUID(),
+                tenantId,
+                projectId,
+                releaseId: release.id,
+                kind: "production",
+                provider: "cloudflare-pages",
+                url: null,
+                state: "building",
+            })
+            .catch((err) => {
+                this.deploying.delete(projectId);
+                throw err;
+            });
+        try {
+            const project = await this.store.projects.findById(tenantId, projectId);
+            if (!project || !release.codeSha) throw new HostingError("there is nothing to publish yet", "site", 422);
+            const archive = await this.runtime.exportTree(projectId, release.codeSha);
+            const site = await this.site(tenantId, project);
+            const result = await hosting.deploy({
+                site,
+                archive,
+                branch: "main",
+                canonicalHost: await this.canonicalHost(tenantId, projectId, site),
+                commit: release.codeSha,
+            });
+            await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
+            await this.attachDomains(tenantId, projectId, site);
+            await this.store.projects.setHosting(tenantId, projectId, { hostingRef: site, productionRef: result.siteUrl });
+            return await this.store.releases.goLive(tenantId, projectId, release.id);
+        } catch (err) {
+            // The previous release stays live: nothing changed at the host or in `published`.
+            const site = err instanceof HostingError && err.kind === "site";
+            const message = site
+                ? (err as Error).message
+                : "the website could not be published just now; the version that was live is still live";
+            if (!site) console.error(`deploy failed for ${projectId}: ${(err as Error).message}`);
+            await this.store.deployments.finish(tenantId, deployment.id, { state: "failed", error: message }).catch(() => {});
+            await this.store.releases.markFailed(tenantId, release.id).catch(() => {});
+            throw new ReleaseError(message, site ? 422 : 502);
+        } finally {
+            this.deploying.delete(projectId);
+        }
     }
 }

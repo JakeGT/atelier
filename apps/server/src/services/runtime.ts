@@ -43,6 +43,8 @@ export interface WorkspaceRuntime {
     restore(projectId: string, sha: string): Promise<string | null>;
     head(projectId: string): Promise<string | null>;
     readFile(projectId: string, rel: string): Promise<PreviewFile | null>;
+    // One saved version's files as a tar archive (what publishing ships).
+    exportTree(projectId: string, sha: string): Promise<Uint8Array>;
     // Stops the workspace; its files and history stay, and it starts again on next use.
     stop(projectId: string): Promise<void>;
     // Removes the workspace and its files for good (project deletion).
@@ -136,6 +138,10 @@ export class LocalRuntime implements WorkspaceRuntime {
 
     readFile(projectId: string, rel: string) {
         return this.ws(projectId).readFile(rel);
+    }
+
+    exportTree(projectId: string, sha: string) {
+        return this.ws(projectId).archive(sha);
     }
 
     async stop(): Promise<void> {}
@@ -318,6 +324,19 @@ export class ContainerRuntime implements WorkspaceRuntime {
     }
     async head(projectId: string) {
         return (await this.json<{ sha: string | null }>(projectId, "GET", "/head")).sha;
+    }
+    async exportTree(projectId: string, sha: string): Promise<Uint8Array> {
+        let res: Response;
+        try {
+            res = await this.call(projectId, "GET", `/export/${sha}`, undefined, 60_000);
+        } catch (err) {
+            if (!unreachable(err)) throw err;
+            await this.ensure(projectId);
+            res = await this.call(projectId, "GET", `/export/${sha}`, undefined, 60_000);
+        }
+        if (!res.ok)
+            throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `workspace ${res.status}`);
+        return new Uint8Array(await res.arrayBuffer());
     }
     async readFile(projectId: string, rel: string): Promise<PreviewFile | null> {
         let res: Response;

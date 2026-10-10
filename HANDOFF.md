@@ -1,8 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p4.2` deployed**: P0, P1, P2 (multi-tenant) and BYOK (E4.1, brought forward).
-> P1 is merged to `main`. P2 is [PR #3](https://github.com/JakeGT/atelier/pull/3) (`p2-multi-tenant`).
-> BYOK is [PR #4](https://github.com/JakeGT/atelier/pull/4) (`p4-byok`, stacked on #3). **Neither is merged yet.**
+> Last updated 2026-10-10. Status: **`p3.4` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has P0, P1, P2 and BYOK. P3 (hosting) is [PR #5](https://github.com/JakeGT/atelier/pull/5) on `p3-hosting`, **not yet merged**.
 
 ## TL;DR
 
@@ -12,6 +11,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 (hosting and domains) is next.
 
 **Working rules:**
+- The interface follows `docs/design/README.md`. Every control has words, actions live on the thing they act on, and nothing technical is shown to people. Run `docs/design/06-review-checklist.md` before any interface change ships.
 - Each phase is developed on its own branch and reviewed as a PR. Nothing goes straight to `main`.
 - After every push, check CI (`gh pr checks <n>`). Never commit key-shaped literals, even in tests.
 
@@ -25,20 +25,20 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 | Web UI | `apps/web/` |
 | Platform infra | `~/Projects/jaketalling-com/jaketalling-platform-infrastructure/apps/atelier/` |
 
-**Git:** `main` has P0–P1. `p2-multi-tenant` (PR #3) has P2. The infra repo's Atelier commits are local only (its `main` is many commits ahead of origin and is not pushed).
+**Git:** `main` has P0–P2 and BYOK. `p3-hosting` (PR #5) has P3. The infra repo's Atelier commits are local only and not pushed.
 
 ## Current deployment
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p4.2` (built locally from `p4-byok`) |
-| Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), plus `atelier-ws-<projectId>` per project, created on demand and stopped when idle |
-| Migrations | `0001`–`0008` applied; `db/grants.sql` re-applied at each start |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.4` (built locally from `p3-hosting`) |
+| Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
+| Migrations | `0001`–`0009` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
-| Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only) |
+| Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T005806Z` (before p4.0) |
+| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T103732Z` (before p3.0) |
 
 Verified after deploy:
 - `/healthz` returns 200;
@@ -95,7 +95,7 @@ docker run -d --rm --name atelier-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:5543
 TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # all tests, incl. RLS/role suite
 scripts/e2e.sh      # the real images end to end (sandbox, network boundaries); E2E_AGENT=1 adds a real assistant run
 
-for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:<tag> .; done
+for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:<tag> .; done
 cd ~/Projects/jaketalling-com/jaketalling-platform-infrastructure && sh scripts/backup.sh
 cd apps/atelier && sed -i 's/^ATELIER_VERSION=.*/ATELIER_VERSION=<tag>/' .env && docker compose up -d
 docker logs atelier-server --tail 20 && curl -fsS https://atelier.jaketalling.com/healthz
@@ -110,6 +110,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - The model picker's list and its recommendations come from models.dev, computed in `services/catalog.ts`. Nothing is hard-coded per model.
 - To try it locally without real keys: `PROVIDER_UPSTREAMS` can point a provider at a stand-in server.
 
+## Hosting (branch `p3-hosting`)
+
+- Publish exports the release's files from the workspace and hands them to the `deployer` service, which validates them and uploads them to Cloudflare Pages. Only the deployer holds the Cloudflare token (ADR-0004 and ADR-0010, "As built").
+- Hosting is on only when the server has `DEPLOYER_URL`. Without it, publishing records releases and serves nothing, as before.
+- Custom domains are per website (the globe button in the editor).
+- Tested against a stand-in for Cloudflare (`scripts/fake-pages.ts`), not yet against Cloudflare itself.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
@@ -122,6 +129,8 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 ## Next steps
 
-1. **Jake: try P2 in production.** Create a second studio, invite someone, open the settings pages, archive and restore a website, and run the assistant once (it now goes through the egress proxy).
-2. **Review and merge PR #3.**
-3. **P3 on a new branch (`p3-hosting`):** Cloudflare Pages per project, the build split into an untrusted build and a trusted upload (ADR-0010), custom domains, real rollback, and the remote mirror for project code (ADR-0009).
+1. **Jake: publish a real website from the editor** and open its `*.pages.dev` address. The deployer has been run against Cloudflare directly (deploy, redeploy, redeploy an earlier version, delete), but not yet through a signed-in Publish, and custom domains have not been tried against Cloudflare.
+2. **Review and merge PR #5.**
+3. **Then P4's remaining epics** (templates and skills library, operator console, usage dashboards) on a new branch, or P5. Carried forward: the remote git mirror of project code (workspace volumes are not backed up), preview deployments, a sandboxed build if frameworks are ever allowed, gVisor.
+
+Cloudflare notes: the token is an account API token with **Pages Write**. A brand-new Pages project can answer 522 or fail TLS on per-deployment addresses for a minute or so after its first deployment.

@@ -61,6 +61,8 @@ export const projectSchema = z.object({
     agentConfigRef: z.string().nullable(),
     previewRef: z.string().nullable(),
     productionRef: z.string().nullable(),
+    // The website's project at the hosting provider, once it has been published there.
+    hostingRef: z.string().nullable(),
     // Guidance the owner gives the assistant for this website, and an optional model.
     agentInstructions: z.string().nullable(),
     agentModel: z.string().nullable(),
@@ -133,6 +135,8 @@ export const deploymentSchema = z.object({
     providerRef: z.string().nullable(),
     url: z.string().nullable(),
     state: z.string(),
+    // Why it failed, worded for the website's owner.
+    error: z.string().nullable(),
     createdAt: z.string().datetime(),
 });
 

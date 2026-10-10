@@ -32,19 +32,33 @@ export function Dots() {
 
 export function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
     return (
-        <button
-            type="button"
-            className="btn btn-ghost btn-icon"
-            onClick={onToggle}
-            title={theme === "paper" ? "Night studio" : "Daylight"}
-            aria-label="Switch colour theme"
-        >
-            {theme === "paper" ? <Moon /> : <Sun />}
+        <button type="button" className="btn btn-ghost" onClick={onToggle} title="Switch between light and dark colours">
+            {theme === "paper" ? <Moon /> : <Sun />} {theme === "paper" ? "Night" : "Day"}
         </button>
     );
 }
 
-export function UserMenu({ session }: { session: Session }) {
+// `theme` + `onToggleTheme`: where the page has no room for a separate theme
+// button, the switch lives here, in words.
+// `items`: the page's own actions, repeated here in words so they can always be found
+// (on a narrow screen there is no room for them in the bar).
+export interface MenuItem {
+    label: string;
+    icon: ReactNode;
+    onClick: () => void;
+}
+
+export function UserMenu({
+    session,
+    theme,
+    onToggleTheme,
+    items = [],
+}: {
+    session: Session;
+    theme?: Theme;
+    onToggleTheme?: () => void;
+    items?: MenuItem[];
+}) {
     const [open, setOpen] = useState(false);
     const ref = useClickOutside(useCallback(() => setOpen(false), []));
     const initial = (session.name || session.email).trim().charAt(0).toUpperCase();
@@ -59,6 +73,26 @@ export function UserMenu({ session }: { session: Session }) {
                         <strong>{session.name}</strong>
                         <span className="mono muted">{session.email}</span>
                     </div>
+                    {items.map((item) => (
+                        <button
+                            key={item.label}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                                setOpen(false);
+                                item.onClick();
+                            }}
+                        >
+                            {item.icon} {item.label}
+                        </button>
+                    ))}
+                    {items.length > 0 && <div className="menu-rule" />}
+                    {theme && onToggleTheme && (
+                        <button type="button" role="menuitem" onClick={onToggleTheme}>
+                            {theme === "paper" ? <Moon /> : <Sun />}{" "}
+                            {theme === "paper" ? "Switch to night colours" : "Switch to daylight colours"}
+                        </button>
+                    )}
                     <button type="button" role="menuitem" onClick={() => void api.logout()}>
                         <LogOut /> Sign out
                     </button>

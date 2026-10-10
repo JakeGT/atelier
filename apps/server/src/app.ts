@@ -9,6 +9,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { configRoutes } from "./routes/config.ts";
 import { health } from "./routes/health.ts";
 import type { ModelCatalog } from "./services/catalog.ts";
+import type { Hosting } from "./services/hosting.ts";
 import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
@@ -25,6 +26,8 @@ export interface Deps {
     // Replaced in tests: the model catalog, and how model providers are reached.
     catalog?: ModelCatalog;
     providerFetch?: typeof fetch;
+    // Where published websites are served from; null when no deployer is configured.
+    hosting?: Hosting | null;
 }
 
 // Baseline headers for everything the app serves (the preview route adds a

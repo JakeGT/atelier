@@ -69,13 +69,13 @@ export function Landing({ session, config, theme, onToggleTheme }: LandingProps)
                     <a href="#rules" className="btn btn-ghost">
                         House rules
                     </a>
-                    <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+                    {!session && <ThemeToggle theme={theme} onToggle={onToggleTheme} />}
                     {session ? (
                         <>
                             <button type="button" className="btn btn-primary" onClick={enter}>
                                 Open studio <ArrowRight />
                             </button>
-                            <UserMenu session={session} />
+                            <UserMenu session={session} theme={theme} onToggleTheme={onToggleTheme} />
                         </>
                     ) : session === null ? (
                         <button type="button" className="btn btn-primary" onClick={enter}>

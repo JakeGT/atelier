@@ -223,6 +223,78 @@ test("the database serves as the runtime role: tenant data needs a tenant, and h
     assert.match(psql("SELECT 1 FROM schema_migrations"), /permission denied/);
 });
 
+// ---- publishing (P3) ----------------------------------------------------------------------------
+
+const PAGES = process.env.E2E_PAGES ?? "http://localhost:18787";
+interface FakeState {
+    sites: Record<string, { files: Record<string, string>; deployments: number; headers: string }>;
+    tokens: string[];
+}
+const pagesState = async (): Promise<FakeState> =>
+    (await (await fetch(`${PAGES}/_state`, { headers: { connection: "close" } })).json()) as FakeState;
+const publish = async (projectId: string): Promise<Response> => {
+    const created = await call("POST", `/projects/${projectId}/releases`);
+    if (!created.ok) return created;
+    const { release } = (await created.json()) as { release: { number: number } };
+    return call("POST", `/projects/${projectId}/releases/${release.number}/publish`);
+};
+const commit = (container: string) => inside(container, "cd /workspace && git add -A && git commit -qm 'a version' && git rev-parse HEAD");
+let site = "";
+
+test("publishing: the website's files travel workspace -> control plane -> deployer -> host, and a bad one is refused", async () => {
+    // The workspace still holds the symlink from the preview test: a website with a link in it is not published.
+    assert.ok(commit(ws.container).ok);
+    const refused = await publish(ws.id);
+    assert.equal(refused.status, 422);
+    assert.match(((await refused.json()) as { error: string }).error, /leak is a link, not a file/);
+    assert.deepEqual((await pagesState()).sites, {});
+
+    inside(ws.container, "rm /workspace/leak && printf 'body{color:teal}' > /workspace/site.css && printf 'SECRET=1' > /workspace/.env");
+    assert.ok(commit(ws.container).ok);
+    const ok = await publish(ws.id);
+    assert.equal(ok.status, 200, await ok.clone().text());
+    const hosting = await json<{ enabled: boolean; url: string }>(await call("GET", `/projects/${ws.id}/hosting`));
+    assert.equal(hosting.enabled, true);
+    site = new URL(hosting.url).host.replace(".pages.dev", "");
+    assert.match(site, /^atl-e2e-one-[0-9a-f]{10}$/);
+    const state = await pagesState();
+    const files = state.sites[site]?.files ?? {};
+    assert.equal(files["/index.html"], "<h1>hello e2e</h1>");
+    assert.equal(files["/site.css"], "body{color:teal}");
+    // The dotfile stayed behind, and so did the link.
+    assert.ok(!("/.env" in files) && !("/leak" in files));
+    assert.match(state.sites[site]?.headers ?? "", /X-Robots-Tag: noindex/);
+
+    // A second version, then back to the first.
+    inside(ws.container, "printf '<h1>version two</h1>' > /workspace/index.html");
+    assert.ok(commit(ws.container).ok);
+    assert.equal((await publish(ws.id)).status, 200);
+    assert.equal((await pagesState()).sites[site]?.files["/index.html"], "<h1>version two</h1>");
+    assert.equal((await call("POST", `/projects/${ws.id}/releases/1/rollback`)).status, 409); // release 1 failed: not a version to go back to
+    assert.equal((await call("POST", `/projects/${ws.id}/releases/2/rollback`)).status, 201);
+    assert.equal((await pagesState()).sites[site]?.files["/index.html"], "<h1>hello e2e</h1>");
+});
+
+test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
+    const tokenOf = (name: string) =>
+        inspect<Inspect>(name)
+            .Config.Env.find((e) => e.startsWith("CLOUDFLARE_API_TOKEN="))
+            ?.split("=")[1];
+    const token = tokenOf("atelier-e2e-deployer-1");
+    assert.ok(token && token.length >= 16);
+    for (const name of ["atelier-e2e-server-1", "atelier-e2e-provisioner-1", "atelier-e2e-egress-1", ws.container]) {
+        assert.ok(!inspect<Inspect>(name).Config.Env.some((e) => e.includes(token)), name);
+    }
+    // The host only ever saw the deployer's token (and the upload token it issued).
+    assert.deepEqual((await pagesState()).tokens.sort(), [token, "upload-jwt"].sort());
+    // Not on the workspace's network, and not reachable through the proxy either.
+    assert.match(request(ws.container, "http://atelier-deployer:8092/healthz", false), /^failed/);
+    assert.match(request(ws.container, "http://atelier-deployer:8092/healthz", true), /^failed/);
+    assert.match(request(ws.container, "http://fake-cloudflare:8787/_state", false), /^failed/);
+    const nets = Object.keys(inspect<Inspect>("atelier-e2e-deployer-1").NetworkSettings.Networks).sort();
+    assert.deepEqual(nets, ["atelier-e2e_control", "atelier-e2e_hosting"]);
+});
+
 test("archiving stops the workspace; deleting removes it and its files", async () => {
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
     await json(await call("POST", `/projects/${ws.id}/archive`));
@@ -233,10 +305,14 @@ test("archiving stops the workspace; deleting removes it and its files", async (
     await json(await call("POST", `/projects/${ws.id}/restore`));
     await json(await call("POST", `/projects/${ws.id}/sessions`));
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
-    assert.equal(inside(ws.container, "cat /workspace/index.html").out, "<h1>hello e2e</h1>");
+    // (Rolling back changed what is live, not the working files.)
+    assert.equal(inside(ws.container, "cat /workspace/index.html").out, "<h1>version two</h1>");
 
     await json(await call("POST", `/projects/${ws.id}/archive`));
+    // Archived, the published website is still up; deleting takes it down.
+    assert.ok(site in (await pagesState()).sites);
     await json(await call("DELETE", `/projects/${ws.id}`));
+    assert.equal(site in (await pagesState()).sites, false);
     assert.equal(exists("container", ws.container), false);
     assert.equal(exists("volume", ws.container), false);
     assert.equal((await call("GET", `/projects/${ws.id}`)).status, 404);

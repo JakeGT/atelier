@@ -46,6 +46,15 @@ const envSchema = z.object({
     PROVISIONER_URL: z.string().default("http://atelier-provisioner:8091"),
     PROVISIONER_SECRET: z.string().optional(),
     PROVISIONER_SECRET_FILE: z.string().optional(),
+    // Hosting (P3): the deployer service that puts published websites on Cloudflare
+    // Pages. Unset means no hosting: releases are recorded but nothing is served.
+    DEPLOYER_URL: z.string().url().optional(),
+    DEPLOYER_SECRET: z.string().optional(),
+    DEPLOYER_SECRET_FILE: z.string().optional(),
+    PAGES_PROJECT_PREFIX: z
+        .string()
+        .regex(/^[a-z0-9]{2,12}-$/)
+        .default("atl-"),
     // The control-plane address runtime containers use for the agent content API.
     RUNTIME_API_URL: z.string().default("http://atelier-server:8080"),
     WORKSPACE_ROOT: z.string().default("/tmp/atelier-workspaces"),
@@ -76,6 +85,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     const migrationDatabaseUrl =
         e.MIGRATION_DATABASE_URL ?? (e.MIGRATION_DATABASE_URL_FILE ? readSecret(e.MIGRATION_DATABASE_URL_FILE) : undefined);
     const provisionerSecret = e.PROVISIONER_SECRET ?? (e.PROVISIONER_SECRET_FILE ? readSecret(e.PROVISIONER_SECRET_FILE) : undefined);
+    const deployerSecret = e.DEPLOYER_SECRET ?? (e.DEPLOYER_SECRET_FILE ? readSecret(e.DEPLOYER_SECRET_FILE) : undefined);
+    if (e.DEPLOYER_URL && !deployerSecret) throw new ConfigError("DEPLOYER_URL requires DEPLOYER_SECRET(_FILE)");
     if (e.RUNTIME_MODE === "container") {
         if (!secretsKey) throw new ConfigError("RUNTIME_MODE=container requires ATELIER_SECRETS_KEY(_FILE)");
         if (!provisionerSecret) throw new ConfigError("RUNTIME_MODE=container requires PROVISIONER_SECRET(_FILE)");
@@ -130,6 +141,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         runtimeMode: e.RUNTIME_MODE,
         provisionerUrl: e.PROVISIONER_URL,
         provisionerSecret,
+        deployerUrl: e.DEPLOYER_URL ?? null,
+        deployerSecret,
+        pagesProjectPrefix: e.PAGES_PROJECT_PREFIX,
         runtimeApiUrl: e.RUNTIME_API_URL,
         authMode: e.AUTH_MODE,
         oidc,

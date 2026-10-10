@@ -48,7 +48,7 @@ export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onT
             <main className="studio-main settings">
                 <p className="eyebrow">{org.name}</p>
                 <h1 className="display">
-                    The <em>studio.</em>
+                    Studio <em>settings.</em>
                 </h1>
                 <div className="tabs settings-tabs" role="tablist">
                     {tabs.map((t) => (
@@ -118,9 +118,13 @@ function General({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promis
                 <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
             </label>
             <div className="field-line">
-                <span className="eyebrow">Address</span>
-                <p className="mono field-static">/o/{org.slug}</p>
-                <p className="field-help">The address stays the same when you rename the studio, so links keep working.</p>
+                <span className="eyebrow">Link to this studio</span>
+                <p className="mono field-static">
+                    {window.location.origin}/o/{org.slug}
+                </p>
+                <p className="field-help">
+                    Only members can open it. The link stays the same when you rename the studio, so bookmarks keep working.
+                </p>
             </div>
             <div className="panel-foot">
                 <button type="submit" className="btn btn-primary" disabled={!dirty || saving || !name.trim()}>
@@ -188,7 +192,7 @@ function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise
                     orgSlug={org.slug}
                     value={org.defaultModel}
                     onChange={(m) => void setDefault(m)}
-                    automatic="Automatic"
+                    automatic="The built-in model"
                     automaticHint="The assistant's built-in model. No key needed."
                     mayManage
                     refresh={changes}
@@ -202,8 +206,8 @@ function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise
 
             <h2 className="panel-title">Providers</h2>
             <p className="field-help panel-lede">
-                Atelier runs on your own accounts with the model providers: you pay them directly, at their prices. A key is stored
-                encrypted, is never shown again, and never reaches the assistant's workspace.
+                A provider is a company whose AI your assistant can use, such as Anthropic or OpenAI. Connect one by pasting an API key from
+                your account with them: you pay them directly, at their prices. Atelier stores the key encrypted and never shows it again.
             </p>
             {providers === null ? (
                 <div className="panel-loading">
@@ -232,12 +236,11 @@ function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise
                                 {p.connected && (
                                     <button
                                         type="button"
-                                        className="btn btn-sm btn-ghost btn-icon"
+                                        className="btn btn-sm btn-danger"
                                         title={`Disconnect ${p.name} and delete its key`}
-                                        aria-label={`Disconnect ${p.name}`}
                                         onClick={() => void disconnect(p)}
                                     >
-                                        <Trash2 />
+                                        <Trash2 /> Disconnect
                                     </button>
                                 )}
                             </span>
@@ -395,6 +398,7 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
 
     return (
         <div className="panel">
+            <p className="field-help panel-lede">Everyone who can open this studio, and what each may do.</p>
             {members === null ? (
                 <div className="panel-loading">
                     <Dots />
@@ -436,33 +440,28 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                                             ))}
                                         </select>
                                     ) : (
-                                        <span className="chip chip-plain" title={ROLE_HELP[m.role]}>
-                                            {m.role}
-                                        </span>
+                                        <span className="chip chip-plain">{m.role}</span>
                                     )}
                                     {self ? (
-                                        <button
-                                            type="button"
-                                            className="btn btn-sm"
-                                            disabled={lastOwner}
-                                            title={
-                                                lastOwner
-                                                    ? "A studio needs an owner. Make someone else an owner first."
-                                                    : "Leave this studio"
-                                            }
-                                            onClick={() => void remove(m)}
-                                        >
-                                            <LogOut /> Leave
-                                        </button>
+                                        // A control that cannot be used says why, in place, instead of sitting there greyed out.
+                                        lastOwner ? (
+                                            <span className="row-note">
+                                                You're the only owner, so you can't leave. Make someone else an owner first.
+                                            </span>
+                                        ) : (
+                                            <button type="button" className="btn btn-sm" onClick={() => void remove(m)}>
+                                                <LogOut /> Leave this studio
+                                            </button>
+                                        )
                                     ) : (
                                         editable && (
                                             <button
                                                 type="button"
-                                                className="btn btn-sm btn-icon"
+                                                className="btn btn-sm btn-danger"
                                                 title="Remove from the studio"
                                                 onClick={() => void remove(m)}
                                             >
-                                                <X />
+                                                <X /> Remove
                                             </button>
                                         )
                                     )}
@@ -475,6 +474,15 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
 
             {mayManage && (
                 <>
+                    <dl className="roles">
+                        {(["owner", "admin", "editor", "viewer"] as const).map((r) => (
+                            <div key={r}>
+                                <dt>{r.charAt(0).toUpperCase() + r.slice(1)}</dt>
+                                <dd>{ROLE_HELP[r]}</dd>
+                            </div>
+                        ))}
+                    </dl>
+
                     <h2 className="panel-title">Invite someone</h2>
                     <form className="invite" onSubmit={invite}>
                         <input
@@ -711,7 +719,10 @@ function UsagePanel({ org }: { org: Org }) {
                     <p className="field-help limit-line">When the daily limit is reached, the assistant pauses until midnight UTC.</p>
                 )
             )}
-            <Meter label="Websites" used={usage.projects} limit={usage.limits.maxProjects} unit="" />
+            <p className="field-help limit-line">
+                A token is how AI use is counted: about three-quarters of a word. Your provider bills you for them.
+            </p>
+            <Meter label="Websites in this studio" used={usage.projects} limit={usage.limits.maxProjects} unit="" />
 
             <h2 className="panel-title">Last 30 days</h2>
             {table.length === 0 ? (
@@ -758,9 +769,16 @@ const ACTION: Record<string, string> = {
     "project.archive": "Archived a website",
     "project.restore": "Restored a website",
     "project.delete": "Deleted a website",
-    "release.create": "Prepared a release",
+    "release.create": "Started publishing",
+    "release.publish.failed": "A publish did not go through",
+    "release.rollback.failed": "Putting an earlier release back did not go through",
+    "release.unpublish": "Took a website offline",
+    "domain.add": "Added a domain",
+    "domain.remove": "Removed a domain",
+    "provider.connect": "Connected a model provider",
+    "provider.disconnect": "Disconnected a model provider",
     "release.publish": "Published",
-    "release.rollback": "Rolled back",
+    "release.rollback": "Put an earlier release back",
     "workspace.restore": "Restored an earlier version",
     "content.restore": "Restored earlier content",
 };
@@ -769,6 +787,8 @@ function describe(e: AuditEntry): string {
     const d = e.detail ?? {};
     const bits: string[] = [];
     if (typeof d.email === "string") bits.push(d.email);
+    if (typeof d.hostname === "string") bits.push(d.hostname);
+    if (typeof d.reason === "string") bits.push(d.reason);
     if (typeof d.slug === "string") bits.push(d.slug);
     if (typeof d.name === "string" && typeof d.slug !== "string") bits.push(d.name);
     if (typeof d.number === "number") bits.push(`release ${d.number}`);

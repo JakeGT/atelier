@@ -76,6 +76,28 @@ services:
             runtime: { aliases: [atelier-egress] }
             outbound: {}
 
+    # Publishes websites to Cloudflare Pages. The only holder of the Cloudflare
+    # token; it runs no project code and workspaces cannot reach it (ADR-0010).
+    # Optional: without it (and DEPLOYER_URL below) publishing records releases
+    # but serves nothing. The token needs "Cloudflare Pages: Edit" on one account.
+    deployer:
+        <<: *hardening
+        image: atelier-deployer:local
+        container_name: atelier-deployer
+        restart: unless-stopped
+        environment:
+            DEPLOYER_SECRET_FILE: /run/secrets/atelier_deployer_secret
+            CLOUDFLARE_ACCOUNT_ID_FILE: /run/secrets/atelier_cloudflare_account_id
+            CLOUDFLARE_API_TOKEN_FILE: /run/secrets/atelier_cloudflare_api_token
+            # It only ever touches Pages projects whose names start with this.
+            PAGES_PROJECT_PREFIX: atl-
+        secrets: [atelier_deployer_secret, atelier_cloudflare_account_id, atelier_cloudflare_api_token]
+        networks:
+            control: { aliases: [atelier-deployer] }
+            hosting: {}
+        tmpfs: [/tmp]
+        mem_limit: 768m
+
     server:
         <<: *hardening
         image: atelier-server:local
@@ -86,6 +108,8 @@ services:
             provisioner: { condition: service_started }
         environment:
             PUBLIC_ORIGIN: https://atelier.example.com
+            DEPLOYER_URL: http://atelier-deployer:8092
+            DEPLOYER_SECRET_FILE: /run/secrets/atelier_deployer_secret
             DATABASE_URL_FILE: /run/secrets/atelier_database_url
             ATELIER_SECRETS_KEY_FILE: /run/secrets/atelier_secrets_key
             RUNTIME_MODE: container
@@ -116,6 +140,8 @@ networks:
     runtime: { name: atelier-runtime, internal: true }
     # The egress proxy's route to the internet. Nothing else joins it.
     outbound: {}
+    # The deployer's route to Cloudflare's API.
+    hosting: {}
     proxy: {}
 
 volumes:
@@ -127,3 +153,6 @@ secrets:
     atelier_secrets_key: { file: ./secrets/atelier_secrets_key }
     atelier_provisioner_secret: { file: ./secrets/atelier_provisioner_secret }
     atelier_oidc_client_secret: { file: ./secrets/atelier_oidc_client_secret }
+    atelier_deployer_secret: { file: ./secrets/atelier_deployer_secret }
+    atelier_cloudflare_account_id: { file: ./secrets/atelier_cloudflare_account_id }
+    atelier_cloudflare_api_token: { file: ./secrets/atelier_cloudflare_api_token }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end test against the real images, wired as in production: Postgres with
 # the owner/runtime role split, the control plane, the provisioner (Docker
-# socket), the egress proxy, and a real per-project workspace container.
+# socket), the egress proxy, the deployer (against a stand-in for Cloudflare),
+# and a real per-project workspace container.
 #
 #   scripts/e2e.sh            build, start, test, tear down
 #   KEEP=1 scripts/e2e.sh     leave the stack up afterwards (http://localhost:18080)
@@ -13,7 +14,9 @@ COMPOSE=(docker compose -f deploy/compose.e2e.yml)
 # Throwaway secrets for this run (nothing key-shaped is committed, even for tests).
 E2E_SECRETS_KEY=$(openssl rand -hex 24)
 E2E_PROVISIONER_SECRET=$(openssl rand -hex 24)
-export E2E_SECRETS_KEY E2E_PROVISIONER_SECRET
+E2E_DEPLOYER_SECRET=$(openssl rand -hex 24)
+E2E_CLOUDFLARE_TOKEN=$(openssl rand -hex 16)
+export E2E_SECRETS_KEY E2E_PROVISIONER_SECRET E2E_DEPLOYER_SECRET E2E_CLOUDFLARE_TOKEN
 
 cleanup() {
     [ "${KEEP:-}" = "1" ] && return
@@ -28,7 +31,7 @@ cleanup() {
 trap 'rc=$?; [ $rc -ne 0 ] && "${COMPOSE[@]}" logs --tail 60 2>/dev/null; cleanup' EXIT
 
 if [ "${SKIP_BUILD:-}" != "1" ]; then
-    for t in server runtime provisioner egress; do docker build -q --target "$t" -t "atelier-$t:e2e" . >/dev/null; done
+    for t in server runtime provisioner egress deployer; do docker build -q --target "$t" -t "atelier-$t:e2e" . >/dev/null; done
 fi
 
 cleanup
@@ -46,4 +49,4 @@ SQL
 "${COMPOSE[@]}" up -d >/dev/null
 for _ in $(seq 1 60); do curl -fsS http://localhost:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
 
-E2E_BASE=http://localhost:18080 node --test --test-reporter=spec scripts/e2e.test.ts
+E2E_BASE=http://localhost:18080 E2E_PAGES=http://localhost:18787 node --test --test-reporter=spec scripts/e2e.test.ts

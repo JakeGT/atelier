@@ -106,6 +106,16 @@ app.post("/restore", async (c) => {
 
 app.get("/head", async (c) => c.json({ sha: await workspace.head() }));
 
+// One saved version's files as a tar archive, for publishing (ADR-0010).
+app.get("/export/:sha", async (c) => {
+    try {
+        const archive = await workspace.archive(c.req.param("sha"));
+        return new Response(new Uint8Array(archive), { headers: { "content-type": "application/x-tar" } });
+    } catch (err) {
+        return c.json({ error: (err as Error).message.slice(0, 300) }, 400);
+    }
+});
+
 app.get("/files/*", async (c) => {
     const rel = decodeURIComponent(c.req.path.replace(/^\/files\/?/, ""));
     const file = await workspace.readFile(rel);

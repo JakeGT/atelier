@@ -6,7 +6,7 @@ import { type Api, type Ctx, ORG, PROJECT, SLUG_RE, slugify } from "./kit.ts";
 
 // Projects (websites): create, list, settings, archive, delete.
 export function projectRoutes(api: Api): void {
-    const { route, store, runtime, stepUp, audit, limits } = api;
+    const { route, store, runtime, stepUp, audit, limits, hosting } = api;
 
     // Archived projects are listed only when asked for.
     route("get", `${ORG}/projects`, "project.read", async (c) => {
@@ -83,7 +83,16 @@ export function projectRoutes(api: Api): void {
     route("delete", PROJECT, "project.delete", stepUp, async (c) => {
         const project = c.get("project");
         if (!project.archivedAt) return c.json({ error: "archive the website before deleting it" }, 409);
-        // The workspace first: if it cannot be removed, keep the record so it can be retried.
+        // The live website first, then the workspace: if either cannot be removed,
+        // keep the record so the deletion can be retried and nothing is orphaned.
+        if (hosting && project.hostingRef) {
+            try {
+                await hosting.deleteSite(project.hostingRef);
+            } catch (err) {
+                console.error(`could not take down ${project.hostingRef}: ${(err as Error).message}`);
+                return c.json({ error: "the live website could not be taken down; try again in a moment" }, 502);
+            }
+        }
         try {
             await runtime.destroy(project.id);
         } catch (err) {

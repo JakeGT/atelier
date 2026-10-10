@@ -405,10 +405,14 @@
 }
 
 .segmented button {
-    display: grid;
-    place-items: center;
-    width: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 30px;
     height: 26px;
+    padding: 0 9px;
+    font-size: 12px;
     border: 0;
     border-radius: 999px;
     background: none;
@@ -783,7 +787,7 @@
         min-width: 0;
     }
     .side-toggle,
-    .editor-bar .chip,
+    .editor-bar .chip:not(.chip-button),
     .frame-lights,
     .segmented {
         display: none;
@@ -833,4 +837,225 @@
     place-items: center;
     min-height: 100%;
     color: var(--ink-3);
+}
+
+/* ---- live address ------------------------------------------------------------- */
+
+.live-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.2s;
+}
+
+.live-link:hover {
+    color: var(--ink);
+}
+
+.live-link svg {
+    flex: none;
+    width: 12px;
+    height: 12px;
+}
+
+.address-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+}
+
+.address-line a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--ink);
+    font-size: 14px;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.address-line a:hover {
+    color: var(--seal-deep);
+}
+
+.address-line a svg {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    color: var(--ink-3);
+}
+
+.dialog .address-warning {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-m);
+    background: var(--draft-wash);
+    color: var(--ink);
+    font-size: 13.5px;
+}
+
+.address-head {
+    margin: 28px 0 10px;
+}
+
+.domain-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+}
+
+.domain-help {
+    flex-basis: 100%;
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
+.domain-help .mono {
+    font-size: 11.5px;
+    color: var(--ink-2);
+    overflow-wrap: anywhere;
+}
+
+.dialog .rows + .invite,
+.address-head + .invite {
+    margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+    .editor-bar .live-link {
+        display: none;
+    }
+}
+
+.live-word {
+    font-style: italic;
+    color: var(--seal);
+}
+
+.offline-confirm {
+    margin-top: 24px;
+    padding: 16px 18px 18px;
+    border: 1px solid var(--seal);
+    border-radius: var(--radius-l);
+    background: var(--seal-wash);
+}
+
+.dialog .offline-confirm p {
+    margin: 0;
+    color: var(--ink);
+    font-size: 14px;
+}
+
+.offline-confirm .dialog-actions {
+    margin-top: 14px;
+}
+
+/* ---- words on the controls ------------------------------------------------------ */
+
+.editor-bar .btn-ghost {
+    padding: 0 10px;
+    white-space: nowrap;
+}
+
+.frame-tools .btn-sm {
+    white-space: nowrap;
+}
+
+/* The preview's tools keep their words while there is room for them: the address
+   gives way first. */
+.frame {
+    container-type: inline-size;
+}
+
+.frame-chrome {
+    grid-template-columns: auto 1fr auto;
+}
+
+@container (max-width: 660px) {
+    .frame-address {
+        display: none;
+    }
+}
+
+@container (max-width: 470px) {
+    .segmented .tool-label {
+        display: none;
+    }
+    .segmented button {
+        padding: 0;
+    }
+}
+
+/* On a phone the bar keeps the way back, the name and Publish. Address and Settings
+   are in the account menu, in words; History is a tab at the bottom. */
+@media (max-width: 900px) {
+    .editor-bar .bar-wide,
+    .editor-bar .bar-back .bar-label {
+        display: none;
+    }
+}
+
+.live-menu .menu {
+    min-width: 280px;
+}
+
+.live-menu .menu-head .mono {
+    font-size: 11.5px;
+}
+
+/* ---- plain-words pass ----------------------------------------------------------- */
+
+.send {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: auto;
+    height: 32px;
+    padding: 0 12px 0 14px;
+    border-radius: 999px;
+    font-size: 13.5px;
+    font-weight: 500;
+}
+
+.send:hover:not(:disabled) {
+    transform: none;
+}
+
+.side-about {
+    margin: 0 0 18px;
+    padding: 0 2px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-3);
+}
+
+.field-note {
+    letter-spacing: 0;
+    text-transform: none;
+    font-family: var(--font-ui);
+    font-size: 11.5px;
+    color: var(--ink-3);
+}
+
+.manifest li > span:last-child {
+    color: var(--ink-2);
+}
+
+.settings-note {
+    margin-top: 22px;
 }

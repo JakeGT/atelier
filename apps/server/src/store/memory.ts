@@ -20,6 +20,7 @@ import type {
     AuditStore,
     ContentStore,
     DeploymentStore,
+    DomainStore,
     InvitationStore,
     LoginSession,
     LoginSessionStore,
@@ -34,7 +35,7 @@ import type {
     UsageTotals,
     UserStore,
 } from "./types.ts";
-import { SlugTakenError } from "./types.ts";
+import { DomainTakenError, SlugTakenError } from "./types.ts";
 
 const key = (...parts: string[]) => parts.join("\0");
 const now = () => new Date().toISOString();
@@ -260,6 +261,7 @@ export class MemoryStore implements Store {
                 agentConfigRef: null,
                 previewRef: null,
                 productionRef: null,
+                hostingRef: null,
                 agentInstructions: null,
                 agentModel: null,
                 archivedAt: null,
@@ -267,6 +269,17 @@ export class MemoryStore implements Store {
             };
             this.projectMap.set(input.id, p);
             return p;
+        },
+        setHosting: async (tenantId, id, hosting) => {
+            const p = this.projectMap.get(id);
+            if (!p || p.tenantId !== tenantId) throw new Error("project not found");
+            const next = {
+                ...p,
+                hostingRef: hosting.hostingRef,
+                productionRef: hosting.productionRef === undefined ? p.productionRef : hosting.productionRef,
+            };
+            this.projectMap.set(id, next);
+            return next;
         },
         update: async (tenantId, id, patch) => {
             const p = this.projectMap.get(id);
@@ -488,6 +501,18 @@ export class MemoryStore implements Store {
             this.releaseMap.set(releaseId, live);
             return live;
         },
+        takeDown: async (tenantId, projectId) => {
+            const live = [...this.releaseMap.values()].find(
+                (r) => r.tenantId === tenantId && r.projectId === projectId && r.state === "live",
+            );
+            if (!live) return null;
+            const down: Release = { ...live, state: "superseded" };
+            this.releaseMap.set(live.id, down);
+            for (const doc of this.contentMap.values()) {
+                if (doc.projectId === projectId) this.contentMap.set(doc.id, { ...doc, published: null, publishedAt: null });
+            }
+            return down;
+        },
         markFailed: async (tenantId, releaseId) => {
             const r = this.releaseMap.get(releaseId);
             if (!r || r.tenantId !== tenantId) throw new Error("release not found");
@@ -509,13 +534,41 @@ export class MemoryStore implements Store {
                 providerRef: null,
                 url: input.url,
                 state: input.state,
+                error: null,
                 createdAt: now(),
             };
             this.deploymentMap.set(input.id, d);
             return d;
         },
+        finish: async (tenantId, id, result) => {
+            const d = this.deploymentMap.get(id);
+            if (!d || d.tenantId !== tenantId) return;
+            this.deploymentMap.set(id, {
+                ...d,
+                state: result.state,
+                providerRef: result.providerRef ?? d.providerRef,
+                url: result.url ?? d.url,
+                error: result.error ?? null,
+            });
+        },
         listByProject: async (tenantId, projectId) =>
             [...this.deploymentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId),
+    };
+
+    private readonly domainMap = new Map<string, { tenantId: string; projectId: string; createdAt: string }>();
+    domains: DomainStore = {
+        list: async (tenantId, projectId) =>
+            [...this.domainMap.entries()]
+                .filter(([, d]) => d.tenantId === tenantId && d.projectId === projectId)
+                .map(([hostname, d]) => ({ hostname, createdAt: d.createdAt })),
+        add: async (input) => {
+            if (this.domainMap.has(input.hostname)) throw new DomainTakenError();
+            this.domainMap.set(input.hostname, { tenantId: input.tenantId, projectId: input.projectId, createdAt: now() });
+        },
+        remove: async (tenantId, projectId, hostname) => {
+            const d = this.domainMap.get(hostname);
+            if (d && d.tenantId === tenantId && d.projectId === projectId) this.domainMap.delete(hostname);
+        },
     };
 
     audit: AuditStore = {

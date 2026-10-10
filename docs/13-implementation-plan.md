@@ -11,9 +11,13 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | P0 | Foundations & platform onboarding | Empty Atelier app live at `atelier.jaketalling.com` behind Authentik | ✅ done |
 | P1 | Single-tenant vertical slice (one project) | One tenant, one project, edit → preview → publish end-to-end | ✅ done |
 | P2 | Multi-tenant + multi-project | Many tenants, many projects, hard isolation, RBAC, quotas | ✅ done (gVisor spike and two items deferred, see P2) |
-| P3 | Hosting & domains | Per-project Cloudflare Pages + custom domains + rollback | pending |
+| P3 | Hosting & domains | Per-project Cloudflare Pages + custom domains + rollback | ✅ built on `p3-hosting` (needs a Cloudflare token to switch on; see P3) |
 | P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | pending |
 | P5 | Direct content editor & hardening | First-party CMS, gVisor, retention, alerting, VPS go-live gates | pending |
+
+**Interface rule for every phase:** anything a person sees follows
+`docs/design/README.md` and passes `docs/design/06-review-checklist.md` before it
+ships. An interface audit is part of finishing a phase.
 
 **Current status (2026-10-09):** P0 and P1 are implemented and deployed to
 `atelier.jaketalling.com`. P1 was then hardened on the `p1-hardening` branch
@@ -214,6 +218,27 @@ Goal: one real deploy target + custom domain per project.
 - Publishing a project produces a live site on a stable `*.pages.dev` URL and a
   custom domain (once added), with a working rollback.
 - A failed build leaves the previous production deployment live.
+
+### P3 as built (branch `p3-hosting`, 2026-10-10)
+
+- **E3.1** One Cloudflare Pages project per website, created on first publish;
+  production deployment on publish (ADR-0004 "As built").
+- **E3.2** The `deployer` service: the only holder of the Cloudflare token. It
+  validates an archive of the release's files and uploads it. There is no
+  build, because websites have no build step (ADR-0010 "As built").
+- **E3.3** Custom domains per website with DNS validation and automatic TLS;
+  canonical-origin enforcement through generated `noindex` headers.
+- **E3.4** Rollback redeploys the earlier release's files with no re-upload.
+- Deleting a website takes its site and domains down first.
+- **Verified** by unit tests against a stand-in for Cloudflare's API, and end to
+  end on the real containers against the same stand-in. Also run against
+  Cloudflare itself through the production deployer (2026-10-10): deploy,
+  redeploy, redeploy an earlier version, delete. Custom domains have not been
+  exercised against Cloudflare (that needs a real domain).
+- **Deferred:** preview deployments as a feature; a sandboxed build (needed
+  only once frameworks are allowed); the content snapshot in the published
+  site (P5); the remote git mirror of project code (ADR-0009), so workspace
+  volumes are still not backed up.
 
 ---
 

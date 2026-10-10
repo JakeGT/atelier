@@ -97,6 +97,7 @@ under [`docs/`](docs/):
 | 15 | [`15-risks-and-signoff.md`](docs/15-risks-and-signoff.md) | Risks, open questions, and the sign-off checklist |
 | 16 | [`16-competitive-features.md`](docs/16-competitive-features.md) | Competitive feature survey & adoption backlog |
 | ADR | [`adr/`](docs/adr/) | Architecture Decision Records for contested choices |
+| — | [`design/README.md`](docs/design/README.md) | Interface design reference: words on controls, finding things, plain language, states, visual language, review checklist |
 
 ## Reading order
 

@@ -1,13 +1,28 @@
-import { ArrowLeft, Eye, History, MessageSquare, PanelRight, Rocket, SlidersHorizontal } from "lucide-react";
+import {
+    ArrowLeft,
+    ArrowUpRight,
+    Check,
+    ChevronDown,
+    CloudOff,
+    Copy,
+    Eye,
+    Globe,
+    History,
+    MessageSquare,
+    PanelRight,
+    Rocket,
+    SlidersHorizontal,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Address } from "../editor/Address";
 import { Chat, type Message } from "../editor/Chat";
 import { type Device, Preview } from "../editor/Preview";
 import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
 import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Release, Run, Session } from "../lib/api";
 import { ApiError, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
-import { navigate, type Theme, useStored } from "../lib/hooks";
-import { Dialog, Dots, ThemeToggle, UserMenu, useToast } from "../ui/kit";
+import { navigate, type Theme, useClickOutside, useStored } from "../lib/hooks";
+import { Dialog, Dots, UserMenu, useToast } from "../ui/kit";
 import { FIRST_PROMPT_KEY } from "./Studio";
 
 type Pane = "chat" | "preview" | "side";
@@ -61,6 +76,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const [acting, setActing] = useState(false);
     const [confirmPublish, setConfirmPublish] = useState(false);
+    const [addressOpen, setAddressOpen] = useState(false);
+    // Opened from "Unpublish": the address dialog goes straight to its confirmation.
+    const [addressUnpublish, setAddressUnpublish] = useState(false);
+    const openAddress = (unpublish: boolean) => {
+        setAddressUnpublish(unpublish);
+        setAddressOpen(true);
+    };
+    const [published, setPublished] = useState<{ number: number; url: string } | null>(null);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
     const loadThread = useCallback(async () => {
@@ -199,7 +222,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     async function act(fn: () => Promise<string>, intent?: Intent, resuming = false) {
         setActing(true);
         try {
-            toast(await fn());
+            const message = await fn();
+            if (message) toast(message);
             await refresh();
         } catch (err) {
             if (!(err instanceof ReauthRequired)) toast((err as Error).message, "error");
@@ -226,7 +250,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             async () => {
                 const r = await a.rollback(pid, number);
                 setTab("releases");
-                return `Rolled back. Release ${r.number} is live.`;
+                return `The earlier one is back: it is live as release ${r.number}.`;
             },
             { action: "rollback", number },
             resuming,
@@ -238,7 +262,10 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             async () => {
                 const r = await a.publish(pid);
                 setTab("releases");
-                return `Release ${r.number} is live.`;
+                const { url } = await a.hosting(pid).catch(() => ({ url: null }));
+                // With an address to show, say so properly; otherwise a line will do.
+                if (url) setPublished({ number: r.number, url });
+                return url ? "" : `Release ${r.number} is live.`;
             },
             { action: "publish" },
             resuming,
@@ -271,7 +298,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const saveDocument = async (doc: ContentDocument, draft: Record<string, unknown>) => {
         await a.saveContent(pid, doc.kind, doc.slug, draft);
-        toast("Draft saved.");
+        toast("Saved. It shows in the preview, and goes public when you publish.");
         await refresh();
     };
 
@@ -279,6 +306,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const running = activeRun !== null;
     const live = overview?.liveRelease ?? null;
+    const liveUrl = live ? (overview?.project.productionRef ?? null) : null;
     const hasChanges = overview?.hasChanges ?? false;
     const nothingToPublish = overview !== null && !hasChanges;
 
@@ -286,46 +314,42 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         <div className={`editor pane-${pane} ${sideOpen ? "side-open" : ""}`}>
             <header className="editor-bar">
                 <div className="editor-bar-left">
-                    <button
-                        type="button"
-                        className="btn btn-ghost btn-icon"
-                        onClick={() => navigate(`/o/${org.slug}`)}
-                        title={`${org.name}'s websites`}
-                    >
-                        <ArrowLeft />
+                    <button type="button" className="btn btn-ghost bar-back" onClick={() => navigate(`/o/${org.slug}`)}>
+                        <ArrowLeft /> <span className="bar-label">Websites</span>
                     </button>
                     <h1 className="display">{project.name}</h1>
                     {archived ? (
                         <span className="chip chip-plain">Archived</span>
                     ) : live ? (
-                        hasChanges ? (
-                            <span className="chip chip-draft">Unpublished changes</span>
-                        ) : (
-                            <span className="chip chip-live">Live · release {live.number}</span>
-                        )
+                        <LiveMenu
+                            number={live.number}
+                            hasChanges={hasChanges}
+                            url={liveUrl}
+                            canPublish={canPublish}
+                            onAddress={() => openAddress(false)}
+                            onUnpublish={() => openAddress(true)}
+                        />
                     ) : (
                         <span className="chip chip-plain">Not published</span>
                     )}
                 </div>
                 <div className="editor-bar-right">
-                    <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+                    <button type="button" className="btn btn-ghost bar-wide" onClick={() => openAddress(false)}>
+                        <Globe /> <span className="bar-label">Address</span>
+                    </button>
                     {mayManage && (
-                        <button
-                            type="button"
-                            className="btn btn-ghost btn-icon"
-                            onClick={() => setSettingsOpen(true)}
-                            title="Website settings"
-                        >
-                            <SlidersHorizontal />
+                        <button type="button" className="btn btn-ghost bar-wide" onClick={() => setSettingsOpen(true)}>
+                            <SlidersHorizontal /> <span className="bar-label">Settings</span>
                         </button>
                     )}
                     <button
                         type="button"
-                        className={`btn btn-ghost btn-icon side-toggle ${sideOpen ? "on" : ""}`}
+                        className={`btn btn-ghost side-toggle ${sideOpen ? "on" : ""}`}
                         onClick={() => setSideOpen((o) => !o)}
-                        title="Versions, releases and content"
+                        aria-pressed={sideOpen}
+                        title="Show or hide the panel with saved versions, what is published, and your wording"
                     >
-                        <PanelRight />
+                        <PanelRight /> <span className="bar-label">Versions and wording</span>
                     </button>
                     {canPublish && (
                         <button
@@ -338,7 +362,18 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                             {acting ? <Dots /> : <Rocket />} Publish
                         </button>
                     )}
-                    <UserMenu session={session} />
+                    <UserMenu
+                        session={session}
+                        theme={theme}
+                        onToggleTheme={onToggleTheme}
+                        items={[
+                            { label: "Address and domains", icon: <Globe />, onClick: () => openAddress(false) },
+                            ...(mayManage
+                                ? [{ label: "Website settings", icon: <SlidersHorizontal />, onClick: () => setSettingsOpen(true) }]
+                                : []),
+                            { label: `All of ${org.name}'s websites`, icon: <ArrowLeft />, onClick: () => navigate(`/o/${org.slug}`) },
+                        ]}
+                    />
                 </div>
             </header>
 
@@ -360,7 +395,6 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onRetryWorkspace={() => void openWorkspace()}
                 />
                 <Preview
-                    slug={project.slug}
                     url={previewUrl}
                     reloadKey={reloadKey}
                     device={device}
@@ -389,7 +423,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     [
                         ["chat", "Chat", MessageSquare],
                         ["preview", "Preview", Eye],
-                        ["side", "History", History],
+                        ["side", "Versions", History],
                     ] as const
                 ).map(([id, label, Icon]) => (
                     <button key={id} type="button" className={pane === id ? "on" : ""} onClick={() => setPane(id)}>
@@ -398,6 +432,23 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     </button>
                 ))}
             </nav>
+
+            {addressOpen && (
+                <Address
+                    project={project}
+                    api={a}
+                    mayManage={mayManage}
+                    canPublish={canPublish}
+                    startUnpublish={addressUnpublish}
+                    onUnpublished={() => {
+                        setAddressOpen(false);
+                        void refresh();
+                    }}
+                    onClose={() => setAddressOpen(false)}
+                />
+            )}
+
+            {published && <Published project={project} published={published} onClose={() => setPublished(null)} />}
 
             {settingsOpen && (
                 <ProjectSettings
@@ -416,25 +467,26 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 <Dialog onClose={() => setConfirmPublish(false)}>
                     <p className="eyebrow">Release {(releases[0]?.number ?? 0) + 1}</p>
                     <h2>Publish this version?</h2>
-                    <p>This makes your current design and content the live website. You can roll back at any time.</p>
+                    <p>
+                        What you see in the preview becomes your public website. You can put an earlier version back at any time, or take
+                        the website offline.
+                    </p>
                     <ul className="manifest">
                         <li>
-                            <span>Design</span>
-                            <span className="mono">
-                                {overview?.head ? overview.head.slice(0, 7) : "none yet"}
-                                {overview?.codeChanged ? " · changed" : ""}
+                            <span>Pages and design</span>
+                            <span>{!overview?.head ? "Nothing built yet" : overview.codeChanged ? "Changed" : "No changes"}</span>
+                        </li>
+                        <li>
+                            <span>Wording</span>
+                            <span>
+                                {overview?.changedDocuments
+                                    ? `${overview.changedDocuments} ${overview.changedDocuments === 1 ? "change" : "changes"}`
+                                    : "No changes"}
                             </span>
                         </li>
                         <li>
-                            <span>Content</span>
-                            <span className="mono">
-                                {overview?.documents ?? 0} {overview?.documents === 1 ? "document" : "documents"}
-                                {overview?.changedDocuments ? ` · ${overview.changedDocuments} changed` : ""}
-                            </span>
-                        </li>
-                        <li>
-                            <span>Replaces</span>
-                            <span className="mono">{live ? `release ${live.number}` : "nothing (first release)"}</span>
+                            <span>Public right now</span>
+                            <span>{live ? `Release ${live.number}` : "Nothing yet"}</span>
                         </li>
                     </ul>
                     <div className="dialog-actions">
@@ -453,19 +505,143 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     <p className="eyebrow">One more step</p>
                     <h2>Confirm it's you.</h2>
                     <p>
-                        {pendingIntent.action === "publish" ? "Publishing changes" : "Rolling back changes"} what the world sees, so we ask
-                        you to confirm your sign-in first. You'll come straight back here and we'll finish{" "}
-                        {pendingIntent.action === "publish" ? "publishing" : "the rollback"} for you.
+                        {pendingIntent.action === "publish" ? "Publishing changes" : "Putting an earlier release back changes"} what the
+                        world sees, so we ask you to confirm your sign-in first. You'll come straight back here and we'll finish{" "}
+                        {pendingIntent.action === "publish" ? "publishing" : "that"} for you.
                     </p>
                     <div className="dialog-actions">
                         <button type="button" className="btn" onClick={() => setPendingIntent(null)}>
                             Cancel
                         </button>
                         <button type="button" className="btn btn-seal" onClick={confirmIdentity}>
-                            Confirm and {pendingIntent.action === "publish" ? "publish" : "roll back"}
+                            Confirm and {pendingIntent.action === "publish" ? "publish" : "put it back"}
                         </button>
                     </div>
                 </Dialog>
+            )}
+        </div>
+    );
+}
+
+// Shown once a publish has gone through: where the website now lives.
+function Published({ project, published, onClose }: { project: Project; published: { number: number; url: string }; onClose: () => void }) {
+    const [copied, setCopied] = useState(false);
+    const host = new URL(published.url).host;
+    return (
+        <Dialog onClose={onClose} wide>
+            <p className="eyebrow">Release {published.number}</p>
+            <h2>
+                {project.name} is <em className="live-word">live.</em>
+            </h2>
+            <p>Anyone with this address can see it now. A brand-new address can take a minute to start answering.</p>
+            <div className="address-line">
+                <a href={published.url} target="_blank" rel="noreferrer" className="mono">
+                    {host} <ArrowUpRight />
+                </a>
+                <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                        void navigator.clipboard.writeText(published.url).then(() => {
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 1600);
+                        })
+                    }
+                >
+                    {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy link"}
+                </button>
+            </div>
+            <div className="dialog-actions">
+                <button type="button" className="btn" onClick={onClose}>
+                    Done
+                </button>
+                <a className="btn btn-seal" href={published.url} target="_blank" rel="noreferrer" onClick={onClose}>
+                    Open website <ArrowUpRight />
+                </a>
+            </div>
+        </Dialog>
+    );
+}
+
+// The website's published state, and what can be done about it: said in words,
+// next to the thing it describes.
+function LiveMenu({
+    number,
+    hasChanges,
+    url,
+    canPublish,
+    onAddress,
+    onUnpublish,
+}: {
+    number: number;
+    hasChanges: boolean;
+    url: string | null;
+    canPublish: boolean;
+    onAddress: () => void;
+    onUnpublish: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const ref = useClickOutside(useCallback(() => setOpen(false), []));
+    const run = (action: () => void) => () => {
+        setOpen(false);
+        action();
+    };
+    return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: Escape closes the menu from anywhere inside it
+        <div
+            className="menu-wrap live-menu"
+            ref={ref}
+            onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+            }}
+        >
+            <button
+                type="button"
+                className={`chip chip-button ${hasChanges ? "chip-draft" : "chip-live"}`}
+                onClick={() => setOpen((o) => !o)}
+                aria-haspopup="menu"
+                aria-expanded={open}
+            >
+                {hasChanges ? `Live · unpublished changes` : `Live · release ${number}`} <ChevronDown />
+            </button>
+            {open && (
+                <div className="menu menu-left" role="menu">
+                    <div className="menu-head">
+                        <strong>Release {number} is live</strong>
+                        <span className="mono muted">{url ? new URL(url).host : "Not served anywhere: hosting is not set up"}</span>
+                    </div>
+                    {url && (
+                        <>
+                            <a role="menuitem" href={url} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
+                                <ArrowUpRight /> Open the live website
+                            </a>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() =>
+                                    void navigator.clipboard.writeText(url).then(() => {
+                                        setCopied(true);
+                                        setTimeout(() => setCopied(false), 1600);
+                                    })
+                                }
+                            >
+                                {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy its address"}
+                            </button>
+                            <button type="button" role="menuitem" onClick={run(onAddress)}>
+                                <Globe /> Address and domains
+                            </button>
+                        </>
+                    )}
+                    {canPublish && url && (
+                        <>
+                            <div className="menu-rule" />
+                            <button type="button" role="menuitem" className="menu-danger" onClick={run(onUnpublish)}>
+                                <CloudOff /> Unpublish…
+                            </button>
+                        </>
+                    )}
+                </div>
             )}
         </div>
     );

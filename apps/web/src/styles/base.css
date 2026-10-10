@@ -476,7 +476,8 @@ textarea {
     font-weight: 500;
 }
 
-.menu button {
+.menu button,
+.menu a[role="menuitem"] {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -490,10 +491,17 @@ textarea {
     cursor: pointer;
 }
 
+.menu a[role="menuitem"] {
+    color: inherit;
+    text-decoration: none;
+}
+
+.menu a[role="menuitem"]:hover,
 .menu button:hover {
     background: var(--line);
 }
 
+.menu a[role="menuitem"] svg,
 .menu button svg {
     width: 16px;
     height: 16px;
@@ -1165,4 +1173,22 @@ textarea {
 .key-form input:focus {
     border-color: var(--ink);
     box-shadow: 0 0 0 3px var(--line);
+}
+
+/* A status that is also a button: it opens what can be done about that status. */
+.chip-button {
+    border: 0;
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+}
+
+.chip-button:hover,
+.chip-button[aria-expanded="true"] {
+    box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.chip-button svg {
+    width: 12px;
+    height: 12px;
+    margin-right: -3px;
 }

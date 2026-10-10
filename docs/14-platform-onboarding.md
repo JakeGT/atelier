@@ -131,8 +131,12 @@ reachable only on the private `atelier-runtime` network.
 | `atelier_secrets_key` | server | Signs agent/preview tokens; derives per-project runtime secrets; encrypts stored secrets. Keep a password-manager copy |
 | `atelier_oidc_client_secret` | server | Must match the Authentik provider's |
 | `atelier_provisioner_secret` | server + provisioner | The server's credential for the provisioner |
-| `atelier_worker_secret` | (P3) | Server ↔ deploy worker |
-| `atelier_cloudflare_api_token` | (P3, upload worker only) | Cloudflare Pages: Edit |
+| `atelier_deployer_secret` | server + deployer | The server's credential for the deployer (P3) |
+| `atelier_cloudflare_account_id` | deployer only | The Cloudflare account that holds the websites' Pages projects |
+| `atelier_cloudflare_api_token` | deployer only | An account API token (Manage account → Account API tokens) with the single permission **Pages Write** on the entire account. Older screens call it *Cloudflare Pages: Edit* |
+
+The deployer only touches Pages projects named `atl-…` (`PAGES_PROJECT_PREFIX`),
+so the account's other Pages projects are out of its reach.
 
 Workspace containers receive no secret files. Their only secret is their own
 project's `RUNTIME_SECRET`, derived from `atelier_secrets_key` and passed by
@@ -142,7 +146,7 @@ the provisioner.
 
 ```sh
 cd ~/Projects/atelier && git checkout <tag-or-commit>
-for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:<tag> .; done
+for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:<tag> .; done
 cd ~/Projects/jaketalling-com/jaketalling-platform-infrastructure
 scripts/backup.sh                                                  # before any upgrade with migrations
 cd apps/atelier
