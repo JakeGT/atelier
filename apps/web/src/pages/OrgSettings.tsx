@@ -1,13 +1,14 @@
-import { LogOut, Mail, Trash2, X } from "lucide-react";
+import { ExternalLink, LogOut, Mail, Trash2, X } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AuditEntry, Invitation, Member, Org, Project, Role, Session, Usage } from "../lib/api";
+import type { AuditEntry, Invitation, Member, Org, Project, ProviderInfo, Role, Session, Usage } from "../lib/api";
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo } from "../lib/hooks";
-import { Dots, useToast } from "../ui/kit";
+import { Dialog, Dots, useToast } from "../ui/kit";
+import { ModelPicker } from "../ui/ModelPicker";
 import { StudioNav } from "../ui/StudioNav";
 
-export type SettingsTab = "general" | "members" | "usage" | "activity";
+export type SettingsTab = "general" | "models" | "members" | "usage" | "activity";
 
 interface Props {
     session: Session;
@@ -19,12 +20,18 @@ interface Props {
     onToggleTheme: () => void;
 }
 
-const TAB_LABEL: Record<SettingsTab, string> = { general: "General", members: "Members", usage: "Usage", activity: "Activity" };
+const TAB_LABEL: Record<SettingsTab, string> = {
+    general: "General",
+    models: "Models",
+    members: "Members",
+    usage: "Usage",
+    activity: "Activity",
+};
 
 export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onToggleTheme }: Props) {
     const mayManage = can.manage(org.role);
-    // General and Activity are for owners and admins; everyone sees Members and Usage.
-    const tabs: SettingsTab[] = mayManage ? ["general", "members", "usage", "activity"] : ["members", "usage"];
+    // General, Models and Activity are for owners and admins; everyone sees Members and Usage.
+    const tabs: SettingsTab[] = mayManage ? ["general", "models", "members", "usage", "activity"] : ["members", "usage"];
     const current = tabs.includes(tab) ? tab : "members";
 
     return (
@@ -58,6 +65,7 @@ export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onT
                     ))}
                 </div>
                 {current === "general" && <General org={org} onOrgsChanged={onOrgsChanged} />}
+                {current === "models" && <Models org={org} onOrgsChanged={onOrgsChanged} />}
                 {current === "members" && <Members org={org} session={session} onOrgsChanged={onOrgsChanged} />}
                 {current === "usage" && <UsagePanel org={org} />}
                 {current === "activity" && <Activity org={org} />}
@@ -86,15 +94,14 @@ function General({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promis
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [name, setName] = useState(org.name);
-    const [model, setModel] = useState(org.defaultModel ?? "");
     const [saving, setSaving] = useState(false);
-    const dirty = name.trim() !== org.name || model.trim() !== (org.defaultModel ?? "");
+    const dirty = name.trim() !== org.name;
 
     async function save(e: FormEvent) {
         e.preventDefault();
         setSaving(true);
         try {
-            await a.update({ name: name.trim(), defaultModel: model.trim() || null });
+            await a.update({ name: name.trim() });
             await onOrgsChanged();
             toast("Saved.");
         } catch (err) {
@@ -115,19 +122,205 @@ function General({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promis
                 <p className="mono field-static">/o/{org.slug}</p>
                 <p className="field-help">The address stays the same when you rename the studio, so links keep working.</p>
             </div>
-            <label className="field-line">
-                <span className="eyebrow">Assistant model</span>
-                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Automatic" maxLength={120} className="mono" />
-                <span className="field-help">
-                    Leave empty to use the assistant's default. A website can choose its own in its settings. Written as provider/model.
-                </span>
-            </label>
             <div className="panel-foot">
                 <button type="submit" className="btn btn-primary" disabled={!dirty || saving || !name.trim()}>
                     {saving ? <Dots /> : "Save changes"}
                 </button>
             </div>
         </form>
+    );
+}
+
+// ---- models --------------------------------------------------------------------------
+
+// Bring your own key: connect the providers you have accounts with, then choose
+// the model your assistant uses.
+function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise<Org[]> }) {
+    const toast = useToast();
+    const fail = useReauth();
+    const a = useMemo(() => orgApi(org.slug), [org.slug]);
+    const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
+    const [connecting, setConnecting] = useState<ProviderInfo | null>(null);
+    const [changes, setChanges] = useState(0);
+
+    const load = useCallback(async () => {
+        try {
+            setProviders(await a.providers());
+            setChanges((n) => n + 1);
+        } catch (err) {
+            setProviders([]);
+            toast((err as Error).message, "error");
+        }
+    }, [a, toast]);
+    useEffect(() => {
+        void load();
+    }, [load]);
+
+    async function setDefault(model: string | null) {
+        try {
+            await a.update({ defaultModel: model });
+            await onOrgsChanged();
+            toast(model ? "Your assistant will use that model." : "Back to the assistant's own default.");
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    }
+
+    async function disconnect(p: ProviderInfo) {
+        try {
+            await a.disconnectProvider(p.id);
+            toast(`${p.name} is disconnected. Its key has been deleted.`);
+            await load();
+        } catch (err) {
+            fail(err);
+        }
+    }
+
+    const usesDisconnected =
+        org.defaultModel !== null && providers?.find((p) => org.defaultModel?.startsWith(`${p.id}/`))?.connected === false;
+
+    return (
+        <div className="panel">
+            <div className="field-line">
+                <span className="eyebrow">Assistant model</span>
+                <ModelPicker
+                    api={a}
+                    orgSlug={org.slug}
+                    value={org.defaultModel}
+                    onChange={(m) => void setDefault(m)}
+                    automatic="Automatic"
+                    automaticHint="The assistant's built-in model. No key needed."
+                    mayManage
+                    refresh={changes}
+                />
+                <span className="field-help">
+                    {usesDisconnected
+                        ? "This model's provider isn't connected, so your assistant can't run. Connect it below or choose another model."
+                        : "What your assistant uses to build, for every website in this studio. A website can choose its own in its settings."}
+                </span>
+            </div>
+
+            <h2 className="panel-title">Providers</h2>
+            <p className="field-help panel-lede">
+                Atelier runs on your own accounts with the model providers: you pay them directly, at their prices. A key is stored
+                encrypted, is never shown again, and never reaches the assistant's workspace.
+            </p>
+            {providers === null ? (
+                <div className="panel-loading">
+                    <Dots />
+                </div>
+            ) : (
+                <ul className="rows">
+                    {providers.map((p) => (
+                        <li key={p.id}>
+                            <span className={`provider-mark ${p.connected ? "on" : ""}`} aria-hidden="true">
+                                {p.name.charAt(0)}
+                            </span>
+                            <span className="row-main">
+                                <strong>{p.name}</strong>
+                                <span className="mono muted">
+                                    {p.connected
+                                        ? `Key ending ${p.hint}${p.updatedAt ? ` · added ${timeAgo(p.updatedAt)}` : ""}`
+                                        : "Not connected"}
+                                </span>
+                            </span>
+                            <span className="row-actions">
+                                {p.connected && <span className="chip chip-live">Connected</span>}
+                                <button type="button" className="btn btn-sm" onClick={() => setConnecting(p)}>
+                                    {p.connected ? "Replace key" : "Connect"}
+                                </button>
+                                {p.connected && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-sm btn-ghost btn-icon"
+                                        title={`Disconnect ${p.name} and delete its key`}
+                                        aria-label={`Disconnect ${p.name}`}
+                                        onClick={() => void disconnect(p)}
+                                    >
+                                        <Trash2 />
+                                    </button>
+                                )}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {connecting && (
+                <ConnectProvider
+                    provider={connecting}
+                    onClose={() => setConnecting(null)}
+                    onConnect={async (key) => {
+                        try {
+                            const { verified } = await a.connectProvider(connecting.id, key);
+                            toast(
+                                verified
+                                    ? `${connecting.name} is connected.`
+                                    : `Saved. ${connecting.name} couldn't be reached to check the key, so it will be tried on the next request.`,
+                            );
+                            setConnecting(null);
+                            await load();
+                        } catch (err) {
+                            if (err instanceof ReauthRequired) setConnecting(null);
+                            fail(err);
+                        }
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+function ConnectProvider({
+    provider,
+    onClose,
+    onConnect,
+}: {
+    provider: ProviderInfo;
+    onClose: () => void;
+    onConnect: (key: string) => Promise<void>;
+}) {
+    const [key, setKey] = useState("");
+    const [busy, setBusy] = useState(false);
+    async function submit(e: FormEvent) {
+        e.preventDefault();
+        if (!key.trim() || busy) return;
+        setBusy(true);
+        await onConnect(key.trim());
+        setBusy(false);
+    }
+    return (
+        <Dialog onClose={onClose} wide>
+            <form onSubmit={submit}>
+                <p className="eyebrow">{provider.connected ? "Replace key" : "Connect a provider"}</p>
+                <h2>{provider.name}</h2>
+                <p>
+                    Paste an API key from your {provider.name} account. Atelier checks it works, then stores it encrypted.{" "}
+                    <a href={provider.keysUrl} target="_blank" rel="noreferrer" className="link">
+                        Get a key <ExternalLink size={12} />
+                    </a>
+                </p>
+                <div className="key-form">
+                    <input
+                        autoFocus
+                        type="password"
+                        value={key}
+                        onChange={(e) => setKey(e.target.value)}
+                        placeholder={provider.keyHint || "API key"}
+                        aria-label={`${provider.name} API key`}
+                        autoComplete="off"
+                        spellCheck={false}
+                    />
+                </div>
+                <div className="dialog-actions">
+                    <button type="button" className="btn" onClick={onClose}>
+                        Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={!key.trim() || busy}>
+                        {busy ? <Dots /> : provider.connected ? "Replace key" : "Connect"}
+                    </button>
+                </div>
+            </form>
+        </Dialog>
     );
 }
 
@@ -365,20 +558,124 @@ function Meter({ label, used, limit, unit }: { label: string; used: number; limi
     );
 }
 
+// A plain figure, for usage that is measured but not capped.
+function Figure({ label, value, unit }: { label: string; value: number; unit: string }) {
+    return (
+        <div className="meter">
+            <div className="meter-head">
+                <span className="eyebrow">{label}</span>
+                <span className="mono">
+                    {compact.format(value)} <span className="muted">{unit}</span>
+                </span>
+            </div>
+        </div>
+    );
+}
+
+// The studio's own daily limit on assistant tokens: off unless an owner or admin sets one.
+function DailyLimit({ limit, onSave }: { limit: number | null; onSave: (limit: number | null) => Promise<void> }) {
+    const [editing, setEditing] = useState(false);
+    const [millions, setMillions] = useState("");
+    const [busy, setBusy] = useState(false);
+    const tokens = Math.round(Number(millions) * 1_000_000);
+    const valid = millions.trim() !== "" && Number.isFinite(tokens) && tokens >= 1000;
+
+    async function save(next: number | null) {
+        setBusy(true);
+        await onSave(next);
+        setBusy(false);
+        setEditing(false);
+    }
+
+    if (!editing) {
+        return (
+            <p className="field-help limit-line">
+                {limit === null
+                    ? "No daily limit. Your assistant runs on your own provider keys, so usage is measured here but not capped."
+                    : "When the daily limit is reached, the assistant pauses until midnight UTC."}{" "}
+                <button
+                    type="button"
+                    className="link"
+                    onClick={() => {
+                        setMillions(limit === null ? "" : String(limit / 1_000_000));
+                        setEditing(true);
+                    }}
+                >
+                    {limit === null ? "Set a daily limit" : "Change"}
+                </button>
+                {limit !== null && (
+                    <>
+                        {" · "}
+                        <button type="button" className="link" disabled={busy} onClick={() => void save(null)}>
+                            Remove the limit
+                        </button>
+                    </>
+                )}
+            </p>
+        );
+    }
+    return (
+        <form
+            className="limit-form"
+            onSubmit={(e) => {
+                e.preventDefault();
+                if (valid && !busy) void save(tokens);
+            }}
+        >
+            <label>
+                <span className="eyebrow">Daily limit</span>
+                <span className="limit-input">
+                    <input
+                        // biome-ignore lint/a11y/noAutofocus: shown only after asking to set the limit
+                        autoFocus
+                        inputMode="decimal"
+                        value={millions}
+                        onChange={(e) => setMillions(e.target.value.replace(/[^0-9.]/g, ""))}
+                        placeholder="5"
+                        aria-label="Daily limit, in millions of tokens"
+                    />
+                    <span className="muted">million tokens a day</span>
+                </span>
+            </label>
+            <button type="button" className="btn btn-sm" onClick={() => setEditing(false)}>
+                Cancel
+            </button>
+            <button type="submit" className="btn btn-sm btn-primary" disabled={!valid || busy}>
+                {busy ? <Dots /> : "Save limit"}
+            </button>
+        </form>
+    );
+}
+
 function UsagePanel({ org }: { org: Org }) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [usage, setUsage] = useState<Usage | null>(null);
     const [projects, setProjects] = useState<Project[]>([]);
 
+    const load = useCallback(
+        () =>
+            Promise.all([a.usage(), a.listProjects(), a.listProjects(true)])
+                .then(([u, live, archived]) => {
+                    setUsage(u);
+                    setProjects([...live, ...archived]);
+                })
+                .catch((err: Error) => toast(err.message, "error")),
+        [a, toast],
+    );
     useEffect(() => {
-        Promise.all([a.usage(), a.listProjects(), a.listProjects(true)])
-            .then(([u, live, archived]) => {
-                setUsage(u);
-                setProjects([...live, ...archived]);
-            })
-            .catch((err: Error) => toast(err.message, "error"));
-    }, [a, toast]);
+        void load();
+    }, [load]);
+
+    async function setLimit(limit: number | null) {
+        try {
+            await a.update({ dailyTokenLimit: limit });
+            await load();
+            toast(limit === null ? "The daily limit is removed." : "Daily limit saved.");
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    }
 
     if (!usage) {
         return (
@@ -402,12 +699,19 @@ function UsagePanel({ org }: { org: Org }) {
 
     return (
         <div className="panel">
-            <Meter label="Assistant today" used={usage.today.tokens} limit={usage.limits.dailyTokenLimit} unit="tokens" />
+            {usage.limits.dailyTokenLimit === null ? (
+                <Figure label="Assistant today" value={usage.today.tokens} unit="tokens" />
+            ) : (
+                <Meter label="Assistant today" used={usage.today.tokens} limit={usage.limits.dailyTokenLimit} unit="tokens" />
+            )}
+            {can.manage(org.role) ? (
+                <DailyLimit limit={usage.limits.dailyTokenLimit} onSave={setLimit} />
+            ) : (
+                usage.limits.dailyTokenLimit !== null && (
+                    <p className="field-help limit-line">When the daily limit is reached, the assistant pauses until midnight UTC.</p>
+                )
+            )}
             <Meter label="Websites" used={usage.projects} limit={usage.limits.maxProjects} unit="" />
-            <p className="field-help">
-                These are safety ceilings, not charges. The daily one resets at midnight UTC; when it is reached, the assistant pauses until
-                then.
-            </p>
 
             <h2 className="panel-title">Last 30 days</h2>
             {table.length === 0 ? (

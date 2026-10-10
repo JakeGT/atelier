@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { agentInstructions } from "../services/instructions.ts";
+import { findProvider, parseModel, validModelRef } from "../services/providers.ts";
 import type { RunState } from "../services/runtime.ts";
 import { SHA_RE } from "../services/workspace.ts";
 import { type Api, type Ctx, PROJECT, param, startOfUtcDay } from "./kit.ts";
@@ -64,8 +65,23 @@ export function workspaceRoutes(api: Api): void {
         // own key: refuse clearly rather than overrun quietly (docs/12 §3).
         const { dailyTokenLimit } = limits(org);
         const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
-        if (used >= dailyTokenLimit) {
-            return c.json({ error: "this organisation has reached today's usage limit for the assistant; it resets at midnight UTC" }, 429);
+        if (dailyTokenLimit !== null && used >= dailyTokenLimit) {
+            return c.json({ error: "this studio has reached today's usage limit for the assistant; it resets at midnight UTC" }, 429);
+        }
+
+        // With a model chosen, its provider's key must be connected (BYOK). With none
+        // chosen the assistant runs on its built-in default model.
+        const model = project.agentModel ?? org.defaultModel;
+        if (model) {
+            const provider = validModelRef(model) ? findProvider(parseModel(model)?.provider ?? "") : undefined;
+            if (!provider)
+                return c.json({ error: "the model chosen for this website is no longer available; choose another in settings" }, 409);
+            if (!(await store.providerKeys.getSealed(org.id, provider.id))) {
+                return c.json(
+                    { error: `${provider.name} isn't connected: add an API key under Settings → Models, or choose another model` },
+                    409,
+                );
+            }
         }
 
         // A fresh, short-lived token per run, scoped to this tenant + project + session.
@@ -77,7 +93,7 @@ export function workspaceRoutes(api: Api): void {
             const run = await runtime.startRun(project.id, {
                 prompt,
                 // The project's own model, else the organisation's, else the runtime's default.
-                model: project.agentModel ?? org.defaultModel,
+                model,
                 instructions: agentInstructions(project),
                 apiUrl,
                 agentToken,

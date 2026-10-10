@@ -1,6 +1,6 @@
 # ADR-0011 — BYOK keys reach the model through a control-plane proxy
 
-- **Status:** Accepted (design; implemented in P4)
+- **Status:** Accepted; built on branch `p4-byok` (2026-10-10). See "As built" below.
 - **Date:** 2026-10-09
 
 ## Context
@@ -34,3 +34,48 @@ agent, which is untrusted.
   OpenAI-compatible and Anthropic APIs.
 - Until P4, workspaces use OpenCode's built-in free models with no key, which is
   the current behaviour.
+
+## As built (branch `p4-byok`, 2026-10-10)
+
+- **Keys belong to a studio (organisation), one per provider.** Table
+  `provider_keys`, row-level security by tenant. Sealed with AES-256-GCM under a
+  key derived from `ATELIER_SECRETS_KEY`; the additional data is
+  `tenant:<id>:provider-key:<provider>`, so a sealed value moved to another
+  studio or provider does not open. Per-project keys are not built.
+- **Managing keys** needs `secrets.manage` (owners and admins) and a recent
+  sign-in. A new key is tried against the provider first: a clear refusal
+  rejects it; an unreachable provider does not. The API returns only the last
+  four characters. The audit log records that a key was set, never the key.
+- **Providers** (`services/providers.ts`): Anthropic, OpenAI, Google Gemini, xAI,
+  Mistral, DeepSeek, Moonshot AI, OpenRouter, Groq, Together AI, Fireworks AI,
+  Cerebras. Each takes one secret in one header, which is what lets the proxy
+  swap it. Azure OpenAI, Amazon Bedrock and Google Vertex need several
+  credentials or request signing and are not supported yet.
+  `PROVIDER_UPSTREAMS` points a provider at an operator's own gateway.
+- **The proxy** (`/internal/model/<provider>/*`, `routes/models.ts`) is a
+  pass-through, not a per-provider translator: it checks the run's token and
+  that the website is not archived, enforces the studio's daily limit if it has set one, swaps
+  the credential header, and streams the request and response untouched. It
+  never follows a redirect and only ever calls the provider's own base address.
+  OpenCode is given a `provider.<id>.options.baseURL` + `apiKey` (the token) for
+  the chosen model's provider only.
+- **A chosen model needs its provider connected** (409 otherwise). With no model
+  chosen, the assistant still runs on OpenCode's built-in model with no key.
+- **The model catalog** (`services/catalog.ts`) comes from models.dev, cached for
+  six hours, filtered to text models that support tool calls. "Recommended" is
+  computed: for each first-party lab, the newest priced model of each of its
+  own model lines released in the last 400 days, at most four; the dearest is
+  marked most capable and the cheapest fast.
+
+- **No token ceiling by default.** A studio pays its providers directly, so
+  usage is measured but not capped. Owners and admins may set a daily limit for
+  their own studio (Settings → Usage); an operator may impose a default with
+  `DEFAULT_DAILY_TOKEN_LIMIT`.
+
+**Not yet built from the decision above:**
+
+- **Metering from the provider's response.** Usage still comes from the
+  assistant's own report (as in P2). The ceiling is enforced at the proxy, but
+  against those numbers.
+- **Dropping the egress allow-list to registry-only.** `opencode.ai` and
+  `models.dev` are still needed by OpenCode itself.

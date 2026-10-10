@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parseModel } from "./providers.ts";
 
 export interface AgentToolEvent {
     name: string;
@@ -64,6 +65,7 @@ export class OpenCodeAgent implements AgentRuntime {
         await mkdir(stateDir, { recursive: true, mode: 0o700 });
         // Instructions live beside the config, outside the workspace: the agent
         // cannot rewrite its own rules, and they are never committed or previewed.
+        const byok = input.model ? (parseModel(input.model)?.provider ?? null) : null;
         const instructionsPath = join(stateDir, "ATELIER.md");
         await writeFile(instructionsPath, input.instructions, { mode: 0o600 });
         await writeFile(
@@ -71,6 +73,12 @@ export class OpenCodeAgent implements AgentRuntime {
             JSON.stringify({
                 $schema: "https://opencode.ai/config.json",
                 instructions: [instructionsPath],
+                // BYOK (ADR-0011): the chosen model's provider is reached through the
+                // control plane's model proxy, with this run's agent token standing in
+                // for the API key. The studio's real key never enters the workspace.
+                ...(byok
+                    ? { provider: { [byok]: { options: { baseURL: `${input.apiUrl}/internal/model/${byok}`, apiKey: input.agentToken } } } }
+                    : {}),
                 mcp: {
                     "atelier-content": {
                         type: "local",

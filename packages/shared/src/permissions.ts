@@ -9,6 +9,8 @@ export const PERMISSIONS = [
     "org.read",
     "org.manage",
     "org.members",
+    // the studio's own API keys for model providers (BYOK)
+    "secrets.manage",
     // projects
     "project.read",
     "project.create",
@@ -44,6 +46,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = {
         "org.read",
         "org.manage",
         "org.members",
+        "secrets.manage",
         "project.read",
         "project.create",
         "project.manage",
@@ -63,6 +66,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = {
         "org.read",
         "org.manage",
         "org.members",
+        "secrets.manage",
         "project.read",
         "project.create",
         "project.manage",

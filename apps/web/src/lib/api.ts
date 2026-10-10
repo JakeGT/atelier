@@ -34,7 +34,8 @@ export interface Invitation {
 }
 
 export interface Usage {
-    limits: { maxProjects: number; dailyTokenLimit: number };
+    // dailyTokenLimit is null unless the studio set its own.
+    limits: { maxProjects: number; dailyTokenLimit: number | null };
     today: { tokens: number };
     projects: number;
     last30Days: { projectId: string | null; kind: string; units: number }[];
@@ -63,6 +64,41 @@ export interface Project {
 
 // What each role may do, mirroring the server's permission table for the buttons
 // the interface shows. The server is the authority; this only avoids dead ends.
+// A model provider a studio can connect its own API key for.
+export interface ProviderInfo {
+    id: string;
+    name: string;
+    keysUrl: string;
+    keyHint: string;
+    connected: boolean;
+    // The last four characters of the connected key.
+    hint: string | null;
+    updatedAt: string | null;
+}
+
+export interface CatalogModel {
+    // "<provider>/<model>": the value a model setting holds.
+    ref: string;
+    provider: string;
+    id: string;
+    name: string;
+    releaseDate: string | null;
+    contextWindow: number | null;
+    // US dollars per million tokens.
+    costIn: number | null;
+    costOut: number | null;
+    reasoning: boolean;
+    vision: boolean;
+    recommended: boolean;
+    tier: "best" | "fast" | null;
+}
+
+export interface ModelList {
+    providers: { id: string; name: string; connected: boolean }[];
+    models: CatalogModel[];
+    unavailable: boolean;
+}
+
 export const can = {
     edit: (r: Role) => r !== "viewer",
     publish: (r: Role) => r === "owner" || r === "admin",
@@ -259,8 +295,13 @@ export function orgApi(org: string) {
     const o = `/api/v1/orgs/${org}`;
     const p = (projectId: string) => `${o}/projects/${projectId}`;
     return {
-        update: (changes: { name?: string; defaultModel?: string | null }) => patch<{ org: Org }>(o, changes).then((b) => b.org),
+        update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
+            patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
+        providers: () => get<{ providers: ProviderInfo[] }>(`${o}/providers`).then((b) => b.providers),
+        connectProvider: (id: string, apiKey: string) => put<{ ok: boolean; verified: boolean }>(`${o}/providers/${id}`, { apiKey }),
+        disconnectProvider: (id: string) => del<{ ok: boolean }>(`${o}/providers/${id}`),
+        models: () => get<ModelList>(`${o}/models`),
         audit: () => get<{ entries: AuditEntry[] }>(`${o}/audit`).then((b) => b.entries),
 
         listMembers: () => get<{ members: Member[] }>(`${o}/members`).then((b) => b.members),

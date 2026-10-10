@@ -11,7 +11,9 @@ import {
     requireRecentAuth,
     requireSession,
 } from "../middleware/auth.ts";
+import { ModelCatalog } from "../services/catalog.ts";
 import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
+import { SecretBox } from "../services/secrets.ts";
 import type { SessionStore } from "../services/sessions.ts";
 import type { Store } from "../store/types.ts";
 
@@ -32,6 +34,9 @@ export interface ApiDeps {
     runtime: WorkspaceRuntime;
     config: Config;
     secretsKey: string;
+    // The model catalog, and how the control plane reaches model providers. Tests replace both.
+    catalog?: ModelCatalog;
+    providerFetch?: typeof fetch;
 }
 
 // Everything under an organisation, and under one of its projects.
@@ -78,6 +83,9 @@ export function createApi(deps: ApiDeps) {
 
     return {
         ...deps,
+        catalog: deps.catalog ?? new ModelCatalog(),
+        providerFetch: deps.providerFetch ?? fetch,
+        box: new SecretBox(deps.secretsKey),
         app,
         declared,
         route,
@@ -89,7 +97,8 @@ export function createApi(deps: ApiDeps) {
             console.error(`workspace error: ${(err as Error).message}`);
             return c.json({ error: (err as Error).message }, 502);
         },
-        // An organisation's ceilings: its own, or the server defaults.
+        // An organisation's ceilings: its own, or the server defaults. The daily token
+        // ceiling is null (none) unless the studio or the operator set one.
         limits: (o: Organization) => ({
             maxProjects: o.maxProjects ?? config.defaultMaxProjects,
             dailyTokenLimit: o.dailyTokenLimit ?? config.defaultDailyTokenLimit,

@@ -36,7 +36,7 @@ export interface OrganizationStore {
     findById(id: string): Promise<Organization | null>;
     // With the caller's role in each, oldest membership first.
     listForUser(userId: string): Promise<(Organization & { role: OrgRole })[]>;
-    update(id: string, patch: { name?: string; defaultModel?: string | null }): Promise<Organization>;
+    update(id: string, patch: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }): Promise<Organization>;
 }
 
 export interface MembershipStore {
@@ -74,6 +74,20 @@ export interface ProjectStore {
     update(tenantId: string, id: string, patch: ProjectPatch): Promise<Project>;
     // Removes the project and everything that hangs off it (content, releases, conversation).
     delete(tenantId: string, id: string): Promise<void>;
+}
+
+export interface ProviderKeyInfo {
+    provider: string;
+    hint: string;
+    updatedAt: string;
+}
+
+// A studio's sealed provider keys. `sealed` is opaque here: only SecretBox opens it.
+export interface ProviderKeyStore {
+    list(tenantId: string): Promise<ProviderKeyInfo[]>;
+    getSealed(tenantId: string, provider: string): Promise<string | null>;
+    put(input: { tenantId: string; provider: string; sealed: string; hint: string; createdBy: string }): Promise<void>;
+    delete(tenantId: string, provider: string): Promise<void>;
 }
 
 export interface UsageTotals {
@@ -202,6 +216,7 @@ export interface Store {
     memberships: MembershipStore;
     invitations: InvitationStore;
     usage: UsageStore;
+    providerKeys: ProviderKeyStore;
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;

@@ -27,6 +27,7 @@ import type {
     MessageStore,
     OrganizationStore,
     ProjectStore,
+    ProviderKeyStore,
     ReleaseStore,
     Store,
     UsageStore,
@@ -324,6 +325,7 @@ export class PostgresStore implements Store {
     memberships: MembershipStore;
     invitations: InvitationStore;
     usage: UsageStore;
+    providerKeys: ProviderKeyStore;
     projects: ProjectStore;
     content: ContentStore;
     agentSessions: AgentSessionStore;
@@ -405,6 +407,7 @@ export class PostgresStore implements Store {
                         UPDATE organizations SET
                             name = COALESCE(${patch.name ?? null}, name),
                             default_model = CASE WHEN ${patch.defaultModel !== undefined} THEN ${patch.defaultModel ?? null} ELSE default_model END,
+                            daily_token_limit = CASE WHEN ${patch.dailyTokenLimit !== undefined} THEN ${patch.dailyTokenLimit ?? null}::bigint ELSE daily_token_limit END,
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(ORG_COLS)}`;
                     return rowToOrg(firstRow(rows));
@@ -496,6 +499,33 @@ export class PostgresStore implements Store {
                     }
                     return pending.map((i) => i.tenant_id);
                 }),
+        };
+
+        this.providerKeys = {
+            list: async (tenantId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ provider: string; hint: string; updated_at: Ts }[]>`
+                        SELECT provider, hint, updated_at FROM provider_keys ORDER BY provider`;
+                    return rows.map((r) => ({ provider: r.provider, hint: r.hint, updatedAt: isoNow(r.updated_at) }));
+                }),
+            getSealed: async (tenantId, provider) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ sealed: string }[]>`SELECT sealed FROM provider_keys WHERE provider = ${provider}`;
+                    return rows[0]?.sealed ?? null;
+                }),
+            put: async (input) => {
+                await this.withTenant(
+                    input.tenantId,
+                    (tx) => tx`
+                        INSERT INTO provider_keys (tenant_id, provider, sealed, hint, created_by)
+                        VALUES (${input.tenantId}, ${input.provider}, ${input.sealed}, ${input.hint}, ${input.createdBy})
+                        ON CONFLICT (tenant_id, provider) DO UPDATE SET
+                            sealed = EXCLUDED.sealed, hint = EXCLUDED.hint, created_by = EXCLUDED.created_by, updated_at = now()`,
+                );
+            },
+            delete: async (tenantId, provider) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM provider_keys WHERE provider = ${provider}`);
+            },
         };
 
         this.usage = {

@@ -14,7 +14,7 @@ import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
 //   /login                 sign in
 //   /studio                -> the organisation last used
 //   /o/:org                that organisation's websites
-//   /o/:org/settings/:tab  organisation settings (general, members, usage, activity)
+//   /o/:org/settings/:tab  organisation settings (general, models, members, usage, activity)
 //   /o/:org/p/:project     the editor
 type Route =
     | { name: "landing" | "login" | "studio" | "missing" }
@@ -24,7 +24,7 @@ type Route =
     | { name: "legacy-editor"; project: string };
 
 const SLUG = "([a-z0-9-]+)";
-const TABS: SettingsTab[] = ["general", "members", "usage", "activity"];
+const TABS: SettingsTab[] = ["general", "models", "members", "usage", "activity"];
 
 function match(path: string): Route {
     if (path === "/") return { name: "landing" };

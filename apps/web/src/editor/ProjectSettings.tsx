@@ -2,8 +2,10 @@ import { Archive, ArchiveRestore } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import type { Org, OrgApi, Project } from "../lib/api";
+import { can } from "../lib/api";
 import { navigate } from "../lib/hooks";
 import { Dialog, Dots, useToast } from "../ui/kit";
+import { ModelPicker } from "../ui/ModelPicker";
 
 interface Props {
     project: Project;
@@ -19,13 +21,10 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
     const toast = useToast();
     const [name, setName] = useState(project.name);
     const [instructions, setInstructions] = useState(project.agentInstructions ?? "");
-    const [model, setModel] = useState(project.agentModel ?? "");
+    const [model, setModel] = useState(project.agentModel);
     const [busy, setBusy] = useState(false);
     const archived = project.archivedAt !== null;
-    const dirty =
-        name.trim() !== project.name ||
-        instructions.trim() !== (project.agentInstructions ?? "") ||
-        model.trim() !== (project.agentModel ?? "");
+    const dirty = name.trim() !== project.name || instructions.trim() !== (project.agentInstructions ?? "") || model !== project.agentModel;
 
     async function save(e: FormEvent) {
         e.preventDefault();
@@ -35,7 +34,7 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
             const next = await api.updateProject(project.id, {
                 name: name.trim(),
                 agentInstructions: instructions.trim() || null,
-                agentModel: model.trim() || null,
+                agentModel: model,
             });
             toast("Saved.");
             onSaved(next);
@@ -92,17 +91,19 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
                     </span>
                 </label>
 
-                <label className="field-line">
+                <div className="field-line">
                     <span className="eyebrow">Assistant model</span>
-                    <input
+                    <ModelPicker
+                        api={api}
+                        orgSlug={org.slug}
                         value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                        placeholder={org.defaultModel ? `Studio default (${org.defaultModel})` : "Automatic"}
-                        maxLength={120}
-                        className="mono"
+                        onChange={setModel}
+                        automatic="Studio default"
+                        automaticHint="Whatever the studio is set to use"
+                        mayManage={can.manage(org.role)}
                         disabled={archived}
                     />
-                </label>
+                </div>
 
                 <div className="dialog-actions dialog-actions-split">
                     {archived ? (

@@ -63,10 +63,10 @@ test("organisation settings: admins can rename and set a default model, editors 
     const owner = await signIn(t);
     const editor = await signIn(t, { tenantId: owner.org.id, role: "editor" });
     assert.equal((await patch(t, editor, owner.api, { name: "Hacked" })).status, 404);
-    const res = await patch(t, owner, owner.api, { name: "  Okoro & Co  ", defaultModel: "provider/some-model" });
+    const res = await patch(t, owner, owner.api, { name: "  Okoro & Co  ", defaultModel: "anthropic/some-model" });
     const org = (await json<{ org: Organization }>(res)).org;
     assert.equal(org.name, "Okoro & Co");
-    assert.equal(org.defaultModel, "provider/some-model");
+    assert.equal(org.defaultModel, "anthropic/some-model");
     // The address (slug) never changes with the name.
     assert.equal(org.slug, owner.org.slug);
     assert.equal((await json<{ org: Organization }>(await patch(t, owner, owner.api, { defaultModel: "" }))).org.defaultModel, null);
@@ -222,12 +222,16 @@ test("the model: the project's own, else the organisation's, else the runtime's 
     const url = `${owner.api}/projects/${project.id}`;
     await runOnce(t, owner, project);
     assert.equal(t.agent.calls.at(-1)?.model, null);
-    await patch(t, owner, owner.api, { defaultModel: "org/model" });
+    // A chosen model runs on the studio's own key for that provider (see models.test.ts).
+    for (const provider of ["openai", "anthropic"]) {
+        await t.store.providerKeys.put({ tenantId: owner.org.id, provider, sealed: "sealed", hint: "0000", createdBy: owner.user.id });
+    }
+    await patch(t, owner, owner.api, { defaultModel: "openai/org-model" });
     await runOnce(t, owner, project);
-    assert.equal(t.agent.calls.at(-1)?.model, "org/model");
-    await patch(t, owner, url, { agentModel: "project/model" });
+    assert.equal(t.agent.calls.at(-1)?.model, "openai/org-model");
+    await patch(t, owner, url, { agentModel: "anthropic/project-model" });
     await runOnce(t, owner, project);
-    assert.equal(t.agent.calls.at(-1)?.model, "project/model");
+    assert.equal(t.agent.calls.at(-1)?.model, "anthropic/project-model");
 });
 
 test("archive hides and freezes a website; restore brings it back; delete is permanent and careful", async () => {
@@ -291,7 +295,7 @@ test("each run is metered once, however often it is polled", async () => {
 
     const usage = await json<{
         today: { tokens: number };
-        limits: { dailyTokenLimit: number };
+        limits: { dailyTokenLimit: number | null };
         last30Days: { kind: string; units: number }[];
     }>(await get(t, owner, `${owner.api}/usage`));
     assert.equal(usage.today.tokens, 1500);
@@ -299,17 +303,27 @@ test("each run is metered once, however often it is polled", async () => {
     assert.equal(by["agent.runs"], 1);
     assert.equal(by["agent.input_tokens"], 1200);
     assert.equal(by["agent.output_tokens"], 300);
-    assert.ok(usage.limits.dailyTokenLimit > 0);
+    // Usage is measured, but nothing is capped unless the studio sets its own limit.
+    assert.equal(usage.limits.dailyTokenLimit, null);
 
     // Usage is the organisation's own.
     const other = await signIn(t);
     assert.equal((await json<{ today: { tokens: number } }>(await get(t, other, `${other.api}/usage`))).today.tokens, 0);
 });
 
-test("the daily ceiling stops new runs with a clear message; the project limit stops new websites", async () => {
-    const t = await makeApp({ DEFAULT_DAILY_TOKEN_LIMIT: "1000", DEFAULT_MAX_PROJECTS: "2" });
+test("a studio's own daily limit stops new runs with a clear message; the project limit stops new websites", async () => {
+    const t = await makeApp({ DEFAULT_MAX_PROJECTS: "2" });
     const owner = await signIn(t);
+    const editor = await signIn(t, { tenantId: owner.org.id, role: "editor" });
     const project = await newProject(t, owner, "One");
+    // Owners and admins set the limit; it must be a sensible whole number; null removes it.
+    assert.equal((await patch(t, editor, owner.api, { dailyTokenLimit: 1000 })).status, 404);
+    for (const bad of [0, 999, 1.5, "1000", -5])
+        assert.equal((await patch(t, owner, owner.api, { dailyTokenLimit: bad })).status, 400, String(bad));
+    const set = await json<{ org: Organization }>(await patch(t, owner, owner.api, { dailyTokenLimit: 1000 }));
+    assert.equal(set.org.dailyTokenLimit, 1000);
+    // Changing something else leaves it alone.
+    assert.equal((await json<{ org: Organization }>(await patch(t, owner, owner.api, { name: "Renamed" }))).org.dailyTokenLimit, 1000);
     const real = t.agent.run;
     t.agent.run = async (input) => ({ ...(await real(input)), tokens: { input: 900, output: 200 } });
 
@@ -319,6 +333,12 @@ test("the daily ceiling stops new runs with a clear message; the project limit s
     assert.equal(refused.status, 429);
     assert.match((await json<{ error: string }>(refused)).error, /today's usage limit/);
     assert.equal(t.agent.calls.length, 1);
+    // Removing the limit lets the assistant run again.
+    assert.equal(
+        (await json<{ org: Organization }>(await patch(t, owner, owner.api, { dailyTokenLimit: null }))).org.dailyTokenLimit,
+        null,
+    );
+    assert.equal((await post(t, owner, `${owner.api}/projects/${project.id}/sessions/${s.id}/messages`, { prompt: "more" })).status, 202);
 
     await newProject(t, owner, "Two");
     const third = await post(t, owner, `${owner.api}/projects`, { name: "Three" });

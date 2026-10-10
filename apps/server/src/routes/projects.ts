@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { validInstructions } from "../services/instructions.ts";
+import { validModelRef } from "../services/providers.ts";
 import type { ProjectPatch } from "../store/types.ts";
 import { type Api, type Ctx, ORG, PROJECT, SLUG_RE, slugify } from "./kit.ts";
 
@@ -59,7 +60,7 @@ export function projectRoutes(api: Api): void {
         }
         if (body?.agentModel === null || typeof body?.agentModel === "string") {
             const model = (body.agentModel ?? "").trim();
-            if (model.length > 120) return c.json({ error: "that model name is too long" }, 400);
+            if (model && !validModelRef(model)) return c.json({ error: "choose a model from a supported provider" }, 400);
             patch.agentModel = model || null;
         }
         const project = await store.projects.update(c.get("org").id, c.get("project").id, patch);

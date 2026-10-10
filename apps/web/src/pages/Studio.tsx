@@ -1,9 +1,9 @@
-import { ArchiveRestore, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, Ellipsis, PencilLine, Plus, Trash2 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Org, Project, Session } from "../lib/api";
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
-import { navigate, type Theme, timeAgo } from "../lib/hooks";
+import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
 import { Cover } from "../ui/Cover";
 import { Dialog, Dots, useToast } from "../ui/kit";
 import { StudioNav } from "../ui/StudioNav";
@@ -99,15 +99,31 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
         }
     }
 
+    async function archive(p: Project) {
+        try {
+            await a.archiveProject(p.id);
+            toast(`${p.name} is archived. You can restore it from the list below.`);
+            await load();
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    }
+
     async function remove(p: Project) {
         try {
+            // A website is archived (stopped and frozen) before it can be deleted.
+            if (!p.archivedAt) {
+                await a.archiveProject(p.id);
+                setDeleting({ ...p, archivedAt: new Date().toISOString() });
+            }
             await a.deleteProject(p.id);
             setDeleting(null);
             toast(`${p.name} was deleted.`);
             await load();
         } catch (err) {
             if (err instanceof ReauthRequired) {
-                toast("Please confirm your sign-in, then delete again.", "error");
+                void load();
+                toast("Please confirm your sign-in, then delete again. The website is archived in the meantime.", "error");
                 setTimeout(reauthenticate, 1200);
             } else toast((err as Error).message, "error");
         }
@@ -214,24 +230,32 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                     ) : (
                         <div className="shelf-grid">
                             {projects.map((p, i) => (
-                                <a
-                                    key={p.id}
-                                    className="card"
-                                    href={`/o/${org.slug}/p/${p.slug}`}
-                                    style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        navigate(`/o/${org.slug}/p/${p.slug}`);
-                                    }}
-                                >
-                                    <Cover seed={p.id} label={p.name} />
-                                    <div className="card-meta">
-                                        <strong>{p.name}</strong>
-                                        <span className="mono muted">
-                                            {p.slug} · {timeAgo(p.createdAt)}
-                                        </span>
-                                    </div>
-                                </a>
+                                <div key={p.id} className="card" style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}>
+                                    <a
+                                        className="card-link"
+                                        href={`/o/${org.slug}/p/${p.slug}`}
+                                        onClick={(e) => {
+                                            if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+                                            e.preventDefault();
+                                            navigate(`/o/${org.slug}/p/${p.slug}`);
+                                        }}
+                                    >
+                                        <Cover seed={p.id} label={p.name} />
+                                        <div className="card-meta">
+                                            <strong>{p.name}</strong>
+                                            <span className="mono muted">
+                                                {p.slug} · {timeAgo(p.createdAt)}
+                                            </span>
+                                        </div>
+                                    </a>
+                                    <CardMenu
+                                        project={p}
+                                        href={`/o/${org.slug}/p/${p.slug}`}
+                                        mayManage={mayManage}
+                                        onArchive={() => void archive(p)}
+                                        onDelete={() => setDeleting(p)}
+                                    />
+                                </div>
                             ))}
                         </div>
                     )}
@@ -288,6 +312,75 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     );
 }
 
+// The three-dot menu on a website's card.
+function CardMenu({
+    project,
+    href,
+    mayManage,
+    onArchive,
+    onDelete,
+}: {
+    project: Project;
+    href: string;
+    mayManage: boolean;
+    onArchive: () => void;
+    onDelete: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    // Opens upward when there is no room below (the last row of the shelf).
+    const [up, setUp] = useState(false);
+    const ref = useClickOutside(useCallback(() => setOpen(false), []));
+    const run = (action: () => void) => () => {
+        setOpen(false);
+        action();
+    };
+    return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: Escape closes the menu from anywhere inside it
+        <div
+            className={`menu-wrap card-menu ${open ? "open" : ""}`}
+            ref={ref}
+            onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+            }}
+        >
+            <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={(e) => {
+                    setUp(window.innerHeight - e.currentTarget.getBoundingClientRect().bottom < 220);
+                    setOpen((o) => !o);
+                }}
+                aria-label={`More for ${project.name}`}
+                aria-haspopup="menu"
+                aria-expanded={open}
+            >
+                <Ellipsis />
+            </button>
+            {open && (
+                <div className={`menu ${up ? "menu-up" : ""}`} role="menu">
+                    <button type="button" role="menuitem" onClick={run(() => navigate(href))}>
+                        <PencilLine /> Open in the editor
+                    </button>
+                    <button type="button" role="menuitem" onClick={run(() => window.open(href, "_blank", "noopener"))}>
+                        <ArrowUpRight /> Open in a new tab
+                    </button>
+                    {mayManage && (
+                        <>
+                            <div className="menu-rule" />
+                            <button type="button" role="menuitem" onClick={run(onArchive)}>
+                                <Archive /> Archive
+                            </button>
+                            <button type="button" role="menuitem" className="menu-danger" onClick={run(onDelete)}>
+                                <Trash2 /> Delete…
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Deleting cannot be undone, so it asks for the website's name.
 function ConfirmDelete({ project, onCancel, onConfirm }: { project: Project; onCancel: () => void; onConfirm: () => void }) {
     const [typed, setTyped] = useState("");
@@ -298,7 +391,7 @@ function ConfirmDelete({ project, onCancel, onConfirm }: { project: Project; onC
             <h2>Delete {project.name}?</h2>
             <p>
                 Its pages, every saved version, its content, its releases and its conversation will be removed. This cannot be undone. If
-                you only want it out of the way, leave it archived.
+                you only want it out of the way, {project.archivedAt ? "leave it archived" : "archive it instead"}.
             </p>
             <label className="field-line">
                 <span className="eyebrow">Type the website's name to confirm</span>

@@ -233,6 +233,11 @@ give the operator control. (No billing.)
 - E4.4 Admin audit log view; per-tenant usage/cost dashboards (cost attributed
   to the user's own keys).
 
+**E4.1 was brought forward** (branch `p4-byok`, 2026-10-10, at the owner's
+request, ahead of P3): provider keys per studio, the key-holding model proxy
+and a searchable model picker with computed recommendations. Details in
+ADR-0011 "As built". The rest of P4 is unchanged.
+
 **Acceptance criteria**
 - A user configures their own provider key and the editor runs on it end-to-end.
 - A new project can start from a template; a pre-made skill applies during edit.

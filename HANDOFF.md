@@ -1,8 +1,8 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p2.0` deployed**: P0, P1 (+ hardening, interface redesign) and P2 (multi-tenant).
-> P1 work is merged to `main`. P2 is on branch `p2-multi-tenant`,
-> [PR #3](https://github.com/JakeGT/atelier/pull/3), **not yet merged**.
+> Last updated 2026-10-10. Status: **`p4.2` deployed**: P0, P1, P2 (multi-tenant) and BYOK (E4.1, brought forward).
+> P1 is merged to `main`. P2 is [PR #3](https://github.com/JakeGT/atelier/pull/3) (`p2-multi-tenant`).
+> BYOK is [PR #4](https://github.com/JakeGT/atelier/pull/4) (`p4-byok`, stacked on #3). **Neither is merged yet.**
 
 ## TL;DR
 
@@ -31,14 +31,14 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p2.0` (built locally from `p2-multi-tenant`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, all `:p4.2` (built locally from `p4-byok`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), plus `atelier-ws-<projectId>` per project, created on demand and stopped when idle |
-| Migrations | `0001`–`0007` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0008` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261009T233444Z` (before p2.0) |
+| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T005806Z` (before p4.0) |
 
 Verified after deploy:
 - `/healthz` returns 200;
@@ -102,6 +102,13 @@ docker logs atelier-server --tail 20 && curl -fsS https://atelier.jaketalling.co
 ```
 
 Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin off`).
+
+## BYOK and models (branch `p4-byok`)
+
+- A studio connects its own provider keys under **Settings → Models**. Twelve providers; the list is `apps/server/src/services/providers.ts`.
+- Keys are sealed in `provider_keys` and never reach a workspace. The assistant calls `/internal/model/<provider>/…` on the server with its run token; the server swaps in the real key (ADR-0011 "As built").
+- The model picker's list and its recommendations come from models.dev, computed in `services/catalog.ts`. Nothing is hard-coded per model.
+- To try it locally without real keys: `PROVIDER_UPSTREAMS` can point a provider at a stand-in server.
 
 ## Known gaps
 
