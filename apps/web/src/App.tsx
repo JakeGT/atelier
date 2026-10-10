@@ -5,6 +5,7 @@ import { navigate, usePath, useTheme } from "./lib/hooks";
 import { Editor } from "./pages/Editor";
 import { Landing } from "./pages/Landing";
 import { Login, safeNext } from "./pages/Login";
+import { Operator, type OperatorTab } from "./pages/Operator";
 import { OrgSettings, type SettingsTab } from "./pages/OrgSettings";
 import { Studio } from "./pages/Studio";
 import { Welcome } from "./pages/Welcome";
@@ -15,11 +16,13 @@ import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
 //   /login                 sign in
 //   /studio                -> the organisation last used
 //   /welcome               the introduction, shown once to someone new
+//   /admin                 the operator console (operators only)
 //   /o/:org                that organisation's websites
 //   /o/:org/settings/:tab  organisation settings (general, models, members, usage, activity)
 //   /o/:org/p/:project     the editor
 type Route =
     | { name: "landing" | "login" | "studio" | "welcome" | "missing" }
+    | { name: "operator"; tab: OperatorTab }
     | { name: "org"; org: string }
     | { name: "settings"; org: string; tab: SettingsTab }
     | { name: "editor"; org: string; project: string }
@@ -33,6 +36,8 @@ function match(path: string): Route {
     if (path === "/login") return { name: "login" };
     if (path === "/studio") return { name: "studio" };
     if (path === "/welcome") return { name: "welcome" };
+    if (path === "/admin" || path === "/admin/") return { name: "operator", tab: "studios" };
+    if (path === "/admin/activity") return { name: "operator", tab: "activity" };
     let m = path.match(new RegExp(`^/o/${SLUG}/?$`));
     if (m?.[1]) return { name: "org", org: m[1] };
     m = path.match(new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`));
@@ -107,7 +112,9 @@ export function App() {
         if (!session.onboarded) return;
         // The studio last used, else their own.
         const last = localStorage.getItem(LAST_ORG);
-        const org = orgs.find((o) => o.slug === last) ?? orgs.find((o) => o.personalOf === session.id) ?? orgs[0];
+        // (A suspended studio is not somewhere to land.)
+        const open = orgs.filter((o) => o.status !== "suspended");
+        const org = open.find((o) => o.slug === last) ?? open.find((o) => o.personalOf === session.id) ?? open[0] ?? orgs[0];
         if (!org) return;
         navigate(legacyProject ? `/o/${org.slug}/p/${legacyProject}` : `/o/${org.slug}`, { replace: true });
     }, [session, orgs, route.name, legacyProject]);
@@ -147,11 +154,26 @@ export function App() {
                 {...common}
             />
         );
+    } else if (route.name === "operator") {
+        // Not an operator: there is nothing here, the same as any address that does not exist.
+        page = session.admin ? (
+            <Operator session={session} tab={route.tab} {...common} />
+        ) : (
+            <Missing title="There's nothing" body="The link may be out of date." />
+        );
     } else if (route.name === "studio" || route.name === "legacy-editor") {
         page = boot;
     } else if (!org) {
         // Not a member, or no such organisation: the same answer either way.
         page = <Missing title="That studio isn't" body="It may have been removed, or you may not be a member." />;
+    } else if (org.status === "suspended") {
+        page = (
+            <Missing
+                whole
+                title={`${org.name} is suspended.`}
+                body="Whoever runs Atelier for you has paused this studio. Nothing in it can be changed until they restore it; published websites are still up. Get in touch with them to find out more."
+            />
+        );
     } else if (route.name === "org") {
         page = <Studio key={org.id} session={session} org={org} orgs={orgs} onOrgsChanged={reloadOrgs} {...common} />;
     } else if (route.name === "settings") {
@@ -195,15 +217,21 @@ function ProjectRoute(props: { slug: string; session: Session; org: Org; theme: 
     return <Editor key={project.id} project={project} onProjectChanged={setProject} {...props} />;
 }
 
-function Missing({ title, body }: { title: string; body: string }) {
+function Missing({ title, body, whole }: { title: string; body: string; whole?: boolean }) {
     return (
         <div className="boot">
             <div style={{ textAlign: "center" }}>
                 <Wordmark />
                 <h1 className="display" style={{ fontSize: 56, marginTop: 24 }}>
-                    {title} <em>here.</em>
+                    {title}
+                    {!whole && (
+                        <>
+                            {" "}
+                            <em>here.</em>
+                        </>
+                    )}
                 </h1>
-                <p className="muted" style={{ marginTop: 12 }}>
+                <p className="muted" style={{ marginTop: 12, maxWidth: 520, marginInline: "auto" }}>
                     {body}
                 </p>
                 <button type="button" className="btn btn-primary" style={{ marginTop: 28 }} onClick={() => navigate("/studio")}>

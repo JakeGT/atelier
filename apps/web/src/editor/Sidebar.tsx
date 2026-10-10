@@ -1,7 +1,8 @@
-import { ChevronRight, Undo2 } from "lucide-react";
+import { PencilLine, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Checkpoint, ContentDocument, Release } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
+import { Dialog } from "../ui/kit";
 
 export type Tab = "versions" | "releases" | "content";
 
@@ -250,9 +251,9 @@ function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boo
     }
 
     return (
-        <li className={open ? "open" : ""}>
-            <button type="button" className="doc-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-                <ChevronRight />
+        <li>
+            <button type="button" className="doc-head" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Open to edit">
+                <PencilLine />
                 <span className="doc-name">
                     <strong>{label(doc.slug)}</strong>
                     <span className="mono muted">
@@ -262,53 +263,65 @@ function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boo
                 <span className={`chip ${changed ? "chip-draft" : "chip-live"}`}>{changed ? "Not published yet" : "Published"}</span>
             </button>
             {open && (
-                <div className="doc-body">
-                    {fields.length === 0 && <p className="muted">This document is empty.</p>}
-                    {fields.map((f, i) => (
-                        <label key={f.key} className="field">
-                            <span className="eyebrow">
-                                {label(f.key)}
-                                {f.kind === "lines" && <span className="field-note"> · one per line</span>}
-                                {f.kind === "structured" && <span className="field-note"> · structured: easier to ask your assistant</span>}
-                            </span>
-                            <textarea
-                                className={f.kind === "structured" ? "mono" : ""}
-                                value={f.text}
-                                spellCheck={f.kind !== "structured"}
-                                readOnly={!canEdit}
-                                rows={Math.min(
-                                    f.kind === "structured" ? 12 : 8,
-                                    Math.max(1, Math.ceil(f.text.length / 34), f.text.split("\n").length),
-                                )}
-                                onChange={(e) => setFields((prev) => prev.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
-                            />
-                        </label>
-                    ))}
-                    {outdated && (
-                        <p className="doc-error">
-                            This was changed by someone else while you were editing. Your edits are still here but can't be saved over
-                            theirs.{" "}
-                            <button type="button" className="link" onClick={useTheirs}>
-                                Show their version instead
-                            </button>
-                        </p>
-                    )}
-                    {error && !outdated && <p className="doc-error">{error}</p>}
-                    <div className="doc-foot">
-                        <span className="mono muted">Last changed {timeAgo(doc.updatedAt)}</span>
-                        {canEdit && (
-                            <button
-                                type="button"
-                                className="btn btn-sm btn-primary"
-                                disabled={saving || !dirty || outdated}
-                                onClick={save}
-                                title="Saved changes show in the preview. They go public when you publish."
-                            >
-                                Save
-                            </button>
+                <Dialog onClose={() => setOpen(false)} wide>
+                    <p className="eyebrow">Wording</p>
+                    <h2>{label(doc.slug)}</h2>
+                    <p>Changes are saved to the preview when you press Save. They go public the next time you publish.</p>
+                    <div className="doc-body doc-body-roomy">
+                        {fields.length === 0 && <p className="muted">This document is empty.</p>}
+                        {fields.map((f, i) => (
+                            <label key={f.key} className="field">
+                                <span className="eyebrow">
+                                    {label(f.key)}
+                                    {f.kind === "lines" && <span className="field-note"> · one per line</span>}
+                                    {f.kind === "structured" && (
+                                        <span className="field-note"> · structured: easier to ask your assistant</span>
+                                    )}
+                                </span>
+                                <textarea
+                                    className={f.kind === "structured" ? "mono" : ""}
+                                    value={f.text}
+                                    spellCheck={f.kind !== "structured"}
+                                    readOnly={!canEdit}
+                                    rows={Math.min(
+                                        f.kind === "structured" ? 16 : 12,
+                                        Math.max(f.kind === "text" ? 1 : 3, Math.ceil(f.text.length / 60), f.text.split("\n").length),
+                                    )}
+                                    onChange={(e) =>
+                                        setFields((prev) => prev.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
+                                    }
+                                />
+                            </label>
+                        ))}
+                        {outdated && (
+                            <p className="doc-error">
+                                This was changed by someone else while you were editing. Your edits are still here but can't be saved over
+                                theirs.{" "}
+                                <button type="button" className="link" onClick={useTheirs}>
+                                    Show their version instead
+                                </button>
+                            </p>
                         )}
+                        {error && !outdated && <p className="doc-error">{error}</p>}
+                        <div className="doc-foot">
+                            <span className="mono muted">Last changed {timeAgo(doc.updatedAt)}</span>
+                            <button type="button" className="btn btn-sm" onClick={() => setOpen(false)}>
+                                Close
+                            </button>
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    className="btn btn-sm btn-primary"
+                                    disabled={saving || !dirty || outdated}
+                                    onClick={save}
+                                    title="Saved changes show in the preview. They go public when you publish."
+                                >
+                                    Save
+                                </button>
+                            )}
+                        </div>
                     </div>
-                </div>
+                </Dialog>
             )}
         </li>
     );

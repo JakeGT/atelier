@@ -1192,3 +1192,9 @@ textarea {
     height: 12px;
     margin-right: -3px;
 }
+
+/* A dialog taller than the window scrolls inside itself; its buttons are never out of reach. */
+.dialog {
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+}

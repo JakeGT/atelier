@@ -132,6 +132,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Rules: `docs/design/07-working-and-sharing.md`. Mechanics: the last two sections of `docs/08-ai-runtime.md`.
 - To try two people locally: `AUTH_MODE=dev` accepts `/auth/login?as=sol` for a second person.
 
+## Operator console, templates, ideas (branch `p4-operator-templates`)
+
+- `/admin` is the operator console, for accounts in the identity provider's admin group: all studios, suspend/restore, switch the assistant or publishing off for one, set its limits, and activity across studios.
+- Starter templates live in `apps/server/templates/<id>/` (a `template.json` plus plain files). Add a folder to add a template.
+- "Ideas for what to ask" is a list of ready-made requests in `apps/web/src/lib/ideas.ts`.
+- Wording items in the editor open a pop-up to edit.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
