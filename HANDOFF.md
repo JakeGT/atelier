@@ -166,20 +166,24 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - `page_look` (tool), `mcp/look.ts`, `mcp/site.ts`: Chromium in the runtime image, driven over the DevTools protocol. Pictures for models that read images (from the catalog's `vision`), a measured outline for those that do not. The built-in model does not.
 - Workspaces need 2,048 MB (`RUNTIME_MEMORY_MB`) now that a browser runs in them.
 
+## Studios and people (branch `studio-people`)
+
+- **Roles per website:** `project_members` (migration 0017). A studio's editor or viewer can have a different role on one website; owners and admins cannot be overridden. `loadProject` sets the role that counts, and the permission check now runs after it. The web app uses `project.myRole`.
+- **A whole studio:** download everything (`POST …/export` then the link), delete it (`DELETE /orgs/:org`, owner only, name typed), usage by month. See docs/12 §5.
+- **People are told:** an e-mail when invited (to the address, whether or not they have an account), a notification when they join, when their role on a website changes, and when a studio they belong to is deleted.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
 - **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
 - **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). Off-host backups are part of the VPS move, the last phase (P6); accepted until then.
-- **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
-- **Per-project role overrides** aren't built (organisation roles only).
 - **Workspaces keep the runtime they were created with** until their next request, when an idle one is recreated on the current runtime (`ContainerRuntime.bringUpToDate`, since p5.8). Until p5.8 they were never recreated, and one on p3.5 blanked the editor by reporting runs without `steps`; runs are now made whole (`wholeRun`) and the app has an error screen (`ui/Safety.tsx`).
 
 ## Next steps
 
 The order from here (docs/13):
 
-1. **P5 is built** (content studio incl. lists of items and checks before publishing, media, retention, alerting). All of the content studio is built. What P5 leaves: deleting a whole studio and exporting its data (in progress, next branch).
+1. **P5 is built** (content studio incl. lists of items and checks before publishing, media, retention, alerting). All of P5 is built, including deleting and exporting a studio.
 2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
 3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
 

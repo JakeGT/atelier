@@ -106,8 +106,24 @@ append-only for the serving database role, so its limit is applied at start-up
 by the owner role.
 
 Deleting a website removes its workspace, its live site and its uploaded
-files. **Not built:** deleting a whole studio, exporting a studio's data, and
-monthly aggregates of usage (usage records are small and are all kept).
+files.
+
+**A whole studio** (branch `studio-people`, `routes/studio.ts`):
+
+- **A copy of everything.** Its owner can download one archive (a .tar) of
+  every website: pages, wording and its history, the conversation with the
+  assistant, the publishing record, uploaded files, the members and usage. It
+  is asked for with a recent sign-in and delivered by a link that works for five
+  minutes for that person only; it is streamed, so its size does not matter.
+- **Deleting it.** Its owner, with a recent sign-in and the studio's name typed
+  out. Live websites are taken down first (if one cannot be, nothing is
+  deleted), then workspaces and uploaded files, then every record under the
+  studio. Its other members are told. A personal studio cannot be deleted. The
+  activity record and usage figures outlive the studio (they hold its id and
+  no content).
+- **Usage by month** (`GET …/usage/monthly`): requests, working time and tokens
+  for the last twelve months, computed from the usage records, which are all
+  kept. There is no separate table of aggregates.
 
 ## 6. Alerting
 

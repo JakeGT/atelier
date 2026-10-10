@@ -229,7 +229,11 @@ function ProjectRoute(props: {
     // Keyed by project so switching projects resets all editor state.
     if (props.view === "content") return <Content key={project.id} project={project} {...props} />;
     return (
-        <MediaProvider a={mediaApi} projectId={project.id} canEdit={can.edit(props.org.role) && project.archivedAt === null}>
+        <MediaProvider
+            a={mediaApi}
+            projectId={project.id}
+            canEdit={can.edit(project.myRole ?? props.org.role) && project.archivedAt === null}
+        >
             <Editor key={project.id} project={project} onProjectChanged={setProject} {...props} />
         </MediaProvider>
     );

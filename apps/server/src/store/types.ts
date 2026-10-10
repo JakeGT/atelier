@@ -55,6 +55,9 @@ export interface OrganizationStore {
             flags?: Organization["flags"];
         },
     ): Promise<Organization>;
+    // Removes the studio and everything recorded under it (members, websites and
+    // all that belongs to them). The activity record and usage figures outlive it.
+    delete(id: string): Promise<void>;
     // Every studio, for the operator. Not tenant-scoped: only operator routes may call it.
     listAll(): Promise<StudioSummary[]>;
 }
@@ -126,6 +129,18 @@ export interface UsageStore {
     record(input: { tenantId: string; projectId: string | null; kind: UsageKind; units: number; sourceId: string }): Promise<void>;
     totals(tenantId: string, since: Date): Promise<UsageTotals[]>;
     total(tenantId: string, kinds: UsageKind[], since: Date): Promise<number>;
+    // Per calendar month (UTC, "2026-10") and kind, since `since`.
+    monthly(tenantId: string, since: Date): Promise<{ month: string; kind: string; units: number }[]>;
+}
+
+// A member's role on one website where it differs from their role in the studio.
+export type ProjectRole = "admin" | "editor" | "viewer";
+export interface ProjectMemberStore {
+    list(tenantId: string, projectId: string): Promise<{ userId: string; role: ProjectRole }[]>;
+    // null: back to their role in the studio.
+    set(tenantId: string, projectId: string, userId: string, role: ProjectRole | null): Promise<void>;
+    // Every website on which this person's role differs.
+    forUser(tenantId: string, userId: string): Promise<{ projectId: string; role: ProjectRole }[]>;
 }
 
 // Content is written only as drafts. `published` changes only when a release
@@ -336,6 +351,7 @@ export interface Store {
     deployments: DeploymentStore;
     domains: DomainStore;
     media: MediaStore;
+    projectMembers: ProjectMemberStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;

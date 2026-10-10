@@ -49,6 +49,8 @@ export interface ApiDeps {
     storage?: MediaStorage | null;
     // Sends e-mail; null means notifications are shown in the app only.
     mailer?: Mailer | null;
+    // The one notifier, shared with sign-in (which tells people when they join a studio).
+    notifier?: Notifier;
     // Starter templates; read from apps/server/templates unless given.
     templates?: Template[];
 }
@@ -96,8 +98,11 @@ export function createApi(deps: ApiDeps) {
         declared.push({ method: method.toUpperCase(), path, permission: requirement });
         const chain: MiddlewareHandler<Env>[] = [];
         if (path.includes(":org")) chain.push(org);
+        // A website is loaded before the check: the person's role may be different on it
+        // (per-website roles). Not found and not allowed both answer 404, as before.
+        if (path.includes(":projectId")) chain.push(project);
         chain.push(requirePermission(requirement));
-        if (path.includes(":projectId")) chain.push(project, announce);
+        if (path.includes(":projectId")) chain.push(announce);
         const on = app.on as unknown as (m: string, p: string, ...h: MiddlewareHandler<Env>[]) => void;
         on(method.toUpperCase(), path, ...chain, ...(rest as MiddlewareHandler<Env>[]));
     }
@@ -110,11 +115,13 @@ export function createApi(deps: ApiDeps) {
         templates: deps.templates ?? loadTemplates(),
         presence,
         storage: deps.storage ?? null,
-        notifier: new Notifier(store, {
-            mailer: deps.mailer ?? null,
-            publicOrigin: config.publicOrigin,
-            operatorEmail: config.operatorEmail,
-        }),
+        notifier:
+            deps.notifier ??
+            new Notifier(store, {
+                mailer: deps.mailer ?? null,
+                publicOrigin: config.publicOrigin,
+                operatorEmail: config.operatorEmail,
+            }),
         releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix, deps.storage ?? null),
         box: new SecretBox(deps.secretsKey),
         app,

@@ -52,7 +52,7 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const pid = project.id;
-    const canEdit = can.edit(org.role) && project.archivedAt === null;
+    const canEdit = can.edit(project.myRole ?? org.role) && project.archivedAt === null;
     const editor = `/o/${org.slug}/p/${project.slug}`;
 
     const [documents, setDocuments] = useState<ContentDocument[] | null>(null);

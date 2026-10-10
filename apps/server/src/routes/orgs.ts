@@ -17,7 +17,7 @@ export function orgRoutes(api: Api): void {
     // signed in, so being added shows up on the next page load, not the next sign-in.
     route("get", "/api/v1/orgs", "signed-in", async (c) => {
         const user = c.get("user");
-        await acceptInvitations(store, user);
+        await acceptInvitations(store, user, api.notifier);
         let orgs = await store.organizations.listForUser(user.id);
         // Everyone has a personal studio. Sign-in makes sure of it; this covers
         // someone whose session began before personal studios existed.
@@ -177,6 +177,12 @@ export function orgRoutes(api: Api): void {
             expiresAt: new Date(Date.now() + config.inviteTtlDays * 86_400_000),
         });
         await audit(c, "invitation.create", `invitation:${invitation.id}`, { email, role });
+        // Tell them: without this an invitation is only discovered by signing in.
+        await api.notifier.mail(
+            email,
+            `${c.get("user").name} added you to ${c.get("org").name} on Atelier`,
+            `${c.get("user").name} has added you to the studio ${c.get("org").name} as ${role === "admin" ? "an admin" : role === "editor" ? "an editor" : "a viewer"}.\n\nSign in with this e-mail address and the studio will be there:\n${config.publicOrigin}\n\nIf you cannot sign in, ask ${c.get("user").name}: access to Atelier itself is given separately.\n`,
+        );
         return c.json({ invitation }, 201);
     });
 

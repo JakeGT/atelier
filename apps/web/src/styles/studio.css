@@ -1442,3 +1442,47 @@ button.where:hover {
 .content-quiet > svg {
     color: var(--ink-3);
 }
+
+/* ---- the whole studio; people on a website ------------------------------------------- */
+
+.panel-danger {
+    border-color: color-mix(in srgb, var(--seal) 45%, var(--line-strong));
+}
+
+.people {
+    display: grid;
+    gap: 8px;
+    margin: 8px 0;
+    padding: 0;
+    list-style: none;
+}
+
+.people li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+}
+
+.people-name {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.people-name .muted {
+    font-size: 12.5px;
+}
+
+.people select {
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    font-size: 13.5px;
+}
