@@ -15,6 +15,7 @@
 | [0011](0011-byok-model-proxy.md) | BYOK keys reach the model through a control-plane proxy | Accepted (P4) |
 | [0012](0012-egress-and-workspace-lifecycle.md) | Workspace egress through an allow-listing proxy; idle workspaces stop | Accepted (implemented P2) |
 | [0013](0013-connect-your-own-cloudflare.md) | A studio connects its own Cloudflare account by OAuth; domains set up for it | Proposed (planned P4) |
+| [0014](0014-content-studio.md) | Content bound to the page and edited in three places; a media library | Proposed (planned P5) |
 
 0001–0005 were accepted on 2026-10-08 by the product owner, with amendments
 captured in ADR-0002 (future first-party direct content editor) and ADR-0004
