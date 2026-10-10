@@ -294,6 +294,43 @@ test("wording: a bound page is filled from saved content in the preview and on t
     assert.match(inside(ws.container, "cat /workspace/index.html").out, /written in the file/);
 });
 
+test("media: an uploaded file is served in the preview and published with the release that uses it", async () => {
+    // The smallest PNG there is; the server works out what it is from these bytes.
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
+    const upload = async (name: string, alt: string) => {
+        const form = new FormData();
+        form.append("file", new File([png], name));
+        form.append("alt", alt);
+        const res = await fetch(`${B}/api/v1/orgs/${org}/projects/${ws.id}/media`, {
+            method: "POST",
+            headers: { cookie, "x-atelier-csrf": csrf, origin: B, connection: "close" },
+            body: form,
+        });
+        return (await json<{ asset: { name: string; path: string } }>(res)).asset;
+    };
+    const used = await upload("Logo Mark.png", "The studio's mark");
+    const unused = await upload("spare.png", "Not used anywhere");
+    assert.match(used.name, /^logo-mark-[0-9a-f]{6}\.png$/);
+
+    inside(ws.container, `printf '<h1>hi</h1><img data-content-image="page/home#logo" src="">' > /workspace/index.html`);
+    assert.ok(commit(ws.container).ok);
+    await json(await call("PUT", `/projects/${ws.id}/content/page/home`, { logo: used.path }));
+
+    const { url } = await json<{ url: string }>(await call("GET", `/projects/${ws.id}/preview-url`));
+    assert.match(await (await fetch(`${B}${url}index.html`)).text(), new RegExp(`src="media/${used.name}" alt="The studio's mark"`));
+    const file = await fetch(`${B}${url}media/${used.name}`);
+    assert.equal(file.status, 200);
+    assert.equal(file.headers.get("content-type"), "image/png");
+
+    assert.equal((await publish(ws.id)).status, 200);
+    const files = (await pagesState()).sites[site]?.files ?? {};
+    assert.ok(`/media/${used.name}` in files, "the file the page uses is on the live website");
+    assert.ok(!(`/media/${unused.name}` in files), "a file nothing uses is not published");
+    assert.match(files["/index.html"] ?? "", new RegExp(`src="media/${used.name}" alt="The studio's mark"`));
+    // The assistant can see the library (and nothing more) with its own token.
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /data-content-image/);
+});
+
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
     const tokenOf = (name: string) =>
         inspect<Inspect>(name)
@@ -325,7 +362,7 @@ test("archiving stops the workspace; deleting removes it and its files", async (
     await json(await call("POST", `/projects/${ws.id}/sessions`));
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
     // (Rolling back changed what is live, not the working files.)
-    assert.match(inside(ws.container, "cat /workspace/index.html").out, /written in the file/);
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /data-content-image/);
 
     await json(await call("POST", `/projects/${ws.id}/archive`));
     // Archived, the published website is still up; deleting takes it down.

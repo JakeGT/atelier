@@ -86,6 +86,19 @@ async function seedTenant(slug: string) {
     return { tenantId, project, doc };
 }
 
+// A studio with one website and one person, for the suites below.
+async function studio(slug: string) {
+    const { tenantId, project } = await seedTenant(slug);
+    const user = await store.users.upsertIdentity({
+        issuer: "https://idp/",
+        subject: `${slug}-${suffix}`,
+        email: `${slug}-${suffix}@example.com`,
+        name: slug,
+        admin: false,
+    });
+    return { tenantId, projectId: project.id, userId: user.id };
+}
+
 test("the runtime role owns nothing and cannot bypass or disable RLS", { skip }, async () => {
     const [r] = await raw<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
         SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`;
@@ -741,4 +754,107 @@ test("the operator's view lists every studio with its own figures; status and sw
     assert.equal(withTemplate.template, "cafe");
     await store.projects.clearTemplate(a.tenantId, withTemplate.id);
     assert.equal((await store.projects.findById(a.tenantId, withTemplate.id))?.template, null);
+});
+
+test("media library: records are per studio; a removed file is kept until it is purged", { skip }, async () => {
+    const a = await studio("media-a");
+    const b = await studio("media-b");
+    const asset = await store.media.create({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        name: "shop-abc123.jpg",
+        kind: "image",
+        mime: "image/jpeg",
+        width: 2000,
+        height: 1000,
+        alt: "The shop",
+        decorative: false,
+        bytes: 1234,
+        variants: [{ name: "shop-abc123-480.webp", width: 480, bytes: 100 }],
+        uploadedBy: null,
+    });
+    assert.deepEqual(asset.variants, [{ name: "shop-abc123-480.webp", width: 480, bytes: 100 }]);
+    assert.equal((await store.media.list(a.tenantId, a.projectId)).length, 1);
+    // Another studio cannot see it, describe it or remove it, even knowing its ids.
+    assert.equal((await store.media.list(b.tenantId, a.projectId)).length, 0);
+    assert.equal(await store.media.get(b.tenantId, a.projectId, asset.id), null);
+    assert.equal(await store.media.describe(b.tenantId, a.projectId, asset.id, { alt: "x", decorative: false }), null);
+    assert.equal(await store.media.remove(b.tenantId, a.projectId, asset.id), null);
+
+    assert.equal((await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "", decorative: true }))?.decorative, true);
+    assert.ok((await store.media.remove(a.tenantId, a.projectId, asset.id))?.deletedAt);
+    assert.equal((await store.media.list(a.tenantId, a.projectId)).length, 0);
+    assert.equal((await store.media.list(a.tenantId, a.projectId, true)).length, 1);
+    assert.equal((await store.media.removedBefore(a.tenantId, new Date(Date.now() - 60_000))).length, 0);
+    assert.equal((await store.media.removedBefore(a.tenantId, new Date(Date.now() + 60_000))).length, 1);
+    await store.media.purge(b.tenantId, asset.id);
+    assert.equal((await store.media.list(a.tenantId, a.projectId, true)).length, 1);
+    await store.media.purge(a.tenantId, asset.id);
+    assert.equal((await store.media.list(a.tenantId, a.projectId, true)).length, 0);
+});
+
+test("notifications belong to one person: told once per event, read only by them", { skip }, async () => {
+    const a = await studio("note-a");
+    const b = await studio("note-b");
+    const input = { tenantId: a.tenantId, kind: "assistant.failed", title: "t", body: "b", link: "/x", dedupe: "run:1" };
+    assert.ok(await store.notifications.add({ userId: a.userId, ...input }));
+    assert.equal(await store.notifications.add({ userId: a.userId, ...input }), null);
+    assert.ok(await store.notifications.add({ userId: a.userId, ...input, dedupe: null }));
+    assert.ok(await store.notifications.add({ userId: a.userId, ...input, dedupe: null }));
+    assert.equal(await store.notifications.unread(a.userId), 3);
+    assert.equal(await store.notifications.unread(b.userId), 0);
+    assert.equal((await store.notifications.list(b.userId)).length, 0);
+    // With no person set, or as someone else, the rows are not there at all.
+    assert.equal((await raw`SELECT count(*)::int AS n FROM notifications`)[0]?.n, 0);
+    await store.notifications.markRead(b.userId);
+    assert.equal(await store.notifications.unread(a.userId), 3);
+    await store.notifications.markRead(a.userId);
+    assert.equal(await store.notifications.unread(a.userId), 0);
+
+    assert.equal(await store.notifications.emailWanted(a.userId), true);
+    await store.notifications.setEmailWanted(a.userId, false);
+    assert.equal(await store.notifications.emailWanted(a.userId), false);
+    assert.equal(await store.notifications.emailWanted(b.userId), true);
+});
+
+test("retention queries: old messages and old versions of wording go; the newest versions always stay", { skip }, async () => {
+    const a = await studio("keep-a");
+    const b = await studio("keep-b");
+    for (const s of [a, b]) {
+        for (let i = 1; i <= 5; i++)
+            await store.content.upsertDraft({
+                tenantId: s.tenantId,
+                projectId: s.projectId,
+                kind: "page",
+                slug: "home",
+                draft: { n: i },
+                updatedBy: null,
+            });
+        await store.messages.add({
+            tenantId: s.tenantId,
+            projectId: s.projectId,
+            sessionId: null,
+            role: "user",
+            text: "hi",
+            runId: null,
+            authorId: null,
+        });
+    }
+    const future = new Date(Date.now() + 60_000);
+    const past = new Date(Date.now() - 60_000);
+    assert.equal(await store.content.pruneRevisions(a.tenantId, past, 2), 0);
+    assert.equal(await store.content.pruneRevisions(a.tenantId, future, 2), 3);
+    const doc = await store.content.get(a.tenantId, a.projectId, "page", "home");
+    assert.deepEqual(
+        (await store.content.revisions(a.tenantId, doc?.id ?? "")).map((r) => r.rev),
+        [5, 4],
+    );
+    assert.deepEqual(doc?.draft, { n: 5 });
+    assert.equal(await store.messages.purgeBefore(a.tenantId, past), 0);
+    assert.equal(await store.messages.purgeBefore(a.tenantId, future), 1);
+    // The other studio is untouched.
+    const other = await store.content.get(b.tenantId, b.projectId, "page", "home");
+    assert.equal((await store.content.revisions(b.tenantId, other?.id ?? "")).length, 5);
+    assert.equal((await store.messages.list(b.tenantId, b.projectId)).length, 1);
 });

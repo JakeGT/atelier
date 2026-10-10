@@ -6,6 +6,7 @@ import type { Pulse, Run, ThreadMessage } from "../lib/api";
 import { useClickOutside } from "../lib/hooks";
 import { IDEAS } from "../lib/ideas";
 import { Dots } from "../ui/kit";
+import { UploadButton } from "./Media";
 import { Prose } from "./Prose";
 
 export type Message = Pick<ThreadMessage, "id" | "role" | "text" | "tools"> & { authorId?: string | null };
@@ -18,6 +19,8 @@ const SUGGESTIONS = [
 ];
 
 interface ChatProps {
+    // A picture or file was added to the website's library from here.
+    onFileAdded?: () => void;
     messages: Message[];
     loading: boolean;
     // The request being worked on, if any, and whose it is.
@@ -225,6 +228,7 @@ export function Chat(props: ChatProps) {
                         >
                             <Lightbulb /> Ideas for what to ask
                         </button>
+                        <UploadButton label="Add pictures or files" onAdded={props.onFileAdded} />
                         {ideasOpen && (
                             <div className="menu menu-left menu-up" role="menu">
                                 <p className="menu-label eyebrow">Choose one, then change it or send it</p>

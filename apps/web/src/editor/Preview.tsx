@@ -129,77 +129,79 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
 
     return (
         <section className="bench">
-            <div className={`frame frame-${device}`}>
-                <div className="frame-chrome">
-                    <div className="frame-nav">
-                        <button
-                            type="button"
+            {/* The tools sit above the frame, not inside it: they keep the full width
+                whichever size is being previewed, so the way back to Desktop is always there. */}
+            <div className="frame-chrome">
+                <div className="frame-nav">
+                    <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => go("back")}
+                        disabled={!canBack || !hasPage}
+                        title="Go back to the page you were on before"
+                    >
+                        <ArrowLeft /> <span className="tool-label">Back</span>
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => go("forward")}
+                        disabled={!canForward || !hasPage}
+                        title="Go forward again"
+                    >
+                        <span className="tool-label">Forward</span> <ArrowRight />
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} title="Reload the preview">
+                        <RotateCw /> <span className="tool-label">Reload</span>
+                    </button>
+                    {url && hasPage && (
+                        <a
                             className="btn btn-ghost btn-sm"
-                            onClick={() => go("back")}
-                            disabled={!canBack || !hasPage}
-                            title="Go back to the page you were on before"
+                            href={`${url}${current === HOME ? "" : current}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Open this page of the preview in a new tab"
                         >
-                            <ArrowLeft /> <span className="tool-label">Back</span>
-                        </button>
-                        <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => go("forward")}
-                            disabled={!canForward || !hasPage}
-                            title="Go forward again"
-                        >
-                            <span className="tool-label">Forward</span> <ArrowRight />
-                        </button>
-                    </div>
-                    <div className="frame-address mono">
-                        <span>Preview</span>
-                        <span className="muted"> · {hasPage ? name.charAt(0).toUpperCase() + name.slice(1) : "private"}</span>
-                    </div>
-                    <div className="frame-tools">
-                        <div className="segmented" role="radiogroup" aria-label="Preview size">
-                            {DEVICES.map((d) => (
-                                // biome-ignore lint/a11y/useSemanticElements: a button group styled as a segmented control
-                                <button
-                                    key={d.id}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={device === d.id}
-                                    title={d.label}
-                                    className={device === d.id ? "on" : ""}
-                                    onClick={() => onDevice(d.id)}
-                                >
-                                    <d.icon /> <span className="tool-label">{d.label}</span>
-                                </button>
-                            ))}
-                        </div>
-                        {canEdit && hasPage && (
-                            <button
-                                type="button"
-                                className={`btn btn-sm ${editing ? "btn-primary" : "btn-ghost"}`}
-                                onClick={toggleEditing}
-                                aria-pressed={editing}
-                                title="Click a piece of text in the page and type to change it"
-                            >
-                                <PencilLine /> <span className="tool-label">{editing ? "Done editing" : "Edit text"}</span>
-                            </button>
-                        )}
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} title="Reload the preview">
-                            <RotateCw /> <span className="tool-label">Reload</span>
-                        </button>
-                        {url && hasPage && (
-                            <a
-                                className="btn btn-ghost btn-sm"
-                                href={`${url}${current === HOME ? "" : current}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                title="Open this page of the preview in a new tab"
-                            >
-                                <ExternalLink /> <span className="tool-label">Open</span>
-                            </a>
-                        )}
-                    </div>
+                            <ExternalLink /> <span className="tool-label">Open</span>
+                        </a>
+                    )}
                 </div>
+                <div className="frame-address mono">
+                    <span>Preview</span>
+                    <span className="muted"> · {hasPage ? name.charAt(0).toUpperCase() + name.slice(1) : "private"}</span>
+                </div>
+                <div className="frame-tools">
+                    <div className="segmented" role="radiogroup" aria-label="Preview size">
+                        {DEVICES.map((d) => (
+                            // biome-ignore lint/a11y/useSemanticElements: a button group styled as a segmented control
+                            <button
+                                key={d.id}
+                                type="button"
+                                role="radio"
+                                aria-checked={device === d.id}
+                                title={d.label}
+                                className={device === d.id ? "on" : ""}
+                                onClick={() => onDevice(d.id)}
+                            >
+                                <d.icon /> <span className="tool-label">{d.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {canEdit && hasPage && (
+                        <button
+                            type="button"
+                            className={`btn btn-sm ${editing ? "btn-primary" : "btn-ghost"}`}
+                            onClick={toggleEditing}
+                            aria-pressed={editing}
+                            title="Click a piece of text in the page and type to change it"
+                        >
+                            <PencilLine /> <span className="tool-label">{editing ? "Done editing" : "Edit text"}</span>
+                        </button>
+                    )}
+                </div>
+            </div>
 
+            <div className={`frame frame-${device}`}>
                 <div className="frame-view">
                     {hasPage && src ? (
                         // Agent-written pages: sandboxed (no same-origin), so they can't act as the signed-in user.

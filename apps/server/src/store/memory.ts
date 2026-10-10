@@ -7,6 +7,7 @@ import type {
     ContentRevision,
     Deployment,
     Invitation,
+    MediaAsset,
     Membership,
     Organization,
     OrgRole,
@@ -24,8 +25,11 @@ import type {
     InvitationStore,
     LoginSession,
     LoginSessionStore,
+    MediaStore,
     MembershipStore,
     MessageStore,
+    Notice,
+    NotificationStore,
     OrganizationStore,
     ProjectStore,
     ProviderKeyStore,
@@ -375,6 +379,17 @@ export class MemoryStore implements Store {
     };
 
     content: ContentStore = {
+        pruneRevisions: async (tenantId, before, keep) => {
+            let gone = 0;
+            for (const [id, revs] of this.revisionMap) {
+                if (this.contentMap.get(id)?.tenantId !== tenantId) continue;
+                const newest = new Set([...revs].sort((x, y) => y.rev - x.rev).slice(0, Math.max(1, keep)));
+                const kept = revs.filter((r) => newest.has(r) || new Date(r.createdAt).getTime() >= before.getTime());
+                gone += revs.length - kept.length;
+                this.revisionMap.set(id, kept);
+            }
+            return gone;
+        },
         setFields: async (tenantId, projectId, kind, slug, fields) => {
             const id = this.contentIndex.get(key(projectId, kind, slug));
             const doc = id ? this.contentMap.get(id) : undefined;
@@ -471,6 +486,11 @@ export class MemoryStore implements Store {
     };
 
     messages: MessageStore = {
+        purgeBefore: async (tenantId, before) => {
+            const old = this.messageLog.filter((m) => m.tenantId === tenantId && new Date(m.createdAt).getTime() < before.getTime());
+            for (const m of old) this.messageLog.splice(this.messageLog.indexOf(m), 1);
+            return old.length;
+        },
         add: async (input) => {
             const isUser = input.role === "user";
             if (input.runId && this.messageLog.some((m) => m.runId === input.runId && (m.role === "user") === isUser)) return;
@@ -623,6 +643,77 @@ export class MemoryStore implements Store {
         remove: async (tenantId, projectId, hostname) => {
             const d = this.domainMap.get(hostname);
             if (d && d.tenantId === tenantId && d.projectId === projectId) this.domainMap.delete(hostname);
+        },
+    };
+
+    private readonly notices: (Notice & { userId: string; dedupe: string | null })[] = [];
+    private readonly noEmail = new Set<string>();
+    notifications: NotificationStore = {
+        add: async (input) => {
+            if (input.dedupe && this.notices.some((n) => n.userId === input.userId && n.dedupe === input.dedupe)) return null;
+            const notice = {
+                id: randomUUID(),
+                userId: input.userId,
+                dedupe: input.dedupe,
+                kind: input.kind,
+                title: input.title,
+                body: input.body,
+                link: input.link,
+                createdAt: now(),
+                readAt: null,
+            };
+            this.notices.unshift(notice);
+            return notice;
+        },
+        list: async (userId, limit = 50) => this.notices.filter((n) => n.userId === userId).slice(0, limit),
+        unread: async (userId) => this.notices.filter((n) => n.userId === userId && n.readAt === null).length,
+        markRead: async (userId) => {
+            for (const n of this.notices) if (n.userId === userId && n.readAt === null) n.readAt = now();
+        },
+        markEmailed: async () => {},
+        emailWanted: async (userId) => !this.noEmail.has(userId),
+        setEmailWanted: async (userId, on) => {
+            if (on) this.noEmail.delete(userId);
+            else this.noEmail.add(userId);
+        },
+        admins: async () => [...this.userMap.values()].filter((u) => u.admin).map((u) => u.id),
+    };
+
+    private readonly mediaMap = new Map<string, MediaAsset>();
+    media: MediaStore = {
+        create: async (asset) => {
+            const made: MediaAsset = { ...asset, createdAt: now(), deletedAt: null };
+            this.mediaMap.set(made.id, made);
+            return made;
+        },
+        list: async (tenantId, projectId, withRemoved = false) =>
+            [...this.mediaMap.values()]
+                .filter((m) => m.tenantId === tenantId && m.projectId === projectId && (withRemoved || m.deletedAt === null))
+                .reverse(),
+        get: async (tenantId, projectId, id) => {
+            const m = this.mediaMap.get(id);
+            return m && m.tenantId === tenantId && m.projectId === projectId ? m : null;
+        },
+        describe: async (tenantId, projectId, id, patch) => {
+            const m = this.mediaMap.get(id);
+            if (!m || m.tenantId !== tenantId || m.projectId !== projectId) return null;
+            const next = { ...m, ...patch };
+            this.mediaMap.set(id, next);
+            return next;
+        },
+        remove: async (tenantId, projectId, id) => {
+            const m = this.mediaMap.get(id);
+            if (!m || m.tenantId !== tenantId || m.projectId !== projectId) return null;
+            const next = { ...m, deletedAt: m.deletedAt ?? now() };
+            this.mediaMap.set(id, next);
+            return next;
+        },
+        removedBefore: async (tenantId, before) =>
+            [...this.mediaMap.values()].filter(
+                (m) => m.tenantId === tenantId && m.deletedAt !== null && new Date(m.deletedAt).getTime() < before.getTime(),
+            ),
+        purge: async (tenantId, id) => {
+            if (this.mediaMap.get(id)?.tenantId === tenantId) this.mediaMap.delete(id);
         },
     };
 

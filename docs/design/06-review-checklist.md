@@ -56,6 +56,7 @@ to the interface ships, and as a full audit of every screen when a phase ends.
 - [ ] Tokens only; both themes checked.
 - [ ] One primary action per screen.
 - [ ] Colour meanings are respected and backed by words.
+- [ ] **A control is never inside the thing it changes the size of.** (The preview's size chooser once lived inside the preview frame: choosing Phone shrank the bar and hid the way back.) Tools that do not fit take a second row; they are never clipped and never lose their words.
 
 ## Recording an audit
 

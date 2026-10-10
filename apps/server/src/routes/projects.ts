@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { validInstructions } from "../services/instructions.ts";
+import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
 import type { ProjectPatch } from "../store/types.ts";
 import { type Api, type Ctx, ORG, PROJECT, SLUG_RE, slugify } from "./kit.ts";
 
 // Projects (websites): create, list, settings, archive, delete.
 export function projectRoutes(api: Api): void {
-    const { route, store, runtime, stepUp, audit, limits, hosting, templates } = api;
+    const { route, store, runtime, stepUp, audit, limits, hosting, templates, storage } = api;
 
     // Archived projects are listed only when asked for.
     route("get", `${ORG}/projects`, "project.read", async (c) => {
@@ -105,6 +106,17 @@ export function projectRoutes(api: Api): void {
         } catch (err) {
             console.error(`could not remove workspace for ${project.id}: ${(err as Error).message}`);
             return c.json({ error: "the website's workspace could not be removed; try again in a moment" }, 502);
+        }
+        // Its uploaded files go with it. One that cannot be removed now is only a stray
+        // object in storage, so it does not stop the deletion.
+        if (storage) {
+            for (const asset of await store.media.list(project.tenantId, project.id, true)) {
+                for (const name of filesOf(asset)) {
+                    await storage
+                        .delete(storageKey(asset, name))
+                        .catch((err: Error) => console.warn(`stray media file ${name}: ${err.message}`));
+                }
+            }
         }
         await store.projects.delete(c.get("org").id, project.id);
         await audit(c, "project.delete", `project:${project.id}`, { slug: project.slug, name: project.name });

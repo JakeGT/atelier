@@ -40,13 +40,34 @@ server.tool("content_get", "Get a content document by kind and slug", { kind: z.
     return json(result.document);
 });
 
-const field = z.object({
+server.tool(
+    "media_list",
+    'List the files the person has uploaded for this website (photographs, logos, PDFs, short clips), with a description of each and its path. Use a file by writing its path exactly, relative to the website\'s top folder: <img src="media/…" alt="…">. You cannot see the pictures or add files; if a needed image is not here, ask the person to upload it in the Content page.',
+    {},
+    async () => json(((await api("/api/agent/media")) as { files: unknown }).files),
+);
+
+const base = {
     key: z.string().describe("The field's name in the draft, as used after # in data-content attributes"),
     label: z.string().describe("What a person would call it: 'Headline', not 'heroTitle'"),
-    type: z
-        .enum(["text", "long", "rich", "list"])
-        .describe("text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings"),
     help: z.string().optional().describe("One line saying where it appears, e.g. 'Shown at the top of the home page'"),
+    required: z.boolean().optional().describe("True if the website must not be published with this empty"),
+    max: z
+        .number()
+        .optional()
+        .describe("The most characters (text, long) or entries (list, items) it may have, if the design depends on it"),
+};
+const field = z.object({
+    ...base,
+    type: z
+        .enum(["text", "long", "rich", "list", "image", "items"])
+        .describe(
+            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members)",
+        ),
+    itemFields: z
+        .array(z.object({ ...base, type: z.enum(["text", "long", "rich", "image", "link"]) }))
+        .optional()
+        .describe("For type items: the parts every entry has. link: a web address or a page such as about.html"),
 });
 
 server.tool(

@@ -13,14 +13,18 @@
 (function bridge() {
     var editing = false;
     var style = null;
-    var BOUND = "[data-content],[data-content-rich],[data-content-list]";
+    var BOUND = "[data-content],[data-content-rich],[data-content-list],[data-content-image]";
     var say = (message) => {
         message.atelierPreview = 1;
         parent.postMessage(message, "*");
     };
     var path = () => location.pathname.replace(/^\/preview\/[^/]+\//, "") || "index.html";
     var refOf = (el) =>
-        el.getAttribute("data-content") || el.getAttribute("data-content-rich") || el.getAttribute("data-content-list") || "";
+        el.getAttribute("data-content") ||
+            el.getAttribute("data-content-rich") ||
+            el.getAttribute("data-content-list") ||
+            el.getAttribute("data-content-image") ||
+            "";
     var apply = () => {
         var nodes = document.querySelectorAll(BOUND);
         for (var i = 0; i < nodes.length; i++) {
@@ -41,7 +45,7 @@
             style.textContent =
                 BOUND +
                 "{outline:2px dashed rgba(220,67,38,.6)!important;outline-offset:3px!important;border-radius:2px;cursor:text!important}" +
-                "[data-content-rich],[data-content-list]{cursor:pointer!important}" +
+                "[data-content-rich],[data-content-list],[data-content-image]{cursor:pointer!important}" +
                 BOUND.split(",").join(":hover,") +
                 ":hover,[data-content]:focus{outline-style:solid!important;background:rgba(220,67,38,.07)!important}";
             document.head.appendChild(style);

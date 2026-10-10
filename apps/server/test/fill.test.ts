@@ -104,3 +104,36 @@ test("references name a document and a field; a page can list what it binds", ()
         ],
     );
 });
+
+test("a list of items with several parts: each entry is a copy of the first, with its parts filled", () => {
+    const page = `<!doctype html><html><head></head><body><ul data-content-list="page/home#services"><li class="card"><img data-item-image="photo" src="x.jpg" alt=""><h3 data-item="name">Old name</h3><div data-item-rich="about"><p>old</p></div><a data-item-href="link" href="old.html">More <b>about it</b></a><span class="tag">kept</span></li><li>a second item the assistant wrote</li></ul></body></html>`;
+    const services = [
+        {
+            name: "Throwing <classes>",
+            about: '<p>Six weeks.</p><script>alert(1)</script><a href="javascript:alert(1)">x</a>',
+            link: "classes.html",
+            photo: "media/wheel-abc123.jpg",
+        },
+        { name: "Commissions", link: "javascript:alert(1)", extra: "ignored" },
+    ];
+    const out = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { services } }]), {
+        media: (n) => (n === "wheel-abc123.jpg" ? { name: n, alt: "A wheel", width: 800, height: 600, variants: [] } : undefined),
+    });
+    const items = out.match(/<li class="card">.*?<\/li>/g) ?? [];
+    assert.equal(items.length, 2);
+    assert.equal((out.match(/<li/g) ?? []).length, 2);
+    assert.match(items[0] ?? "", /<img data-item-image="photo" src="media\/wheel-abc123\.jpg" alt="A wheel" width="800" height="600">/);
+    assert.match(items[0] ?? "", /<h3 data-item="name">Throwing &lt;classes&gt;<\/h3>/);
+    assert.match(items[0] ?? "", /<div data-item-rich="about"><p>Six weeks\.<\/p><a>x<\/a><\/div>/);
+    assert.match(items[0] ?? "", /<a data-item-href="link" href="classes\.html">More <b>about it<\/b><\/a><span class="tag">kept<\/span>/);
+    // A part this entry does not have never shows the first entry's: text is emptied,
+    // and a link with nowhere safe to go, or a picture not chosen, is left out.
+    assert.equal(
+        items[1],
+        '<li class="card"><h3 data-item="name">Commissions</h3><div data-item-rich="about"></div><span class="tag">kept</span></li>',
+    );
+    assert.ok(!out.includes("script") && !out.includes("javascript:") && !out.includes("ignored"));
+    // Lines of text still work as before, and the two kinds can be mixed.
+    const mixed = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { services: ["Just a line", { name: "An item" }] } }]));
+    assert.match(mixed, /<li class="card">Just a line<\/li><li class="card"><h3 data-item="name">An item<\/h3>/);
+});

@@ -13,7 +13,7 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | P2 | Multi-tenant + multi-project | Many tenants, many projects, hard isolation, RBAC, quotas | ✅ done (gVisor spike and two items deferred, see P2) |
 | P3 | Hosting & domains | Per-project Cloudflare Pages + custom domains + rollback | ✅ built on `p3-hosting` (needs a Cloudflare token to switch on; see P3) |
 | P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | ✅ built (E4.1–E4.4); E4.5 "connect your own Cloudflare" is planned, not started |
-| P5 | Content studio, retention & alerting | Content bound to the page and edited directly, media, retention, alerting | in progress (see P5) |
+| P5 | Content studio, retention & alerting | Content bound to the page and edited directly, media, retention, alerting | ✅ built (see P5 for what it leaves) |
 | P6 | **The VPS move (last)** | Everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery | not started; **by decision the final piece of work** |
 
 **Interface rule for every phase:** anything a person sees follows
@@ -390,16 +390,19 @@ current host. What needs the VPS is P6, which is last.
   below.
 - E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
-- E5.3 Alerting (build/publish failure, stall, spend over ceiling).
+  **Built (`p5-media`):** a daily job with the periods in docs/12 §5. **Not
+  built:** deleting a whole studio, monthly aggregates of usage.
+- E5.3 Alerting (build/publish failure, stall, spend over ceiling). **Built
+  (`p5-media`):** notifications in the app and by e-mail (docs/12 §6).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown
 
-**Steps a–e are built** (a on `p4-operator-templates`; b–e on
-`p5-content-studio`, 2026-10-10; details in ADR-0014 "As built"). **Steps f–h
-(media) are not started** and wait for a decision on where files are stored.
-Lists of items with several fields, more field types, and limits checked at
-publish are also still to do.
+**Steps a–h are built** (a on `p4-operator-templates`; b–e on
+`p5-content-studio`; f–h on `p5-media`, 2026-10-10), with the differences
+listed in ADR-0014's two "As built" sections. Lists of items with several fields and limits
+checked at publish followed on `p5-finish`. Still to do: number, date and
+yes/no fields, a focal point for images, poster images for video.
 
 | Step | What it delivers | Depends on |
 | --- | --- | --- |

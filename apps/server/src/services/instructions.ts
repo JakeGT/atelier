@@ -21,9 +21,16 @@ The person edits wording directly, without you, and the website shows what they 
   - one piece of text: \`<h1 data-content="page/home#headline">Okoro Ceramics</h1>\`
   - text with a little formatting (paragraphs, bold, links, lists): \`<div data-content-rich="page/home#story"><p>…</p></div>\`
   - a list of short lines: \`<ul data-content-list="page/home#hours"><li>Tue–Sat 10–6</li></ul>\` (the value is an array of strings; every item looks like the first \`<li>\`)
+  - a list whose entries have several parts (services, menu entries, team members, testimonials): a field of type \`items\` with \`itemFields\`, whose value is an array of objects. Mark the list, and inside its first entry mark each part: \`<ul data-content-list="page/home#services"><li><h3 data-item="name">Throwing classes</h3><p data-item="summary">…</p><a data-item-href="link" href="classes.html">More</a></li></ul>\`. Also \`data-item-rich\` and, on an \`<img>\`, \`data-item-image\`. Every entry is a copy of the first, so write one entry's markup well; a part an entry does not have is left empty, and its link or picture is left out.
 - The marked element must contain only that wording: no other elements inside a \`data-content\` element, because its contents are replaced by the saved value.
 - Wording shared by every page (the site's name, the footer line) goes in kind \`page\`, slug \`shared\`, marked the same way on each page.
 - Read existing wording first (\`content_list\`), reuse its field names, and do not remove a \`data-content\` attribute or change a saved value unless you are asked to change that wording.
+
+## Photographs and other files
+- The person uploads images, PDFs and short clips to the website's media library. Call \`media_list\` to see what is there; each file has a description and a path such as \`media/shop-front-3f9a1c.jpg\`.
+- Use a file by that path, relative to the website's top folder (from a page in a subfolder, \`../media/…\`). The files are not in this directory and you cannot open them: go by their descriptions, widths and heights.
+- For an image the person should be able to swap themselves, save its path in a field of type \`image\` and mark the element: \`<img data-content-image="page/home#photo" src="media/shop-front-3f9a1c.jpg" alt="">\`. The description and sizes are filled in for you.
+- Never link to images on other websites or invent a path. If the website needs a picture that is not in the library, say which picture and ask the person to upload it.
 
 ## Boundaries
 - You cannot publish. Publishing is a button only the person can press; if they ask you to publish, tell them to press Publish.

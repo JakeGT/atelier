@@ -13,6 +13,8 @@ import {
 } from "../middleware/auth.ts";
 import { ModelCatalog } from "../services/catalog.ts";
 import type { Hosting } from "../services/hosting.ts";
+import type { MediaStorage } from "../services/mediaStorage.ts";
+import { type Mailer, Notifier } from "../services/notifier.ts";
 import { Presence } from "../services/presence.ts";
 import { ReleaseService } from "../services/release.ts";
 import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
@@ -43,6 +45,10 @@ export interface ApiDeps {
     providerFetch?: typeof fetch;
     // Where published websites are served from; null or absent when there is no hosting.
     hosting?: Hosting | null;
+    // Where uploaded files are kept; null means the media library is switched off.
+    storage?: MediaStorage | null;
+    // Sends e-mail; null means notifications are shown in the app only.
+    mailer?: Mailer | null;
     // Starter templates; read from apps/server/templates unless given.
     templates?: Template[];
 }
@@ -103,7 +109,13 @@ export function createApi(deps: ApiDeps) {
         hosting: deps.hosting ?? null,
         templates: deps.templates ?? loadTemplates(),
         presence,
-        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix),
+        storage: deps.storage ?? null,
+        notifier: new Notifier(store, {
+            mailer: deps.mailer ?? null,
+            publicOrigin: config.publicOrigin,
+            operatorEmail: config.operatorEmail,
+        }),
+        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix, deps.storage ?? null),
         box: new SecretBox(deps.secretsKey),
         app,
         declared,

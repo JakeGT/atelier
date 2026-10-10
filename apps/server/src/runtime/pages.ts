@@ -23,6 +23,8 @@ export interface SiteLimits {
 
 export const DEFAULT_LIMITS: SiteLimits = { maxFiles: 5000, maxFileBytes: 25 * 1024 * 1024, maxTotalBytes: 200 * 1024 * 1024 };
 
+const MEDIA_FILE = /^[a-z0-9][a-z0-9-]{0,70}\.[a-z0-9]{2,5}$/;
+
 // A problem with the website itself, worded for its owner.
 export class SiteError extends Error {}
 
@@ -79,8 +81,14 @@ export interface Site {
 }
 
 // Turns an archive into the files to serve, refusing anything that is not a plain file.
-// `fill`: given a page's HTML, returns it with its wording filled in (ADR-0014).
-export function siteFromArchive(archive: Buffer, limits: SiteLimits = DEFAULT_LIMITS, fill?: (html: string) => string): Site {
+// `fill`: given a page's HTML and path, returns it with its wording filled in (ADR-0014).
+// `media`: files from the website's media library that this release uses, served under /media/.
+export function siteFromArchive(
+    archive: Buffer,
+    limits: SiteLimits = DEFAULT_LIMITS,
+    fill?: (html: string, path: string) => string,
+    media: { name: string; body: Buffer }[] = [],
+): Site {
     let entries: ReturnType<typeof readTar>;
     try {
         entries = readTar(archive, { maxEntries: limits.maxFiles * 4 });
@@ -116,8 +124,22 @@ export function siteFromArchive(archive: Buffer, limits: SiteLimits = DEFAULT_LI
         const path = `/${parts.join("/")}`;
         const contentType = mimeFor(path);
         // Pages are published with their wording filled in: finished HTML, no script needed.
-        const body = fill && contentType.startsWith("text/html") ? Buffer.from(fill(entry.body.toString("utf8")), "utf8") : entry.body;
+        const body =
+            fill && contentType.startsWith("text/html")
+                ? Buffer.from(fill(entry.body.toString("utf8"), parts.join("/")), "utf8")
+                : entry.body;
         files.push({ path, body, contentType, hash: assetHash(body, path) });
+        if (files.length > limits.maxFiles) throw new SiteError(`the website has more than ${limits.maxFiles} files`);
+    }
+    for (const m of media) {
+        const path = `/media/${m.name}`;
+        // A file the website itself keeps at that address wins.
+        if (!MEDIA_FILE.test(m.name) || files.some((f) => f.path === path)) continue;
+        if (m.body.length > limits.maxFileBytes) throw new SiteError(`${m.name} is larger than the most a single file can be`);
+        total += m.body.length;
+        if (total > limits.maxTotalBytes)
+            throw new SiteError(`the website is larger than ${Math.round(limits.maxTotalBytes / 1024 / 1024)} MB`);
+        files.push({ path, body: m.body, contentType: mimeFor(path), hash: assetHash(m.body, path) });
         if (files.length > limits.maxFiles) throw new SiteError(`the website has more than ${limits.maxFiles} files`);
     }
     if (!files.some((f) => f.path === "/index.html"))

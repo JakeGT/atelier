@@ -8,7 +8,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
-import { fillHtml, lookupFrom } from "../services/fill.ts";
+import { baseOf, fillHtml, lookupFrom } from "../services/fill.ts";
 import { type CloudflarePages, DEFAULT_LIMITS, PagesError, SiteError, type SiteLimits, siteFromArchive } from "./pages.ts";
 
 export interface DeployerOptions {
@@ -24,6 +24,18 @@ const contentDocuments = z
     .array(z.object({ kind: z.string(), slug: z.string(), content: z.record(z.string(), z.unknown()).nullable() }))
     .max(2000);
 const CONTENT_CAP = 8 * 1024 * 1024;
+// What the library knows about the images this release places (alt text, sizes).
+const mediaInfo = z
+    .array(
+        z.object({
+            name: z.string(),
+            alt: z.string(),
+            width: z.number().nullable(),
+            height: z.number().nullable(),
+            variants: z.array(z.object({ name: z.string(), width: z.number() })),
+        }),
+    )
+    .max(2000);
 
 const HOSTNAME = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const BRANCH = /^[a-z0-9][a-z0-9-]{0,40}$/;
@@ -75,7 +87,8 @@ export function deployerApp(opts: DeployerOptions): Hono {
     });
 
     // Body: a tar archive of the website's files, or a form with that archive and
-    // the release's content (`content`: [{kind, slug, content}]) to fill pages with.
+    // the release's content (`content`: [{kind, slug, content}]) to fill pages with,
+    // and the media library files it uses (`media-file` parts; `media`: what is known about them).
     // ?branch=main is production.
     app.post("/sites/:name/deployments", async (c) => {
         const name = siteName(c);
@@ -100,7 +113,8 @@ export function deployerApp(opts: DeployerOptions): Hono {
                 }
             }
             let archive = Buffer.concat(chunks);
-            let fill: ((html: string) => string) | undefined;
+            let fill: ((html: string, path: string) => string) | undefined;
+            const media: { name: string; body: Buffer }[] = [];
             const type = c.req.header("content-type") ?? "";
             if (type.startsWith("multipart/form-data")) {
                 const form = await new Response(new Uint8Array(archive), { headers: { "content-type": type } }).formData();
@@ -109,10 +123,17 @@ export function deployerApp(opts: DeployerOptions): Hono {
                 archive = Buffer.from(await file.arrayBuffer());
                 const documents = contentDocuments.safeParse(JSON.parse(String(form.get("content") ?? "[]")));
                 if (!documents.success) return c.json({ error: "invalid request" }, 400);
+                const info = mediaInfo.safeParse(JSON.parse(String(form.get("media") ?? "[]")));
+                if (!info.success) return c.json({ error: "invalid request" }, 400);
+                const byName = new Map(info.data.map((m) => [m.name, m]));
                 const lookup = lookupFrom(documents.data);
-                fill = (html) => fillHtml(html, lookup);
+                fill = (html, path) => fillHtml(html, lookup, { media: (n) => byName.get(n), base: baseOf(path) });
+                // Files from the media library that this release uses.
+                for (const part of form.getAll("media-file")) {
+                    if (part instanceof File) media.push({ name: part.name, body: Buffer.from(await part.arrayBuffer()) });
+                }
             }
-            const site = siteFromArchive(archive, limits, fill);
+            const site = siteFromArchive(archive, limits, fill, media);
             const { subdomain } = await pages.ensureProject(name);
             const deployment = await pages.deploy(name, site, { branch, canonicalHost: canonical, commit });
             return c.json({ ...deployment, siteUrl: `https://${subdomain}` }, 201);
