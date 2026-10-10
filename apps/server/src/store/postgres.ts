@@ -7,6 +7,7 @@ import type {
     ContentRevision,
     Deployment,
     Invitation,
+    MediaAsset,
     Membership,
     Organization,
     OrgRole,
@@ -25,8 +26,11 @@ import type {
     DomainStore,
     InvitationStore,
     LoginSessionStore,
+    MediaStore,
     MembershipStore,
     MessageStore,
+    Notice,
+    NotificationStore,
     OrganizationStore,
     ProjectStore,
     ProviderKeyStore,
@@ -350,6 +354,8 @@ export class PostgresStore implements Store {
     releases: ReleaseStore;
     deployments: DeploymentStore;
     domains: DomainStore;
+    media: MediaStore;
+    notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
 
@@ -700,6 +706,16 @@ export class PostgresStore implements Store {
                         VALUES (${doc.id}, ${doc.projectId}, ${doc.tenantId}, ${doc.rev}, ${json(input.draft)}, ${input.updatedBy})`;
                     return doc;
                 }),
+            pruneRevisions: async (tenantId, before, keep) =>
+                this.withTenant(
+                    tenantId,
+                    async (tx) =>
+                        (
+                            await tx`
+                                DELETE FROM content_revisions r USING content_documents d
+                                WHERE d.id = r.document_id AND r.created_at < ${before} AND r.rev <= d.rev - ${Math.max(1, keep)}`
+                        ).count,
+                ),
             setFields: async (tenantId, projectId, kind, slug, fields) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<ContentRow[]>`
@@ -777,6 +793,8 @@ export class PostgresStore implements Store {
         };
 
         this.messages = {
+            purgeBefore: async (tenantId, before) =>
+                this.withTenant(tenantId, async (tx) => (await tx`DELETE FROM agent_messages WHERE created_at < ${before}`).count),
             add: async (input) => {
                 await this.withTenant(
                     input.tenantId,
@@ -953,6 +971,152 @@ export class PostgresStore implements Store {
                     tenantId,
                     (tx) => tx`DELETE FROM project_domains WHERE project_id = ${projectId} AND hostname = ${hostname}`,
                 );
+            },
+        };
+
+        interface NoticeRow {
+            id: string;
+            kind: string;
+            title: string;
+            body: string;
+            link: string | null;
+            created_at: Ts;
+            read_at: Ts | null;
+        }
+        const rowToNotice = (r: NoticeRow): Notice => ({
+            id: r.id,
+            kind: r.kind,
+            title: r.title,
+            body: r.body,
+            link: r.link,
+            createdAt: isoNow(r.created_at),
+            readAt: r.read_at ? isoNow(r.read_at) : null,
+        });
+        this.notifications = {
+            add: async (n) =>
+                this.withUser(n.userId, async (tx) => {
+                    const rows = await tx<NoticeRow[]>`
+                        INSERT INTO notifications (id, user_id, tenant_id, kind, title, body, link, dedupe)
+                        VALUES (${randomUUID()}, ${n.userId}, ${n.tenantId}, ${n.kind}, ${n.title}, ${n.body}, ${n.link}, ${n.dedupe})
+                        ON CONFLICT (user_id, dedupe) DO NOTHING
+                        RETURNING id, kind, title, body, link, created_at, read_at`;
+                    // A person's old notifications go as new ones arrive (kept 90 days).
+                    await tx`DELETE FROM notifications WHERE created_at < now() - interval '90 days'`;
+                    const r = rows[0];
+                    return r ? rowToNotice(r) : null;
+                }),
+            list: async (userId, limit = 50) =>
+                this.withUser(userId, async (tx) => {
+                    const rows = await tx<NoticeRow[]>`
+                        SELECT id, kind, title, body, link, created_at, read_at FROM notifications ORDER BY created_at DESC LIMIT ${limit}`;
+                    return rows.map(rowToNotice);
+                }),
+            unread: async (userId) =>
+                this.withUser(userId, async (tx) => {
+                    const rows = await tx<{ n: string }[]>`SELECT count(*) AS n FROM notifications WHERE read_at IS NULL`;
+                    return Number(rows[0]?.n ?? 0);
+                }),
+            markRead: async (userId) => {
+                await this.withUser(userId, (tx) => tx`UPDATE notifications SET read_at = now() WHERE read_at IS NULL`);
+            },
+            markEmailed: async (userId, id) => {
+                await this.withUser(userId, (tx) => tx`UPDATE notifications SET emailed_at = now() WHERE id = ${id}`);
+            },
+            emailWanted: async (userId) => {
+                const rows = await this.sql<{ email_notifications: boolean }[]>`SELECT email_notifications FROM users WHERE id = ${userId}`;
+                return rows[0]?.email_notifications ?? false;
+            },
+            setEmailWanted: async (userId, on) => {
+                await this.sql`UPDATE users SET email_notifications = ${on} WHERE id = ${userId}`;
+            },
+            admins: async () => (await this.sql<{ id: string }[]>`SELECT id FROM users WHERE admin`).map((r) => r.id),
+        };
+
+        const MEDIA_COLS =
+            "id, project_id, tenant_id, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by, created_at, deleted_at";
+        interface MediaRow {
+            id: string;
+            project_id: string;
+            tenant_id: string;
+            name: string;
+            kind: MediaAsset["kind"];
+            mime: string | null;
+            width: number | null;
+            height: number | null;
+            alt: string | null;
+            decorative: boolean;
+            bytes: string | number | null;
+            variants: MediaAsset["variants"];
+            uploaded_by: string | null;
+            created_at: Ts;
+            deleted_at: Ts | null;
+        }
+        const rowToMedia = (r: MediaRow): MediaAsset => ({
+            id: r.id,
+            projectId: r.project_id,
+            tenantId: r.tenant_id,
+            name: r.name,
+            kind: r.kind,
+            mime: r.mime ?? "application/octet-stream",
+            width: r.width,
+            height: r.height,
+            alt: r.alt ?? "",
+            decorative: r.decorative,
+            bytes: Number(r.bytes ?? 0),
+            variants: r.variants ?? [],
+            uploadedBy: r.uploaded_by,
+            createdAt: isoNow(r.created_at),
+            deletedAt: r.deleted_at ? isoNow(r.deleted_at) : null,
+        });
+        this.media = {
+            create: async (a) =>
+                this.withTenant(a.tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        INSERT INTO media_assets (id, project_id, tenant_id, key, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by)
+                        VALUES (${a.id}, ${a.projectId}, ${a.tenantId}, ${`${a.tenantId}/${a.projectId}/${a.name}`}, ${a.name}, ${a.kind}, ${a.mime},
+                                ${a.width}, ${a.height}, ${a.alt}, ${a.decorative}, ${a.bytes}, ${json(a.variants as unknown as Json)}, ${a.uploadedBy})
+                        RETURNING ${tx.unsafe(MEDIA_COLS)}`;
+                    return rowToMedia(firstRow(rows));
+                }),
+            list: async (tenantId, projectId, withRemoved = false) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        SELECT ${tx.unsafe(MEDIA_COLS)} FROM media_assets
+                        WHERE project_id = ${projectId} AND name IS NOT NULL AND (${withRemoved} OR deleted_at IS NULL)
+                        ORDER BY created_at DESC`;
+                    return rows.map(rowToMedia);
+                }),
+            get: async (tenantId, projectId, id) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        SELECT ${tx.unsafe(MEDIA_COLS)} FROM media_assets WHERE id = ${id} AND project_id = ${projectId} AND name IS NOT NULL`;
+                    const r = rows[0];
+                    return r ? rowToMedia(r) : null;
+                }),
+            describe: async (tenantId, projectId, id, patch) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        UPDATE media_assets SET alt = ${patch.alt}, decorative = ${patch.decorative}
+                        WHERE id = ${id} AND project_id = ${projectId} RETURNING ${tx.unsafe(MEDIA_COLS)}`;
+                    const r = rows[0];
+                    return r ? rowToMedia(r) : null;
+                }),
+            remove: async (tenantId, projectId, id) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        UPDATE media_assets SET deleted_at = COALESCE(deleted_at, now())
+                        WHERE id = ${id} AND project_id = ${projectId} RETURNING ${tx.unsafe(MEDIA_COLS)}`;
+                    const r = rows[0];
+                    return r ? rowToMedia(r) : null;
+                }),
+            removedBefore: async (tenantId, before) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        SELECT ${tx.unsafe(MEDIA_COLS)} FROM media_assets WHERE deleted_at < ${before} AND name IS NOT NULL`;
+                    return rows.map(rowToMedia);
+                }),
+            purge: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM media_assets WHERE id = ${id} AND deleted_at IS NOT NULL`);
             },
         };
 

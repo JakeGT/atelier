@@ -1,3 +1,5 @@
+import type { MediaInfo } from "./fill.ts";
+
 // Where published websites are served from. The control plane talks to the
 // deployer service (runtime/deployer.ts), which holds the hosting credential and
 // does the work; this is the client, and the seam for another host later
@@ -39,6 +41,9 @@ export interface DeployInput {
     commit: string | null;
     // The release's content: pages are published with their wording filled in (ADR-0014).
     content?: { kind: string; slug: string; content: Record<string, unknown> | null }[];
+    // The media library files this release uses, and what the library knows about them.
+    media?: { name: string; body: Uint8Array; mime: string }[];
+    mediaInfo?: MediaInfo[];
 }
 
 export interface Hosting {
@@ -116,10 +121,13 @@ export class DeployerHosting implements Hosting {
         if (input.canonicalHost) query.set("canonical", input.canonicalHost);
         if (input.commit) query.set("commit", input.commit);
         const path = `/sites/${input.site}/deployments?${query}`;
-        if (!input.content?.length) return this.call<DeployResult>("POST", path, { body: input.archive });
+        if (!input.content?.length && !input.media?.length) return this.call<DeployResult>("POST", path, { body: input.archive });
         const form = new FormData();
         form.append("archive", new Blob([input.archive as Uint8Array<ArrayBuffer>], { type: "application/x-tar" }), "site.tar");
-        form.append("content", JSON.stringify(input.content));
+        form.append("content", JSON.stringify(input.content ?? []));
+        form.append("media", JSON.stringify(input.mediaInfo ?? []));
+        for (const m of input.media ?? [])
+            form.append("media-file", new Blob([m.body as Uint8Array<ArrayBuffer>], { type: m.mime }), m.name);
         return this.call<DeployResult>("POST", path, { form });
     }
 

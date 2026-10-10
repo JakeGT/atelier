@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
-import { fillHtml, isBound, lookupFrom } from "../services/fill.ts";
+import { baseOf, fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { agentInstructions } from "../services/instructions.ts";
+import { filesOf, MEDIA_NAME, mimeOfName, storageKey } from "../services/media.ts";
 import { PREVIEW_BRIDGE } from "../services/previewBridge.ts";
 import { findProvider, parseModel, validModelRef } from "../services/providers.ts";
 import type { RunState } from "../services/runtime.ts";
@@ -24,7 +25,7 @@ const PREVIEW_HEADERS = {
 
 // The assistant and its workspace: sessions, runs, the conversation, versions, preview.
 export function workspaceRoutes(api: Api): void {
-    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates } = api;
+    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates, storage, notifier } = api;
     const previewKey = `${secretsKey}:preview`;
     const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
 
@@ -82,6 +83,14 @@ export function workspaceRoutes(api: Api): void {
         const { dailyTokenLimit } = limits(org);
         const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
         if (dailyTokenLimit !== null && used >= dailyTokenLimit) {
+            // Once a day, to the people who can change the limit.
+            await notifier.tellStudio(org.id, {
+                kind: "usage.limit",
+                title: `${org.name} has reached today's usage limit`,
+                body: "The assistant will not take new requests in this studio until midnight UTC. An owner or admin can raise or remove the limit in the studio's settings.",
+                link: `/o/${org.slug}/settings`,
+                dedupe: `limit:${org.id}:${new Date().toISOString().slice(0, 10)}`,
+            });
             return c.json({ error: "this studio has reached today's usage limit for the assistant; it resets at midnight UTC" }, 429);
         }
 
@@ -154,6 +163,28 @@ export function workspaceRoutes(api: Api): void {
             await store.messages.add({ ...base, role: "note", text, tools: run.result?.toolEvents ?? [] });
         } else {
             await store.messages.add({ ...base, role: "error", text: run.error ?? "The assistant stopped unexpectedly." });
+        }
+        // Whoever asked may have walked away: tell them if it did not finish.
+        if (run.status === "failed" || run.status === "timed_out") {
+            const asked = (await store.messages.list(tenantId, projectId)).find((m) => m.runId === run.id && m.role === "user");
+            const project = await store.projects.findById(tenantId, projectId);
+            const org = await store.organizations.findById(tenantId);
+            if (asked?.authorId && project && org) {
+                await notifier.tell([asked.authorId], {
+                    tenantId,
+                    kind: run.status === "failed" ? "assistant.failed" : "assistant.paused",
+                    title:
+                        run.status === "failed"
+                            ? `Your assistant could not finish on ${project.name}`
+                            : `Your assistant was paused on ${project.name}`,
+                    body:
+                        run.status === "failed"
+                            ? `It stopped with a problem: ${(run.error ?? "it stopped unexpectedly").slice(0, 300)}. Nothing was lost; open the website to ask again.`
+                            : "The request ran out of time before it finished. What it had done is saved. Open the website and choose Carry on to let it finish.",
+                    link: `/o/${org.slug}/p/${project.slug}`,
+                    dedupe: `run:${run.id}`,
+                });
+            }
         }
         const seconds = run.finishedAt ? Math.max(0, (new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000) : 0;
         const meter = (kind: Parameters<typeof store.usage.record>[0]["kind"], units: number) =>
@@ -315,7 +346,21 @@ export function workspaceRoutes(api: Api): void {
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
         const file = await runtime.readFile(claims.projectId, rel).catch(() => null);
-        if (!file) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        if (!file) {
+            // Not one of the website's own files: a file from its media library, perhaps.
+            const name = /^media\/([^/]+)$/.exec(rel)?.[1] ?? "";
+            if (storage && MEDIA_NAME.test(name)) {
+                const known = (await store.media.list(project.tenantId, project.id)).some((a) => filesOf(a).includes(name));
+                const body = known
+                    ? await storage.get(storageKey({ tenantId: project.tenantId, projectId: project.id }, name)).catch(() => null)
+                    : null;
+                if (body)
+                    return new Response(body as Uint8Array<ArrayBuffer>, {
+                        headers: { "content-type": mimeOfName(name), ...PREVIEW_HEADERS },
+                    });
+            }
+            return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        }
         // Inside the editor's preview frame (and only there), a page is given a few
         // lines that tell the editor which page is showing and obey its Back and
         // Forward buttons. The sandbox stops the editor reaching into the frame, so
@@ -328,7 +373,12 @@ export function workspaceRoutes(api: Api): void {
             // publishing will fill it from a release (ADR-0014).
             if (isBound(html)) {
                 const drafts = await store.content.list(claims.tenantId, claims.projectId);
-                html = fillHtml(html, lookupFrom(drafts.map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }))));
+                const library = html.includes("data-content-image") ? await store.media.list(claims.tenantId, claims.projectId) : [];
+                const byName = new Map(library.map((a) => [a.name, { ...a, alt: a.decorative ? "" : a.alt }]));
+                html = fillHtml(html, lookupFrom(drafts.map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }))), {
+                    media: (n) => byName.get(n),
+                    base: baseOf(rel),
+                });
             }
             if (c.req.header("sec-fetch-dest") === "iframe") html = `${html}\n${PREVIEW_BRIDGE}`;
             if (html !== written) return new Response(html, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });

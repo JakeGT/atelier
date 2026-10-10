@@ -1198,3 +1198,76 @@ textarea {
     max-height: calc(100vh - 48px);
     overflow-y: auto;
 }
+
+/* ---- notifications -------------------------------------------------------------------- */
+
+.menu-wrap > .notice-new {
+    margin-right: 8px;
+    border-color: var(--seal);
+    color: var(--seal-deep);
+    white-space: nowrap;
+}
+
+.notices {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+    max-height: 52vh;
+    overflow-y: auto;
+}
+
+.notices li {
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+}
+
+.notices li.notice-unread {
+    border-color: var(--seal);
+}
+
+.notices li > div:first-child {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.notices strong {
+    font-weight: 500;
+}
+
+.notices p {
+    margin: 6px 0 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-2);
+}
+
+.notice-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.notice-foot .mono {
+    font-size: 11.5px;
+}
+
+.check.notice-email {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 18px;
+    font-size: 13.5px;
+    cursor: pointer;
+}
+
+.menu-wrap:has(> .notice-new) {
+    display: flex;
+    align-items: center;
+}

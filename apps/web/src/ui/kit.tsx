@@ -1,9 +1,9 @@
-import { Check, LogOut, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
+import { ArrowRight, Bell, Check, LogOut, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { Session } from "../lib/api";
+import type { Inbox, Session } from "../lib/api";
 import { api, isStale, UPDATE_EVENT } from "../lib/api";
-import { navigate, type Theme, useClickOutside } from "../lib/hooks";
+import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
 
 export function Wordmark({ to = "/" }: { to?: string }) {
     return (
@@ -62,8 +62,17 @@ export function UserMenu({
     const [open, setOpen] = useState(false);
     const ref = useClickOutside(useCallback(() => setOpen(false), []));
     const initial = (session.name || session.email).trim().charAt(0).toUpperCase();
+    const { inbox, showing, show, hide, setEmail } = useInbox();
+    const unread = inbox?.unread ?? 0;
     return (
         <div className="menu-wrap" ref={ref}>
+            {/* Something new: said in words, beside the account button, until it has been looked at. */}
+            {unread > 0 && (
+                <button type="button" className="btn btn-sm notice-new" onClick={show}>
+                    <Bell /> {unread} new {unread === 1 ? "notification" : "notifications"}
+                </button>
+            )}
+            {showing && inbox && <NoticeList inbox={inbox} onClose={hide} onEmail={setEmail} />}
             <button type="button" className="avatar" onClick={() => setOpen((o) => !o)} aria-label="Account" aria-expanded={open}>
                 {initial}
             </button>
@@ -86,6 +95,16 @@ export function UserMenu({
                             {item.icon} {item.label}
                         </button>
                     ))}
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                            setOpen(false);
+                            show();
+                        }}
+                    >
+                        <Bell /> Notifications{unread > 0 ? ` (${unread} new)` : ""}
+                    </button>
                     {items.length > 0 && <div className="menu-rule" />}
                     {theme && onToggleTheme && (
                         <button type="button" role="menuitem" onClick={onToggleTheme}>
@@ -99,6 +118,101 @@ export function UserMenu({
                 </div>
             )}
         </div>
+    );
+}
+
+// ---- notifications ---------------------------------------------------------------------
+
+// What happened while the person was not looking (a request that did not finish,
+// a website that could not be published). Checked every minute and whenever the
+// window is returned to.
+function useInbox() {
+    const [inbox, setInbox] = useState<Inbox | null>(null);
+    const [showing, setShowing] = useState(false);
+    const load = useCallback(() => api.notifications().then(setInbox, () => {}), []);
+    useEffect(() => {
+        void load();
+        const timer = setInterval(() => !document.hidden && void load(), 60_000);
+        const onFocus = () => void load();
+        window.addEventListener("focus", onFocus);
+        return () => {
+            clearInterval(timer);
+            window.removeEventListener("focus", onFocus);
+        };
+    }, [load]);
+    return {
+        inbox,
+        showing,
+        show: () => {
+            setShowing(true);
+            void load();
+        },
+        // Closing the list is what marks them as seen, so they stay marked "new" while it is open.
+        hide: () => {
+            setShowing(false);
+            void api.readNotifications().then(load, () => {});
+        },
+        setEmail: (on: boolean) => {
+            setInbox((i) => (i ? { ...i, email: on } : i));
+            void api.emailNotifications(on).then(load, load);
+        },
+    };
+}
+
+function NoticeList({ inbox, onClose, onEmail }: { inbox: Inbox; onClose: () => void; onEmail: (on: boolean) => void }) {
+    return (
+        <Dialog onClose={onClose} wide>
+            <h2 className="display">Notifications</h2>
+            {inbox.notifications.length === 0 ? (
+                <p className="muted">
+                    Nothing yet. You are told here when a request to your assistant does not finish, or a website cannot be published.
+                </p>
+            ) : (
+                <ol className="notices">
+                    {inbox.notifications.map((n) => (
+                        <li key={n.id} className={n.readAt ? "" : "notice-unread"}>
+                            <div>
+                                <strong>{n.title}</strong>
+                                {!n.readAt && <span className="chip chip-seal">New</span>}
+                            </div>
+                            <p>{n.body}</p>
+                            <div className="notice-foot">
+                                <span className="mono muted">{timeAgo(n.createdAt)}</span>
+                                {n.link && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-sm"
+                                        onClick={() => {
+                                            onClose();
+                                            navigate(n.link ?? "/");
+                                        }}
+                                    >
+                                        Go and look <ArrowRight />
+                                    </button>
+                                )}
+                            </div>
+                        </li>
+                    ))}
+                </ol>
+            )}
+            <label className="check notice-email">
+                <input
+                    type="checkbox"
+                    checked={inbox.email && inbox.emailAvailable}
+                    disabled={!inbox.emailAvailable}
+                    onChange={(e) => onEmail(e.target.checked)}
+                />
+                <span>
+                    E-mail me about these too
+                    {!inbox.emailAvailable && <span className="muted"> (e-mail is not set up on this Atelier yet)</span>}
+                </span>
+            </label>
+            <div className="dialog-actions">
+                <button type="button" className="btn btn-primary" onClick={onClose}>
+                    Close
+                </button>
+            </div>
+        </Dialog>
     );
 }
 

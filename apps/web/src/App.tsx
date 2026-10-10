@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { MediaProvider } from "./editor/Media";
 import type { Org, Project, PublicConfig, Session } from "./lib/api";
-import { api, orgApi } from "./lib/api";
+import { api, can, orgApi } from "./lib/api";
 import { navigate, usePath, useTheme } from "./lib/hooks";
 import { Content } from "./pages/Content";
 import { Editor } from "./pages/Editor";
@@ -206,6 +207,7 @@ function ProjectRoute(props: {
 }) {
     const [project, setProject] = useState<Project | null | undefined>(undefined);
     const orgSlug = props.org.slug;
+    const mediaApi = useMemo(() => orgApi(orgSlug), [orgSlug]);
 
     useEffect(() => {
         setProject(undefined);
@@ -226,7 +228,11 @@ function ProjectRoute(props: {
     if (project === null) return <Missing title="That website isn't" body="It may have been removed, or the link is wrong." />;
     // Keyed by project so switching projects resets all editor state.
     if (props.view === "content") return <Content key={project.id} project={project} {...props} />;
-    return <Editor key={project.id} project={project} onProjectChanged={setProject} {...props} />;
+    return (
+        <MediaProvider a={mediaApi} projectId={project.id} canEdit={can.edit(props.org.role) && project.archivedAt === null}>
+            <Editor key={project.id} project={project} onProjectChanged={setProject} {...props} />
+        </MediaProvider>
+    );
 }
 
 function Missing({ title, body, whole }: { title: string; body: string; whole?: boolean }) {

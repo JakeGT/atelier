@@ -40,12 +40,21 @@ server.tool("content_get", "Get a content document by kind and slug", { kind: z.
     return json(result.document);
 });
 
+server.tool(
+    "media_list",
+    'List the files the person has uploaded for this website (photographs, logos, PDFs, short clips), with a description of each and its path. Use a file by writing its path exactly, relative to the website\'s top folder: <img src="media/…" alt="…">. You cannot see the pictures or add files; if a needed image is not here, ask the person to upload it in the Content page.',
+    {},
+    async () => json(((await api("/api/agent/media")) as { files: unknown }).files),
+);
+
 const field = z.object({
     key: z.string().describe("The field's name in the draft, as used after # in data-content attributes"),
     label: z.string().describe("What a person would call it: 'Headline', not 'heroTitle'"),
     type: z
-        .enum(["text", "long", "rich", "list"])
-        .describe("text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings"),
+        .enum(["text", "long", "rich", "list", "image"])
+        .describe(
+            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'",
+        ),
     help: z.string().optional().describe("One line saying where it appears, e.g. 'Shown at the top of the home page'"),
 });
 

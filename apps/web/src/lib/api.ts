@@ -228,12 +228,37 @@ export interface ContentDocument {
     updatedAt: string;
 }
 
+// A file in a website's media library.
+export interface MediaAsset {
+    id: string;
+    name: string;
+    // How pages and wording refer to it.
+    path: string;
+    kind: "image" | "video" | "audio" | "document";
+    mime: string;
+    width: number | null;
+    height: number | null;
+    alt: string;
+    decorative: boolean;
+    bytes: number;
+    variants: { name: string; width: number }[];
+    createdAt: string;
+}
+export interface MediaLibrary {
+    // False when this server has nowhere to keep files yet.
+    enabled: boolean;
+    assets: MediaAsset[];
+    used: number;
+    limits: { fileBytes: number; libraryBytes: number; files: number };
+}
+
 // How one field of a piece of wording is shown and edited.
 export interface ContentField {
     key: string;
     label: string;
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
-    type: "text" | "long" | "rich" | "list";
+    // image: a file from the media library, held as its path ("media/<name>").
+    type: "text" | "long" | "rich" | "list" | "image";
     help?: string;
 }
 
@@ -360,8 +385,29 @@ export function reauthenticate(): void {
 }
 
 // About the signed-in person, not any one organisation.
+// Something that happened while the person was not looking.
+export interface Notice {
+    id: string;
+    kind: string;
+    title: string;
+    body: string;
+    link: string | null;
+    createdAt: string;
+    readAt: string | null;
+}
+export interface Inbox {
+    notifications: Notice[];
+    unread: number;
+    // Whether this person is e-mailed too, and whether this server can send e-mail at all.
+    email: boolean;
+    emailAvailable: boolean;
+}
+
 export const api = {
     config: () => get<PublicConfig>("/api/v1/config"),
+    notifications: () => get<Inbox>("/api/v1/notifications"),
+    readNotifications: () => post<{ ok: true }>("/api/v1/notifications/read"),
+    emailNotifications: (on: boolean) => put<{ email: boolean }>("/api/v1/notifications/email", { on }),
     session: async (): Promise<Session | null> => {
         const s = (await fetch("/auth/session").then((r) => noteBuild(r).json())) as Session | null;
         csrfToken = s?.csrfToken ?? null;
@@ -456,6 +502,24 @@ export function orgApi(org: string) {
             post<{ hostname: string; target: string }>(`${p(projectId)}/domains`, { hostname }),
         checkDomain: (projectId: string, hostname: string) => post<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}/check`),
         removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}`),
+
+        listMedia: (projectId: string) => get<MediaLibrary>(`${p(projectId)}/media`),
+        uploadMedia: (projectId: string, file: File, about: { alt: string; decorative: boolean }) => {
+            const form = new FormData();
+            form.append("file", file);
+            form.append("alt", about.alt);
+            form.append("decorative", String(about.decorative));
+            return fetch(`${p(projectId)}/media`, { method: "POST", headers: { "x-atelier-csrf": csrfToken ?? "" }, body: form })
+                .then((r) => parse<{ asset: MediaAsset }>(r))
+                .then((b) => b.asset);
+        },
+        describeMedia: (projectId: string, id: string, about: { alt: string; decorative: boolean }) =>
+            patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${id}`, about).then((b) => b.asset),
+        removeMedia: (projectId: string, id: string, anyway = false) =>
+            del<{ ok: true }>(`${p(projectId)}/media/${id}${anyway ? "?anyway=1" : ""}`),
+        // The smallest copy of an image there is, for showing it in the library.
+        mediaUrl: (projectId: string, asset: Pick<MediaAsset, "name" | "variants">) =>
+            `${p(projectId)}/media/file/${asset.variants[0]?.name ?? asset.name}`,
 
         contentHistory: (projectId: string, kind: string, slug: string) =>
             get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${kind}/${slug}/revisions`).then((b) => b.revisions),

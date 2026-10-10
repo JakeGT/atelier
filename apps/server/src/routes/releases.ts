@@ -3,7 +3,7 @@ import { type Api, type Ctx, PROJECT, param } from "./kit.ts";
 
 // Releases: the only path from draft to live (ADR-0007).
 export function releaseRoutes(api: Api): void {
-    const { route, store, stepUp, audit, releases } = api;
+    const { route, store, stepUp, audit, releases, notifier } = api;
 
     route("get", `${PROJECT}/releases`, "release.read", async (c) =>
         c.json({ releases: await store.releases.listByProject(c.get("org").id, c.get("project").id) }),
@@ -55,6 +55,27 @@ export function releaseRoutes(api: Api): void {
             if (err instanceof ReleaseError) {
                 if (err.status === 422 || err.status === 502)
                     await audit(c, `release.${action}.failed`, `project:${projectId}`, { number, reason: err.message });
+                // Our side or the host's (not something wrong with the website): the studio's
+                // owners should know it did not go out, and so should whoever runs the platform.
+                if (err.status === 502) {
+                    const project = c.get("project");
+                    await notifier.tellStudio(
+                        c.get("org").id,
+                        {
+                            kind: "publish.failed",
+                            title: `${project.name} could not be published`,
+                            body: `${c.get("user").name} tried to publish it and the publishing service failed. The version that was live is still live. Try again in a few minutes.`,
+                            link: `/o/${c.get("org").slug}/p/${project.slug}`,
+                            dedupe: `publish:${projectId}:${number}`,
+                        },
+                        [c.get("user").id],
+                    );
+                    await notifier.tellOperator(
+                        "publish.failed",
+                        "Publishing is failing",
+                        `Publishing ${project.name} (${c.get("org").name}) failed on the hosting side. See the server and deployer logs.`,
+                    );
+                }
                 return c.json({ error: err.message }, err.status);
             }
             throw err;

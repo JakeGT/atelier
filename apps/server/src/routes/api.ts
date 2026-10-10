@@ -2,7 +2,9 @@ import { adminRoutes } from "./admin.ts";
 import { contentRoutes } from "./content.ts";
 import { hostingRoutes } from "./hosting.ts";
 import { type ApiDeps, createApi, type DeclaredRoute, type Env } from "./kit.ts";
+import { mediaRoutes } from "./media.ts";
 import { modelRoutes } from "./models.ts";
+import { notificationRoutes } from "./notifications.ts";
 import { orgRoutes } from "./orgs.ts";
 import { projectRoutes } from "./projects.ts";
 import { releaseRoutes } from "./releases.ts";
@@ -18,10 +20,12 @@ export function apiRoutes(deps: ApiDeps): { app: import("hono").Hono<Env>; decla
     orgRoutes(api);
     projectRoutes(api);
     contentRoutes(api);
+    mediaRoutes(api);
     workspaceRoutes(api);
     releaseRoutes(api);
     modelRoutes(api);
     hostingRoutes(api);
     adminRoutes(api);
+    notificationRoutes(api);
     return { app: api.app, declared: api.declared };
 }

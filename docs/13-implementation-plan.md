@@ -390,16 +390,19 @@ current host. What needs the VPS is P6, which is last.
   below.
 - E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
-- E5.3 Alerting (build/publish failure, stall, spend over ceiling).
+  **Built (`p5-media`):** a daily job with the periods in docs/12 §5. **Not
+  built:** deleting a whole studio, monthly aggregates of usage.
+- E5.3 Alerting (build/publish failure, stall, spend over ceiling). **Built
+  (`p5-media`):** notifications in the app and by e-mail (docs/12 §6).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown
 
-**Steps a–e are built** (a on `p4-operator-templates`; b–e on
-`p5-content-studio`, 2026-10-10; details in ADR-0014 "As built"). **Steps f–h
-(media) are not started** and wait for a decision on where files are stored.
-Lists of items with several fields, more field types, and limits checked at
-publish are also still to do.
+**Steps a–h are built** (a on `p4-operator-templates`; b–e on
+`p5-content-studio`; f–h on `p5-media`, 2026-10-10), with the differences
+listed in ADR-0014's two "As built" sections. Still to do: lists of items with
+several fields, more field types, limits checked at publish, a focal point for
+images, poster images for video.
 
 | Step | What it delivers | Depends on |
 | --- | --- | --- |

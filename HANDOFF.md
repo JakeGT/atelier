@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.0` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #8. Three PRs are open, to merge in this order: [#9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs), [#10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates`, [#11](https://github.com/JakeGT/atelier/pull/11) `p5-content-studio` (stacked on #10; includes #9).
+> Last updated 2026-10-10. Status: **`p5.3` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #8. Four PRs are open, to merge in this order: [#9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs), [#10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates`, [#11](https://github.com/JakeGT/atelier/pull/11) `p5-content-studio`, [#12](https://github.com/JakeGT/atelier/pull/12) `p5-media` (each stacked on the one before).
 
 ## TL;DR
 
@@ -31,9 +31,9 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.0` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.3` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
-| Migrations | `0001`–`0013` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0015` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
@@ -146,6 +146,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Documents describe their fields (label, type, help); the assistant is told to write them and to bind elements.
 - Not built: media (needs a storage decision), lists of multi-field items, publish-time limits. See ADR-0014 "As built".
 
+## Pictures and files, notifications, retention (branch `p5-media`)
+
+- **Media library:** uploads are prepared in `services/media.ts` (type from bytes, photographs re-encoded and given smaller copies, SVG sanitised) and kept in Cloudflare R2 (`services/mediaStorage.ts`, signed S3 requests; `MEDIA_STORAGE=disk` in development). Pages refer to `media/<name>`; `data-content-image` binds an `<img>` to a field. The release service sends the deployer the files a release mentions.
+- **Notifications:** `services/notifier.ts`, table `notifications` (one person's rows only, by RLS). In the app always; by e-mail through Resend when configured. Events and recipients are in docs/12 §6.
+- **Retention:** `services/retention.ts`, daily; periods in docs/12 §5.
+- **On in production since p5.3 (2026-10-10):** the R2 bucket `atelier` (private, standard address: it is located in the EU but not in the EU jurisdiction, so `R2_JURISDICTION` is unset) and Resend (`MAIL_FROM` `noreply@notify.jaketalling.com`, operator alerts to the owner's address). Checked from inside the server: put, get and delete against the bucket, and one test e-mail accepted by Resend. Not checked: an upload through the signed-in interface.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
@@ -160,11 +167,9 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 The order from here (docs/13):
 
-1. **P5, in progress:** content studio steps a–e are built. Next: media (steps f–h, after Jake decides where files are stored), then data retention (E5.2) and alerting (E5.3).
+1. **P5 is built** (content studio, media, retention, alerting). What it leaves: lists of items with several fields, limits checked at publish, focal points, video posters, deleting a whole studio.
 2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
 3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
-
-Planned, not started: **the content studio** (ADR-0014, docs/13 E5.0 steps a–h). Content becomes what the page shows, edited in the preview, in a pop-up and on a dedicated Content page, with a media library. Step a (pop-up editing from the side panel) needs nothing else.
 
 Planned, not started: **Connect your own Cloudflare** (ADR-0013, docs/13 E4.5). A studio connects its own Cloudflare account by OAuth and has domains set up for it. The first step is answering the ADR's open questions against a real OAuth client and starting Cloudflare's approval for a public one.
 
