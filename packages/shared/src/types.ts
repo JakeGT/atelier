@@ -28,6 +28,11 @@ export const organizationSchema = z.object({
     name: z.string().min(1),
     slug: z.string().min(1),
     status: z.enum(TENANT_STATUSES).default("active"),
+    // The model the assistant uses unless a project chooses its own (null = the runtime's default).
+    defaultModel: z.string().nullable(),
+    // Safety ceilings; null = the server's default.
+    maxProjects: z.number().int().positive().nullable(),
+    dailyTokenLimit: z.number().int().positive().nullable(),
 });
 
 export const userSchema = z.object({
@@ -56,6 +61,10 @@ export const projectSchema = z.object({
     agentConfigRef: z.string().nullable(),
     previewRef: z.string().nullable(),
     productionRef: z.string().nullable(),
+    // Guidance the owner gives the assistant for this website, and an optional model.
+    agentInstructions: z.string().nullable(),
+    agentModel: z.string().nullable(),
+    archivedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
 });
 
@@ -189,3 +198,30 @@ export const agentMessageSchema = z.object({
 });
 
 export type AgentMessage = z.infer<typeof agentMessageSchema>;
+
+// ---- P2: membership, invitations, usage ----
+
+export const INVITABLE_ROLES = ["admin", "editor", "viewer"] as const;
+
+export const memberSchema = z.object({
+    userId: z.string().uuid(),
+    email: z.string(),
+    name: z.string(),
+    role: z.enum(ORG_ROLES),
+    joinedAt: z.string().datetime(),
+});
+
+export const invitationSchema = z.object({
+    id: z.string().uuid(),
+    tenantId: z.string().uuid(),
+    email: z.string(),
+    role: z.enum(INVITABLE_ROLES),
+    createdAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+});
+
+export const USAGE_KINDS = ["agent.input_tokens", "agent.output_tokens", "agent.runs", "agent.seconds"] as const;
+export type UsageKind = (typeof USAGE_KINDS)[number];
+
+export type Member = z.infer<typeof memberSchema>;
+export type Invitation = z.infer<typeof invitationSchema>;

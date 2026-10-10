@@ -1,10 +1,15 @@
 # 06 — API design
 
-> **Implementation status (P1 + hardening):** P1 routes are flat
-> (`/api/v1/projects/...`). The tenant comes from the session (the user's first
-> org). P2 adds `/orgs/{org}/...`, where **the URL selects the org and the
-> membership check authorizes it** (§1's "never from a URL segment" means the
-> URL alone never grants access). Every route is registered with a permission
+> **Implementation status (P2):** organisation-scoped routes live under
+> `/api/v1/orgs/{org}/...`: **the URL selects the organisation and the
+> membership check authorises it** (§1's "never from a URL segment" means the
+> URL alone never grants access). A foreign or unknown organisation is a 404.
+> Added in P2: `POST /orgs`, `GET|PATCH /orgs/{org}`, members
+> (`GET`, `PATCH|DELETE .../members/{user}`), invitations
+> (`GET|POST`, `DELETE .../invitations/{id}`), `GET .../usage`,
+> `GET .../audit`; projects gained `GET|PATCH|DELETE`, `POST .../archive|restore`.
+> The routes listed below are the P1 set and all now carry the
+> `/orgs/{org}` prefix. Every route is registered with a permission
 > from the shared table (`requirePermission`), and `test/permissions.test.ts`
 > fails CI if one isn't. Mutations need the CSRF token. Publish and rollback
 > also need a sign-in within `STEP_UP_MINUTES` (`401 reauth_required`).

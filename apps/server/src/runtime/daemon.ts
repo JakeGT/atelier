@@ -27,6 +27,7 @@ const workspace = new Workspace(process.env.WORKSPACE_DIR ?? "/workspace");
 const agent = new OpenCodeAgent({
     stateDir: process.env.AGENT_STATE_DIR ?? "/tmp/agent",
     mcpEntry: process.env.MCP_SERVER_ENTRY ?? "/app/apps/server/src/mcp/content.ts",
+    egressProxy: process.env.EGRESS_PROXY || undefined,
 });
 const port = Number(process.env.PORT ?? 8090);
 
@@ -51,6 +52,7 @@ app.post("/runs", async (c) => {
     const body = (await c.req.json().catch(() => null)) as {
         prompt?: unknown;
         model?: unknown;
+        instructions?: unknown;
         apiUrl?: unknown;
         agentToken?: unknown;
     } | null;
@@ -64,10 +66,20 @@ app.post("/runs", async (c) => {
         return c.json({ error: "prompt, apiUrl and agentToken are required" }, 400);
     }
     const model = typeof body.model === "string" ? body.model : null;
-    const run = startAgentRun(runs, workspace, agent, { prompt: body.prompt, model, apiUrl: body.apiUrl, agentToken: body.agentToken });
+    const instructions = typeof body.instructions === "string" ? body.instructions : "";
+    const run = startAgentRun(runs, workspace, agent, {
+        prompt: body.prompt,
+        model,
+        instructions,
+        apiUrl: body.apiUrl,
+        agentToken: body.agentToken,
+    });
     if (run === "busy") return c.json({ error: "busy" }, 409);
     return c.json(run, 202);
 });
+
+// Whether a job is in progress (the control plane asks before stopping an idle workspace).
+app.get("/status", (c) => c.json({ busy: runs.busy }));
 
 app.get("/runs/:id", (c) => {
     const run = runs.get(c.req.param("id"));
@@ -100,6 +112,10 @@ app.get("/files/*", async (c) => {
     if (!file) return c.json({ error: "not found" }, 404);
     return new Response(file.body, { headers: { "content-type": file.contentType } });
 });
+
+// As PID 1 in a container, Node ignores SIGTERM unless told otherwise, and Docker then
+// waits its full timeout before killing it. Stop at once when asked.
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
 
 await workspace.init();
 serve({ fetch: app.fetch, hostname: "0.0.0.0", port }, () => console.log(`workspace daemon listening on :${port}`));

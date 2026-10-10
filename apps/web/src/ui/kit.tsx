@@ -70,7 +70,7 @@ export function UserMenu({ session }: { session: Session }) {
 
 // ---- dialog -------------------------------------------------------------------------
 
-export function Dialog({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+export function Dialog({ onClose, children, wide }: { onClose: () => void; children: ReactNode; wide?: boolean }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") onClose();
@@ -87,7 +87,7 @@ export function Dialog({ onClose, children }: { onClose: () => void; children: R
                 if (e.target === e.currentTarget) onClose();
             }}
         >
-            <div className="dialog" role="dialog" aria-modal="true">
+            <div className={`dialog ${wide ? "dialog-wide" : ""}`} role="dialog" aria-modal="true">
                 {children}
             </div>
         </div>

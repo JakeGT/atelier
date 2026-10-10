@@ -5,7 +5,7 @@
 # platform the real stack lives in the infra repo at apps/atelier/compose.yml
 # (see docs/14).
 #
-#   for t in server runtime provisioner; do docker build --target $t -t atelier-$t:local ..; done
+#   for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:local ..; done
 #   mkdir -p secrets
 #   openssl rand -base64 24 > secrets/postgres_password
 #   printf 'postgres://atelier:%s@db:5432/atelier' "$(cat secrets/postgres_password)" > secrets/atelier_database_url
@@ -55,10 +55,26 @@ services:
             PROVISIONER_SECRET_FILE: /run/secrets/atelier_provisioner_secret
             RUNTIME_IMAGE: atelier-runtime:local
             RUNTIME_NETWORK: atelier-runtime
-            EGRESS_NETWORK: atelier-egress
+            # Workspaces get no route to the internet of their own: they reach out
+            # only through the allow-listing proxy below (ADR-0012).
+            RUNTIME_EGRESS_PROXY: http://atelier-egress:8888
         secrets: [atelier_provisioner_secret]
         volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
         networks: [control]
+
+    # The workspaces' only way out: an allow-list of hosts, never a private address.
+    egress:
+        <<: *hardening
+        image: atelier-egress:local
+        container_name: atelier-egress
+        restart: unless-stopped
+        environment:
+            # What the assistant needs. Add your model provider's API host if you use one
+            # directly. To learn what a new version needs, run with EGRESS_MODE=observe.
+            EGRESS_ALLOW: opencode.ai,models.dev,registry.npmjs.org,github.com,githubusercontent.com
+        networks:
+            runtime: { aliases: [atelier-egress] }
+            outbound: {}
 
     server:
         <<: *hardening
@@ -98,6 +114,8 @@ networks:
     control: { internal: true }
     # Shared by the server and every workspace; must be internal (the provisioner checks).
     runtime: { name: atelier-runtime, internal: true }
+    # The egress proxy's route to the internet. Nothing else joins it.
+    outbound: {}
     proxy: {}
 
 volumes:

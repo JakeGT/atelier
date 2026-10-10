@@ -17,6 +17,8 @@ export interface AgentRunInput {
     workspaceDir: string;
     prompt: string;
     model: string | null;
+    // The house rules plus the owner's guidance for this website.
+    instructions: string;
     // Where the agent's MCP content server reaches the Atelier API, and the
     // short-lived token scoping it to one tenant + project + session.
     apiUrl: string;
@@ -41,6 +43,7 @@ export interface OpenCodeOptions {
     stateDir: string;
     mcpEntry: string;
     timeoutMs?: number;
+    egressProxy?: string;
 }
 
 // Drives OpenCode headlessly via `opencode run --format json` (one-shot NDJSON).
@@ -59,10 +62,15 @@ export class OpenCodeAgent implements AgentRuntime {
         const { stateDir } = this.opts;
         const configPath = join(stateDir, "opencode.json");
         await mkdir(stateDir, { recursive: true, mode: 0o700 });
+        // Instructions live beside the config, outside the workspace: the agent
+        // cannot rewrite its own rules, and they are never committed or previewed.
+        const instructionsPath = join(stateDir, "ATELIER.md");
+        await writeFile(instructionsPath, input.instructions, { mode: 0o600 });
         await writeFile(
             configPath,
             JSON.stringify({
                 $schema: "https://opencode.ai/config.json",
+                instructions: [instructionsPath],
                 mcp: {
                     "atelier-content": {
                         type: "local",
@@ -86,6 +94,19 @@ export class OpenCodeAgent implements AgentRuntime {
             XDG_CACHE_HOME: join(stateDir, "cache"),
             XDG_STATE_HOME: join(stateDir, "state"),
             OPENCODE_CONFIG: configPath,
+            // In a workspace with no route to the internet of its own, outbound
+            // requests go through the allow-listing egress proxy (ADR-0012). The
+            // control plane is reached directly.
+            ...(this.opts.egressProxy
+                ? {
+                      HTTPS_PROXY: this.opts.egressProxy,
+                      HTTP_PROXY: this.opts.egressProxy,
+                      https_proxy: this.opts.egressProxy,
+                      http_proxy: this.opts.egressProxy,
+                      NO_PROXY: "atelier-server,localhost,127.0.0.1",
+                      no_proxy: "atelier-server,localhost,127.0.0.1",
+                  }
+                : {}),
         };
 
         const stdout = await runProcess(this.opts.command ?? "opencode", args, env, input.workspaceDir, this.opts.timeoutMs ?? 15 * 60_000);

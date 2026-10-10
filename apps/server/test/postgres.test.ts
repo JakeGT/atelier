@@ -9,6 +9,7 @@ import { ReleaseService } from "../src/services/release.ts";
 import type { WorkspaceRuntime } from "../src/services/runtime.ts";
 import { SessionStore } from "../src/services/sessions.ts";
 import { PostgresStore } from "../src/store/postgres.ts";
+import { SlugTakenError } from "../src/store/types.ts";
 
 // Row-Level Security and the role split against a real Postgres. The in-memory
 // store applies tenancy by hand, so only this suite proves the database itself
@@ -199,6 +200,7 @@ test("with no tenant set, every tenant-scoped table reads as empty (fail closed)
         "deployments",
         "agent_sessions",
         "agent_messages",
+        "invitations",
         "usage_events",
     ]) {
         const [r] = await raw<{ n: number }[]>`SELECT count(*)::int AS n FROM ${raw(table)}`;
@@ -354,4 +356,213 @@ test("a run gets exactly one request and one reply in the conversation", { skip 
         ],
     );
     assert.deepEqual(thread[1]?.tools, [{ name: "write", state: "completed" }]);
+});
+
+// ---- P2 ---------------------------------------------------------------------------------
+
+test("organisation slugs are unique across tenants without revealing who has them", { skip }, async () => {
+    const taken = `taken-${suffix}`;
+    await store.organizations.create({ id: randomUUID(), slug: taken, name: "First" });
+    await assert.rejects(store.organizations.create({ id: randomUUID(), slug: taken, name: "Second" }), SlugTakenError);
+});
+
+test("invitations: visible to their organisation and their addressee only; accepting joins exactly those", { skip }, async () => {
+    const a = await seedTenant("tenant-k");
+    const b = await seedTenant("tenant-l");
+    const c = await seedTenant("tenant-m");
+    const inviter = await store.users.upsertIdentity({
+        issuer: "https://idp/",
+        subject: `inv-${suffix}`,
+        email: "inviter@example.com",
+        name: "I",
+        admin: false,
+    });
+    const email = `newcomer-${suffix}@example.com`;
+    const soon = new Date(Date.now() + 86_400_000);
+    await store.invitations.create({ tenantId: a.tenantId, email, role: "editor", invitedBy: inviter.id, expiresAt: soon });
+    await store.invitations.create({
+        tenantId: b.tenantId,
+        email: email.toUpperCase(),
+        role: "viewer",
+        invitedBy: inviter.id,
+        expiresAt: soon,
+    });
+    // Expired, and addressed to someone else: neither may be used.
+    await store.invitations.create({
+        tenantId: c.tenantId,
+        email,
+        role: "admin",
+        invitedBy: inviter.id,
+        expiresAt: new Date(Date.now() - 1000),
+    });
+    await store.invitations.create({
+        tenantId: c.tenantId,
+        email: `other-${suffix}@example.com`,
+        role: "admin",
+        invitedBy: inviter.id,
+        expiresAt: soon,
+    });
+
+    // One organisation cannot see another's invitations; with no context, none are visible.
+    assert.deepEqual(
+        (await store.invitations.list(a.tenantId)).map((i) => i.email),
+        [email],
+    );
+    assert.equal((await store.invitations.list(c.tenantId)).length, 1);
+    const [{ n } = { n: -1 }] = await raw<{ n: number }[]>`SELECT count(*)::int AS n FROM invitations`;
+    assert.equal(n, 0);
+
+    assert.deepEqual((await store.invitations.pendingFor(email)).map((i) => i.tenantId).sort(), [a.tenantId, b.tenantId].sort());
+
+    const user = await store.users.upsertIdentity({ issuer: "https://idp/", subject: `new-${suffix}`, email, name: "N", admin: false });
+    const joined = await store.invitations.acceptAll(user.id, email);
+    assert.deepEqual(joined.sort(), [a.tenantId, b.tenantId].sort());
+    assert.equal(await store.memberships.roleOf(a.tenantId, user.id), "editor");
+    assert.equal(await store.memberships.roleOf(b.tenantId, user.id), "viewer");
+    assert.equal(await store.memberships.roleOf(c.tenantId, user.id), null);
+    assert.deepEqual(await store.invitations.acceptAll(user.id, email), []);
+    assert.deepEqual(
+        (await store.organizations.listForUser(user.id)).map((o) => [o.id, o.role]).sort(),
+        [
+            [a.tenantId, "editor"],
+            [b.tenantId, "viewer"],
+        ].sort(),
+    );
+
+    // The database refuses a self-service membership without a matching live invitation:
+    // a different role, a different organisation, or someone else's address.
+    const asUser = (emailSetting: string, tenantId: string, role: string) =>
+        store.withSettings(
+            { "app.current_user": user.id, "app.current_email": emailSetting },
+            (tx) => tx`INSERT INTO memberships (tenant_id, user_id, role) VALUES (${tenantId}, ${user.id}, ${role})`,
+        );
+    await assert.rejects(asUser(email, c.tenantId, "admin"), /row-level security/);
+    await assert.rejects(asUser(`other-${suffix}@example.com`, c.tenantId, "owner"), /row-level security/);
+    await assert.rejects(asUser("", c.tenantId, "admin"), /row-level security/);
+});
+
+test("members are listed per organisation; roles change; removal is immediate", { skip }, async () => {
+    const a = await seedTenant("tenant-n");
+    const b = await seedTenant("tenant-o");
+    const u1 = await store.users.upsertIdentity({
+        issuer: "https://idp/",
+        subject: `m1-${suffix}`,
+        email: "m1@example.com",
+        name: "M One",
+        admin: false,
+    });
+    const u2 = await store.users.upsertIdentity({
+        issuer: "https://idp/",
+        subject: `m2-${suffix}`,
+        email: "m2@example.com",
+        name: "M Two",
+        admin: false,
+    });
+    await store.memberships.add({ tenantId: a.tenantId, userId: u1.id, role: "owner" });
+    await store.memberships.add({ tenantId: a.tenantId, userId: u2.id, role: "viewer" });
+    await store.memberships.add({ tenantId: b.tenantId, userId: u2.id, role: "owner" });
+
+    assert.deepEqual(
+        (await store.memberships.list(a.tenantId)).map((m) => [m.email, m.role]),
+        [
+            ["m1@example.com", "owner"],
+            ["m2@example.com", "viewer"],
+        ],
+    );
+    assert.deepEqual(
+        (await store.memberships.list(b.tenantId)).map((m) => m.email),
+        ["m2@example.com"],
+    );
+    await store.memberships.setRole(a.tenantId, u2.id, "editor");
+    assert.equal(await store.memberships.roleOf(a.tenantId, u2.id), "editor");
+    await store.memberships.remove(a.tenantId, u2.id);
+    assert.equal(await store.memberships.roleOf(a.tenantId, u2.id), null);
+    assert.deepEqual(
+        (await store.organizations.listForUser(u2.id)).map((o) => o.id),
+        [b.tenantId],
+    );
+});
+
+test("project settings persist; deleting a project removes everything under it", { skip }, async () => {
+    const a = await seedTenant("tenant-p");
+    const updated = await store.projects.update(a.tenantId, a.project.id, {
+        name: "Renamed",
+        agentInstructions: "Be brief.",
+        agentModel: "x/y",
+    });
+    assert.deepEqual(
+        [updated.name, updated.agentInstructions, updated.agentModel, updated.archivedAt],
+        ["Renamed", "Be brief.", "x/y", null],
+    );
+    // Fields left out are untouched; null clears.
+    const cleared = await store.projects.update(a.tenantId, a.project.id, { agentModel: null });
+    assert.deepEqual([cleared.name, cleared.agentInstructions, cleared.agentModel], ["Renamed", "Be brief.", null]);
+    const archived = await store.projects.update(a.tenantId, a.project.id, { archived: true });
+    assert.equal(archived.status, "archived");
+    assert.ok(archived.archivedAt);
+    assert.equal((await store.projects.update(a.tenantId, a.project.id, { archived: false })).archivedAt, null);
+
+    await store.messages.add({
+        tenantId: a.tenantId,
+        projectId: a.project.id,
+        sessionId: null,
+        role: "user",
+        text: "hi",
+        runId: null,
+        authorId: null,
+    });
+    await store.releases.create({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.project.id,
+        codeSha: null,
+        actorId: null,
+        rollbackOf: null,
+        documents: [],
+    });
+    // Another tenant cannot delete it.
+    const other = await seedTenant("tenant-q");
+    await store.projects.delete(other.tenantId, a.project.id);
+    assert.ok(await store.projects.findById(a.tenantId, a.project.id));
+
+    await store.projects.delete(a.tenantId, a.project.id);
+    assert.equal(await store.projects.findById(a.tenantId, a.project.id), null);
+    for (const table of ["content_documents", "content_revisions", "releases", "agent_messages"]) {
+        const [r] = await store.withTenant(
+            a.tenantId,
+            (tx) => tx<{ n: number }[]>`SELECT count(*)::int AS n FROM ${tx(table)} WHERE project_id = ${a.project.id}`,
+        );
+        assert.equal(r?.n, 0, table);
+    }
+});
+
+test("usage is recorded once per source, summed per tenant, and cannot be rewritten", { skip }, async () => {
+    const a = await seedTenant("tenant-r");
+    const b = await seedTenant("tenant-s");
+    const run = randomUUID();
+    for (let i = 0; i < 3; i++) {
+        await store.usage.record({ tenantId: a.tenantId, projectId: a.project.id, kind: "agent.input_tokens", units: 1000, sourceId: run });
+        await store.usage.record({ tenantId: a.tenantId, projectId: a.project.id, kind: "agent.output_tokens", units: 250, sourceId: run });
+    }
+    await store.usage.record({
+        tenantId: a.tenantId,
+        projectId: a.project.id,
+        kind: "agent.input_tokens",
+        units: 40,
+        sourceId: randomUUID(),
+    });
+    const since = new Date(Date.now() - 60_000);
+    assert.equal(await store.usage.total(a.tenantId, ["agent.input_tokens", "agent.output_tokens"], since), 1290);
+    assert.equal(await store.usage.total(b.tenantId, ["agent.input_tokens", "agent.output_tokens"], since), 0);
+    assert.equal(await store.usage.total(a.tenantId, ["agent.input_tokens"], new Date(Date.now() + 60_000)), 0);
+    const totals = Object.fromEntries((await store.usage.totals(a.tenantId, since)).map((t) => [t.kind, t.units]));
+    assert.deepEqual(totals, { "agent.input_tokens": 1040, "agent.output_tokens": 250 });
+    await assert.rejects(
+        store.withTenant(a.tenantId, (tx) => tx`UPDATE usage_events SET units = 0`),
+        /permission denied/,
+    );
+    await assert.rejects(
+        store.withTenant(a.tenantId, (tx) => tx`DELETE FROM usage_events`),
+        /permission denied/,
+    );
 });

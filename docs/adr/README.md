@@ -13,6 +13,7 @@
 | [0009](0009-project-code-storage.md) | Where project code lives (volume now, remote mirror in P3) | Accepted |
 | [0010](0010-build-isolation.md) | Build isolation: untrusted build, trusted upload | Accepted (P3) |
 | [0011](0011-byok-model-proxy.md) | BYOK keys reach the model through a control-plane proxy | Accepted (P4) |
+| [0012](0012-egress-and-workspace-lifecycle.md) | Workspace egress through an allow-listing proxy; idle workspaces stop | Accepted (implemented P2) |
 
 0001–0005 were accepted on 2026-10-08 by the product owner, with amendments
 captured in ADR-0002 (future first-party direct content editor) and ADR-0004

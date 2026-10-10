@@ -13,6 +13,7 @@ interface SidebarProps {
     documents: ContentDocument[];
     busy: boolean;
     canPublish: boolean;
+    canEdit: boolean;
     onRestore: (sha: string) => void;
     onRollback: (number: number) => void;
     onSaveDocument: (doc: ContentDocument, draft: Record<string, unknown>) => Promise<void>;
@@ -62,7 +63,7 @@ function Empty({ title, body }: { title: string; body: string }) {
     );
 }
 
-function Versions({ checkpoints, busy, onRestore }: SidebarProps) {
+function Versions({ checkpoints, busy, canEdit, onRestore }: SidebarProps) {
     if (checkpoints.length === 0) {
         return <Empty title="No versions yet." body="Every request you make is saved here, so you can always go back." />;
     }
@@ -77,9 +78,11 @@ function Versions({ checkpoints, busy, onRestore }: SidebarProps) {
                     {i === 0 ? (
                         <span className="chip chip-seal">Current</span>
                     ) : (
-                        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onRestore(c.sha)}>
-                            <Undo2 /> Restore
-                        </button>
+                        canEdit && (
+                            <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onRestore(c.sha)}>
+                                <Undo2 /> Restore
+                            </button>
+                        )
                     )}
                 </li>
             ))}
@@ -127,7 +130,7 @@ function Releases({ releases, busy, canPublish, onRollback }: SidebarProps) {
     );
 }
 
-function Content({ documents, onSaveDocument }: SidebarProps) {
+function Content({ documents, canEdit, onSaveDocument }: SidebarProps) {
     if (documents.length === 0) {
         return (
             <Empty title="No content yet." body="Wording your assistant saves as content appears here, where you can edit it directly." />
@@ -136,7 +139,7 @@ function Content({ documents, onSaveDocument }: SidebarProps) {
     return (
         <ul className="docs">
             {documents.map((d) => (
-                <Document key={d.id} doc={d} onSave={onSaveDocument} />
+                <Document key={d.id} doc={d} canEdit={canEdit} onSave={onSaveDocument} />
             ))}
         </ul>
     );
@@ -163,7 +166,7 @@ const toFields = (draft: Record<string, unknown> | null): Field[] =>
             : { key, text: JSON.stringify(value, null, 2), structured: true },
     );
 
-function Document({ doc, onSave }: { doc: ContentDocument; onSave: SidebarProps["onSaveDocument"] }) {
+function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boolean; onSave: SidebarProps["onSaveDocument"] }) {
     const [open, setOpen] = useState(false);
     const [fields, setFields] = useState<Field[]>(() => toFields(doc.draft));
     const [error, setError] = useState<string | null>(null);
@@ -225,6 +228,7 @@ function Document({ doc, onSave }: { doc: ContentDocument; onSave: SidebarProps[
                                 className={f.structured ? "mono" : ""}
                                 value={f.text}
                                 spellCheck={!f.structured}
+                                readOnly={!canEdit}
                                 rows={Math.min(
                                     f.structured ? 12 : 8,
                                     Math.max(1, Math.ceil(f.text.length / 34), f.text.split("\n").length),
@@ -238,9 +242,11 @@ function Document({ doc, onSave }: { doc: ContentDocument; onSave: SidebarProps[
                         <span className="mono muted">
                             rev {doc.rev} · {timeAgo(doc.updatedAt)}
                         </span>
-                        <button type="button" className="btn btn-sm btn-primary" disabled={saving || !dirty} onClick={save}>
-                            Save draft
-                        </button>
+                        {canEdit && (
+                            <button type="button" className="btn btn-sm btn-primary" disabled={saving || !dirty} onClick={save}>
+                                Save draft
+                            </button>
+                        )}
                     </div>
                 </div>
             )}

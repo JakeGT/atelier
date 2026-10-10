@@ -8,31 +8,31 @@ import type { Store } from "../store/types.ts";
 
 export interface ApiVariables {
     user: SessionUser;
-    org: Organization;
-    role: OrgRole | null;
     authTime: number;
     sessionId: string;
+    // Set on /orgs/:org/... routes.
+    org: Organization;
+    role: OrgRole | null;
+    // Set on .../projects/:projectId/... routes.
     project: Project;
 }
 
 type ApiContext = Context<{ Variables: ApiVariables }>;
 
-// Resolves the session cookie to a user, their (first) organization, and their
-// role in it. P1 is a single-tenant slice, so "the tenant" is the user's first
-// org; tenant selection from the URL (/orgs/{org}/...) arrives with P2.
-export function requireAuth(sessions: SessionStore, store: Store, secureCookies: boolean) {
+// What a route may demand: a capability from the shared table, or just a signed-in
+// person (for the few routes that are about the person, not an organisation).
+export type Requirement = Permission | "signed-in";
+
+// Resolves the session cookie to a user.
+export function requireSession(sessions: SessionStore, secureCookies: boolean) {
     return async (c: ApiContext, next: Next) => {
         const sid = readCookie(c, "session", secureCookies);
         const session = sid ? await sessions.get(sid) : undefined;
         if (!sid || !session) return c.json({ error: "unauthorized" }, 401);
-        const orgs = await store.organizations.listForUser(session.user.id);
-        const org = orgs[0];
-        if (!org) return c.json({ error: "no organization" }, 403);
         c.set("user", session.user);
-        c.set("org", org);
-        c.set("role", await store.memberships.roleOf(org.id, session.user.id));
         c.set("authTime", session.authTime);
         c.set("sessionId", sid);
+        c.set("role", null);
         await next();
     };
 }
@@ -51,23 +51,40 @@ export function requireCsrf(sessions: SessionStore, publicOrigin: string, secure
     };
 }
 
-export function allowed(user: SessionUser, role: OrgRole | null, permission: Permission): boolean {
-    if (user.admin && hasOperatorPermission(permission)) return true;
-    return role !== null && hasPermission(role, permission);
-}
-
-// The single enforcement point for the shared permission table. Forbidden and
-// not-a-member both answer 404, so existence does not leak (docs/06 §1).
-export function requirePermission(permission: Permission) {
+// The URL names the organisation (/orgs/:org/...); membership decides whether the
+// caller may enter. An organisation the caller does not belong to is a 404, the
+// same as one that does not exist, so slugs cannot be probed.
+export function loadOrg(store: Store) {
     return async (c: ApiContext, next: Next) => {
-        if (!allowed(c.get("user"), c.get("role"), permission)) return c.json({ error: "not found" }, 404);
+        const slug = c.req.param("org") ?? "";
+        const orgs = await store.organizations.listForUser(c.get("user").id);
+        const org = orgs.find((o) => o.slug === slug);
+        if (org?.status !== "active") return c.json({ error: "not found" }, 404);
+        const { role, ...organization } = org;
+        c.set("org", organization);
+        c.set("role", role);
         await next();
     };
 }
 
-// Step-up: privileged actions need an authentication at the provider within the
-// last `minutes`. The client answers `reauth_required` by sending the person to
-// /auth/login?prompt=login, which forces a fresh sign-in (max_age=0).
+export function allowed(user: SessionUser, role: OrgRole | null, requirement: Requirement): boolean {
+    if (requirement === "signed-in") return true;
+    if (user.admin && hasOperatorPermission(requirement)) return true;
+    return role !== null && hasPermission(role, requirement);
+}
+
+// The single enforcement point for the shared permission table. Forbidden and
+// not-a-member both answer 404, so existence does not leak (docs/06 §1).
+export function requirePermission(requirement: Requirement) {
+    return async (c: ApiContext, next: Next) => {
+        if (!allowed(c.get("user"), c.get("role"), requirement)) return c.json({ error: "not found" }, 404);
+        await next();
+    };
+}
+
+// Step-up: privileged actions need a sign-in within the last `minutes` (ADR-0007 §8).
+// The client answers `reauth_required` by sending the person to
+// /auth/login?prompt=login and resuming afterwards.
 export function requireRecentAuth(minutes: number) {
     return async (c: ApiContext, next: Next) => {
         if (Date.now() - c.get("authTime") > minutes * 60_000) return c.json({ error: "reauth_required" }, 401);
@@ -75,8 +92,8 @@ export function requireRecentAuth(minutes: number) {
     };
 }
 
-// Loads :projectId within the caller's tenant; a project in another tenant (or
-// none) is a 404 before any handler runs.
+// Loads :projectId within the caller's organisation; a project elsewhere (or
+// nowhere) is a 404 before any handler runs.
 export function loadProject(store: Store) {
     return async (c: ApiContext, next: Next) => {
         const projectId = c.req.param("projectId") ?? "";

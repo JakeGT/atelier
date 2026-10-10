@@ -7,9 +7,9 @@ const slugify = (s: string): string =>
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "");
 
-// Creates the user's first organization + owner membership if they have none.
-// Called on sign-in so a fresh account immediately owns a tenant (P1 single-tenant
-// slice). Multi-tenant org creation/joining arrives with P2.
+// Creates a personal organisation (with the user as owner) for someone who
+// belongs to none. Called on sign-in, after any invitations have been accepted, so
+// nobody lands in an empty app. People can create more organisations themselves.
 export async function ensureUserOrg(store: Store, userId: string, email: string, name: string): Promise<void> {
     const orgs = await store.organizations.listForUser(userId);
     if (orgs.length > 0) return;

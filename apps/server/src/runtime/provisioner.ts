@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Hono } from "hono";
+import { type Context, Hono, type Next } from "hono";
 import { assertProjectId, workspaceName } from "../services/runtime.ts";
 import { type DockerClient, dockerError } from "./docker.ts";
 
@@ -17,6 +17,14 @@ export interface ProvisionerConfig {
     egressNetwork: string;
     // Optional OCI runtime for workspaces (e.g. "runsc" for gVisor) — ADR-0003.
     ociRuntime?: string;
+    // Which Atelier installation this provisioner belongs to. Two installations on
+    // one Docker host (production and a test stack, say) never see or touch each
+    // other's workspaces.
+    instance: string;
+    // When set (e.g. "http://atelier-egress:8888"), workspaces get no route to the
+    // internet of their own: they stay on the internal runtime network only and
+    // reach out through this allow-listing proxy (ADR-0012).
+    egressProxy?: string;
     memoryBytes: number;
     nanoCpus: number;
     pidsLimit: number;
@@ -25,6 +33,7 @@ export interface ProvisionerConfig {
 const MANAGED = "dev.atelier.managed";
 const PROJECT = "dev.atelier.project";
 const SPEC = "dev.atelier.spec";
+const INSTANCE = "dev.atelier.instance";
 
 interface ContainerInfo {
     Id: string;
@@ -37,10 +46,16 @@ export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtime
     return {
         Image: cfg.image,
         User: "node",
-        Env: [`RUNTIME_SECRET=${runtimeSecret}`, "WORKSPACE_DIR=/workspace", "AGENT_STATE_DIR=/tmp/agent", "PORT=8090"],
+        Env: [
+            `RUNTIME_SECRET=${runtimeSecret}`,
+            "WORKSPACE_DIR=/workspace",
+            "AGENT_STATE_DIR=/tmp/agent",
+            "PORT=8090",
+            ...(cfg.egressProxy ? [`EGRESS_PROXY=${cfg.egressProxy}`] : []),
+        ],
         Cmd: ["node", "apps/server/src/runtime/daemon.ts"],
         WorkingDir: "/app",
-        Labels: { [MANAGED]: "true", [PROJECT]: projectId },
+        Labels: { [MANAGED]: "true", [PROJECT]: projectId, [INSTANCE]: cfg.instance },
         HostConfig: {
             ReadonlyRootfs: true,
             CapDrop: ["ALL"],
@@ -50,7 +65,14 @@ export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtime
             MemorySwap: cfg.memoryBytes,
             NanoCpus: cfg.nanoCpus,
             Tmpfs: { "/tmp": "rw,nosuid,nodev,size=512m,mode=1777" },
-            Mounts: [{ Type: "volume", Source: name, Target: "/workspace" }],
+            Mounts: [
+                {
+                    Type: "volume",
+                    Source: name,
+                    Target: "/workspace",
+                    VolumeOptions: { Labels: { [MANAGED]: "true", [PROJECT]: projectId, [INSTANCE]: cfg.instance } },
+                },
+            ],
             NetworkMode: cfg.runtimeNetwork,
             RestartPolicy: { Name: "unless-stopped" },
             LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
@@ -93,6 +115,10 @@ export class Provisioner {
         const info = res.body as ContainerInfo;
         // Never act on a container this provisioner did not create.
         if (info.Config?.Labels?.[MANAGED] !== "true") throw new Error(`${name} exists but is not managed by Atelier`);
+        // Containers from before instances were labelled belong to the default one.
+        if ((info.Config?.Labels?.[INSTANCE] ?? "default") !== this.cfg.instance) {
+            throw new Error(`${name} belongs to another Atelier installation`);
+        }
         return info;
     }
 
@@ -106,6 +132,11 @@ export class Provisioner {
         if (runtime.status !== 200) throw dockerError(`runtime network ${this.cfg.runtimeNetwork}`, runtime);
         if ((runtime.body as { Internal?: boolean }).Internal !== true) {
             throw new Error(`runtime network ${this.cfg.runtimeNetwork} must be internal`);
+        }
+        if (this.cfg.egressProxy) {
+            // Workspaces never join an outbound network in this mode.
+            this.networksChecked = true;
+            return;
         }
         const egress = await this.docker.call("GET", `/networks/${this.cfg.egressNetwork}`);
         if (egress.status === 404) {
@@ -139,9 +170,11 @@ export class Provisioner {
         if (!info) {
             const created = await this.docker.call("POST", `/containers/create?name=${name}`, spec);
             if (created.status !== 201) throw dockerError("create", created);
-            // Outbound internet for the model provider; the runtime network is internal.
-            const net = await this.docker.call("POST", `/networks/${this.cfg.egressNetwork}/connect`, { Container: name });
-            if (net.status !== 200) throw dockerError("connect egress", net);
+            if (!this.cfg.egressProxy) {
+                // Outbound internet for the model provider; the runtime network is internal.
+                const net = await this.docker.call("POST", `/networks/${this.cfg.egressNetwork}/connect`, { Container: name });
+                if (net.status !== 200) throw dockerError("connect egress", net);
+            }
         }
         if (!info?.State?.Running) {
             const started = await this.docker.call("POST", `/containers/${name}/start`);
@@ -157,18 +190,59 @@ export class Provisioner {
         const res = await this.docker.call("POST", `/containers/${name}/stop?t=10`);
         if (res.status !== 204 && res.status !== 304) throw dockerError("stop", res);
     }
+
+    // Removes a project's container and its volume: the website's files and history
+    // are gone for good. Only ever touches what this provisioner created and labelled.
+    async purge(projectId: string): Promise<void> {
+        assertProjectId(projectId);
+        const name = workspaceName(projectId);
+        if (await this.inspect(name)) {
+            const rm = await this.docker.call("DELETE", `/containers/${name}?force=true`);
+            if (rm.status !== 204 && rm.status !== 404) throw dockerError("remove", rm);
+        }
+        const vol = await this.docker.call("GET", `/volumes/${name}`);
+        if (vol.status === 404) return;
+        if (vol.status !== 200) throw dockerError("inspect volume", vol);
+        // A volume created before labels existed has none; one with labels must be ours.
+        const labels = (vol.body as { Labels?: Record<string, string> | null }).Labels ?? {};
+        if (labels[INSTANCE] !== undefined && labels[INSTANCE] !== this.cfg.instance) {
+            throw new Error(`volume ${name} belongs to another Atelier installation`);
+        }
+        const rmVol = await this.docker.call("DELETE", `/volumes/${name}`);
+        if (rmVol.status !== 204 && rmVol.status !== 404) throw dockerError("remove volume", rmVol);
+    }
+
+    // The workspaces this provisioner manages, and whether each is running.
+    async list(): Promise<{ projectId: string; running: boolean }[]> {
+        const filters = encodeURIComponent(JSON.stringify({ label: [`${MANAGED}=true`] }));
+        const res = await this.docker.call("GET", `/containers/json?all=true&filters=${filters}`);
+        if (res.status !== 200) throw dockerError("list", res);
+        return (res.body as { Labels?: Record<string, string>; State?: string }[])
+            .filter((c) => (c.Labels?.[INSTANCE] ?? "default") === this.cfg.instance)
+            .map((c) => ({ projectId: c.Labels?.[PROJECT] ?? "", running: c.State === "running" }))
+            .filter((w) => w.projectId);
+    }
 }
 
 export function provisionerApp(provisioner: Provisioner, secret: string): Hono {
     const app = new Hono();
     const want = Buffer.from(secret);
     app.get("/healthz", (c) => c.json({ ok: true }));
-    app.use("/workspaces/*", async (c, next) => {
+    const guard = async (c: Context, next: Next) => {
         const header = c.req.header("authorization");
         const given = Buffer.from(header?.startsWith("Bearer ") ? header.slice(7) : "");
         if (given.length !== want.length || !timingSafeEqual(given, want)) return c.json({ error: "unauthorized" }, 401);
         await next();
+    };
+    app.use("/workspaces", guard);
+    app.get("/workspaces", async (c) => {
+        try {
+            return c.json({ workspaces: await provisioner.list() });
+        } catch (err) {
+            return c.json({ error: (err as Error).message }, 500);
+        }
     });
+    app.use("/workspaces/*", guard);
     app.put("/workspaces/:projectId", async (c) => {
         const body = (await c.req.json().catch(() => null)) as { runtimeSecret?: unknown } | null;
         if (typeof body?.runtimeSecret !== "string" || body.runtimeSecret.length < 32)
@@ -180,11 +254,14 @@ export function provisionerApp(provisioner: Provisioner, secret: string): Hono {
             return c.json({ error: (err as Error).message }, 500);
         }
     });
+    // DELETE stops the workspace; ?purge=1 also removes its files (project deletion).
     app.delete("/workspaces/:projectId", async (c) => {
         try {
-            await provisioner.stop(c.req.param("projectId"));
+            if (c.req.query("purge") === "1") await provisioner.purge(c.req.param("projectId"));
+            else await provisioner.stop(c.req.param("projectId"));
             return c.json({ ok: true });
         } catch (err) {
+            console.error(`remove ${c.req.param("projectId")}: ${(err as Error).message}`);
             return c.json({ error: (err as Error).message }, 500);
         }
     });

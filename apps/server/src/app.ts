@@ -77,7 +77,7 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
     app.route("/", health);
     app.route("/", configRoutes(deps.config));
     app.route("/", authRoutes(deps.config, deps.oidc, deps.sessions, deps.store));
-    const api = apiRoutes(deps.sessions, deps.store, deps.runtime, deps.config, deps.secretsKey);
+    const api = apiRoutes(deps);
     app.route("/", api.app);
 
     if (dist && shell) {

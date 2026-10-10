@@ -40,11 +40,13 @@ interface ChatProps {
     runningSince: string | null;
     ready: boolean;
     starting: boolean;
+    // Why the conversation cannot be continued here (a viewer, an archived website), if so.
+    locked?: string | null;
     onSend: (prompt: string) => void;
     onRetryWorkspace?: () => void;
 }
 
-export function Chat({ messages, loading, runningSince, ready, starting, onSend, onRetryWorkspace }: ChatProps) {
+export function Chat({ messages, loading, runningSince, ready, starting, locked, onSend, onRetryWorkspace }: ChatProps) {
     const [input, setInput] = useState("");
     const scroller = useRef<HTMLDivElement>(null);
     const textarea = useRef<HTMLTextAreaElement>(null);
@@ -134,7 +136,9 @@ export function Chat({ messages, loading, runningSince, ready, starting, onSend,
             <form className="composer" onSubmit={submit}>
                 {!ready && (
                     <div className="composer-status">
-                        {starting ? (
+                        {locked ? (
+                            locked
+                        ) : starting ? (
                             <>
                                 <Dots /> Opening the workspace…
                             </>
@@ -157,7 +161,7 @@ export function Chat({ messages, loading, runningSince, ready, starting, onSend,
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={onKey}
-                        placeholder={busy ? "The assistant is working…" : "Describe a change…"}
+                        placeholder={locked ? "Read-only" : busy ? "The assistant is working…" : "Describe a change…"}
                         disabled={!ready}
                         aria-label="Message the assistant"
                     />

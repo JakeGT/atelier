@@ -13,7 +13,18 @@ test("every /api route is declared with a permission", async () => {
         .filter((r) => r.path !== "/api/v1/config");
     assert.ok(mounted.length > 10);
     for (const r of mounted) assert.ok(known.has(`${r.method} ${r.path}`), `${r.method} ${r.path} has no declared permission`);
-    for (const d of declared) assert.ok(d.permission === "agent-token" || PERMISSIONS.includes(d.permission));
+    for (const d of declared) {
+        if (d.permission === "agent-token" || d.permission === "signed-in") continue;
+        assert.ok(PERMISSIONS.includes(d.permission), `${d.path}: unknown permission ${d.permission}`);
+    }
+    // "Signed in is enough" is reserved for routes about the person, never an organisation's data.
+    for (const d of declared.filter((x) => x.permission === "signed-in")) assert.ok(!d.path.includes(":org"), d.path);
+    // Everything about an organisation is under its prefix, so membership is always checked.
+    for (const d of declared.filter(
+        (x) => x.permission !== "agent-token" && x.permission !== "signed-in" && !x.permission.startsWith("admin."),
+    )) {
+        assert.ok(d.path.startsWith("/api/v1/orgs/:org"), `${d.path} is not organisation-scoped`);
+    }
 });
 
 test("publishing and rolling back are owner/admin only; viewers are read-only", () => {

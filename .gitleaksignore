@@ -4,3 +4,7 @@
 # A made-up key used only by the test suite ("test-secrets-key-0123…"). It was
 # replaced with a per-run random value, but the scan covers history.
 6960de34760fdcdd235db28e8da44dcdc8427150:apps/server/test/helpers.ts:generic-api-key:13
+
+# A placeholder signing key in the end-to-end compose file ("e2e-secrets-key-0123…"), used
+# only by a throwaway local stack. scripts/e2e.sh now generates one per run.
+65e8b0e4ba7fa2eb3dd0e47ebfd61a23fee206d2:deploy/compose.e2e.yml:generic-api-key:55

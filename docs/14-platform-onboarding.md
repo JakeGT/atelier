@@ -1,9 +1,10 @@
 # 14 — Platform onboarding runbook
 
-> **Status (P1 + hardening):** live at `atelier.jaketalling.com`. The stack is
-> `atelier-server` + `atelier-provisioner`, plus per-project `atelier-ws-*`
-> containers that the provisioner creates (images `atelier-server`,
-> `atelier-provisioner`, `atelier-runtime`, all at the same tag).
+> **Status (P2):** live at `atelier.jaketalling.com`. The stack is
+> `atelier-server` + `atelier-provisioner` + `atelier-egress`, plus per-project
+> `atelier-ws-*` containers that the provisioner creates (images
+> `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`,
+> all at the same tag).
 >
 > Postgres has three roles:
 > - `atelier`: owner, migrations;
@@ -39,13 +40,15 @@ operational plan; the actual compose files and secrets are created in **P0**
 platform-proxy      Caddy reaches the server (only the entry service joins it)
 platform-database   server reaches platform Postgres
 atelier-control     internal: server -> provisioner (nothing else is on it)
-atelier-runtime     internal: server <-> per-project workspace containers
-atelier-egress      workspaces -> internet (model provider); created by the provisioner
+atelier-runtime     internal: server <-> workspaces, and workspaces -> egress proxy
+atelier-outbound    the egress proxy's route to the internet; nothing else joins it
 ```
 
 Workspace containers (`atelier-ws-<projectId>`) are **only** on
-`atelier-runtime` + `atelier-egress`: never on `platform-proxy`,
-`platform-database`, or `atelier-control`. The provisioner refuses to run if
+`atelier-runtime`: never on `platform-proxy`, `platform-database`,
+`atelier-control` or `atelier-outbound`. They have no route to the internet and
+reach out through `atelier-egress`, which forwards only to the hosts in
+`EGRESS_ALLOW` (ADR-0012). The provisioner refuses to run if
 `atelier-runtime` is not `internal`. (P3's deploy worker gets its own private
 network with egress to Cloudflare only; ADR-0010.)
 
@@ -139,7 +142,7 @@ the provisioner.
 
 ```sh
 cd ~/Projects/atelier && git checkout <tag-or-commit>
-for t in server runtime provisioner; do docker build --target $t -t atelier-$t:<tag> .; done
+for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:<tag> .; done
 cd ~/Projects/jaketalling-com/jaketalling-platform-infrastructure
 scripts/backup.sh                                                  # before any upgrade with migrations
 cd apps/atelier

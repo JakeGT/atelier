@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
-# Three images from one source tree (ADR-0006):
+# Four images from one source tree (ADR-0006, ADR-0012):
 #   docker build --target server      -t atelier-server:<tag> .       # control plane (internet-facing; no agent, no git, no socket)
 #   docker build --target runtime     -t atelier-runtime:<tag> .      # one per project: workspace daemon + opencode + git
 #   docker build --target provisioner -t atelier-provisioner:<tag> .  # the only holder of the Docker socket
+#   docker build --target egress      -t atelier-egress:<tag> .       # allow-listing proxy: the workspaces' only way out
 # Node runs the TypeScript directly (type stripping), so only the web app is compiled.
 
 ARG NODE_IMAGE=node:24.19.0-alpine3.24
@@ -82,3 +83,10 @@ ENV PORT=8091
 EXPOSE 8091
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:8091/healthz >/dev/null || exit 1
 CMD ["node", "apps/server/src/runtime/provisioner-main.ts"]
+
+# ---- egress (the workspaces' only way out) ---------------------------------------------------------
+FROM app AS egress
+ENV PORT=8888
+USER node
+EXPOSE 8888
+CMD ["node", "apps/server/src/runtime/egress-main.ts"]

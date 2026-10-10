@@ -6,14 +6,68 @@ export interface Session {
     csrfToken: string | null;
 }
 
+export type Role = "owner" | "admin" | "editor" | "viewer";
+
+export interface Org {
+    id: string;
+    slug: string;
+    name: string;
+    defaultModel: string | null;
+    // The signed-in person's role in this organisation.
+    role: Role;
+}
+
+export interface Member {
+    userId: string;
+    email: string;
+    name: string;
+    role: Role;
+    joinedAt: string;
+}
+
+export interface Invitation {
+    id: string;
+    email: string;
+    role: Exclude<Role, "owner">;
+    createdAt: string;
+    expiresAt: string;
+}
+
+export interface Usage {
+    limits: { maxProjects: number; dailyTokenLimit: number };
+    today: { tokens: number };
+    projects: number;
+    last30Days: { projectId: string | null; kind: string; units: number }[];
+}
+
+export interface AuditEntry {
+    id: number;
+    actorId: string | null;
+    action: string;
+    target: string | null;
+    occurredAt: string;
+    detail: Record<string, unknown> | null;
+}
+
 export interface Project {
     id: string;
     tenantId: string;
     slug: string;
     name: string;
     status: string;
+    agentInstructions: string | null;
+    agentModel: string | null;
+    archivedAt: string | null;
     createdAt: string;
 }
+
+// What each role may do, mirroring the server's permission table for the buttons
+// the interface shows. The server is the authority; this only avoids dead ends.
+export const can = {
+    edit: (r: Role) => r !== "viewer",
+    publish: (r: Role) => r === "owner" || r === "admin",
+    manage: (r: Role) => r === "owner" || r === "admin",
+};
 
 export interface AgentSession {
     id: string;
@@ -154,12 +208,14 @@ function friendly(error: string | undefined, status: number): string {
     if (status === 401) return "Your session has ended. Please sign in again.";
     if (status === 403 && error === "csrf") return "This page is out of date. Reload and try again.";
     if (status === 409 && error?.includes("still working")) return "The assistant is still working on the last request.";
+    if (status === 404 && (!error || error === "not found"))
+        return "That isn't available. It may have been removed, or you may not have access.";
     if (status >= 500 && !error) return "Something went wrong on our side. Please try again.";
     return error ? error.charAt(0).toUpperCase() + error.slice(1) : `Request failed (${status})`;
 }
 
 // Every state-changing request carries the per-session CSRF token.
-const send = (method: "POST" | "PUT", url: string, body?: unknown): Promise<Response> =>
+const send = (method: "POST" | "PUT" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<Response> =>
     fetch(url, {
         method,
         headers: { "content-type": "application/json", "x-atelier-csrf": csrfToken ?? "" },
@@ -169,8 +225,8 @@ const send = (method: "POST" | "PUT", url: string, body?: unknown): Promise<Resp
 const get = <T>(url: string) => fetch(url).then((r) => parse<T>(r));
 const post = <T>(url: string, body?: unknown) => send("POST", url, body).then((r) => parse<T>(r));
 const put = <T>(url: string, body?: unknown) => send("PUT", url, body).then((r) => parse<T>(r));
-
-const p = (projectId: string) => `/api/v1/projects/${projectId}`;
+const patch = <T>(url: string, body?: unknown) => send("PATCH", url, body).then((r) => parse<T>(r));
+const del = <T>(url: string) => send("DELETE", url).then((r) => parse<T>(r));
 
 // Hands off to the identity provider (a full page navigation, not a client route).
 export function startSignIn(next = "/studio"): void {
@@ -181,6 +237,7 @@ export function reauthenticate(): void {
     window.location.assign(`/auth/login?prompt=login&next=${encodeURIComponent(window.location.pathname)}`);
 }
 
+// About the signed-in person, not any one organisation.
 export const api = {
     config: () => get<PublicConfig>("/api/v1/config"),
     session: async (): Promise<Session | null> => {
@@ -192,36 +249,63 @@ export const api = {
         const body = await post<{ redirect: string | null }>("/auth/logout");
         window.location.assign(body.redirect ?? "/");
     },
-
-    listProjects: () => get<{ projects: Project[] }>("/api/v1/projects").then((b) => b.projects),
-    createProject: (name: string) => post<{ project: Project }>("/api/v1/projects", { name }).then((b) => b.project),
-    overview: (projectId: string) => get<Overview>(`${p(projectId)}/overview`),
-
-    listSessions: (projectId: string) => get<{ sessions: AgentSession[] }>(`${p(projectId)}/sessions`).then((b) => b.sessions),
-    createSession: (projectId: string) => post<{ session: AgentSession }>(`${p(projectId)}/sessions`, {}).then((b) => b.session),
-    startRun: (projectId: string, sessionId: string, prompt: string) =>
-        post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { prompt }).then((b) => b.run),
-    thread: (projectId: string) => get<{ messages: ThreadMessage[]; activeRun: Run | null }>(`${p(projectId)}/messages`),
-    getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => b.run),
-
-    listCheckpoints: (projectId: string) => get<{ checkpoints: Checkpoint[] }>(`${p(projectId)}/checkpoints`).then((b) => b.checkpoints),
-    restoreCheckpoint: (projectId: string, sha: string) => post<{ ok: boolean }>(`${p(projectId)}/checkpoints/${sha}/restore`),
-    previewUrl: (projectId: string) => get<{ url: string }>(`${p(projectId)}/preview-url`).then((b) => b.url),
-
-    listContent: (projectId: string) => get<{ documents: ContentDocument[] }>(`${p(projectId)}/content`).then((b) => b.documents),
-    saveContent: (projectId: string, kind: string, slug: string, draft: Record<string, unknown>) =>
-        put<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}`, draft).then((b) => b.document),
-    listRevisions: (projectId: string, kind: string, slug: string) =>
-        get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${kind}/${slug}/revisions`).then((b) => b.revisions),
-    restoreRevision: (projectId: string, kind: string, slug: string, rev: number) =>
-        post<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}/revisions/${rev}/restore`).then((b) => b.document),
-
-    listReleases: (projectId: string) => get<{ releases: Release[] }>(`${p(projectId)}/releases`).then((b) => b.releases),
-    // "Publish" = freeze the current drafts + code into a release, then make it live.
-    publish: async (projectId: string): Promise<Release> => {
-        const { release } = await post<{ release: Release }>(`${p(projectId)}/releases`);
-        return (await post<{ release: Release }>(`${p(projectId)}/releases/${release.number}/publish`)).release;
-    },
-    rollback: (projectId: string, number: number) =>
-        post<{ release: Release }>(`${p(projectId)}/releases/${number}/rollback`).then((b) => b.release),
+    listOrgs: () => get<{ orgs: Org[] }>("/api/v1/orgs").then((b) => b.orgs),
+    createOrg: (name: string) => post<{ org: Org }>("/api/v1/orgs", { name }).then((b) => b.org),
 };
+
+// Everything inside one organisation. The organisation's slug is part of every
+// URL; the server checks membership on each request.
+export function orgApi(org: string) {
+    const o = `/api/v1/orgs/${org}`;
+    const p = (projectId: string) => `${o}/projects/${projectId}`;
+    return {
+        update: (changes: { name?: string; defaultModel?: string | null }) => patch<{ org: Org }>(o, changes).then((b) => b.org),
+        usage: () => get<Usage>(`${o}/usage`),
+        audit: () => get<{ entries: AuditEntry[] }>(`${o}/audit`).then((b) => b.entries),
+
+        listMembers: () => get<{ members: Member[] }>(`${o}/members`).then((b) => b.members),
+        setRole: (userId: string, role: Role) => patch<{ ok: boolean }>(`${o}/members/${userId}`, { role }),
+        removeMember: (userId: string) => del<{ ok: boolean }>(`${o}/members/${userId}`),
+        listInvitations: () => get<{ invitations: Invitation[] }>(`${o}/invitations`).then((b) => b.invitations),
+        invite: (email: string, role: Invitation["role"]) =>
+            post<{ invitation: Invitation }>(`${o}/invitations`, { email, role }).then((b) => b.invitation),
+        revokeInvitation: (id: string) => del<{ ok: boolean }>(`${o}/invitations/${id}`),
+
+        listProjects: (archived = false) =>
+            get<{ projects: Project[] }>(`${o}/projects${archived ? "?archived=1" : ""}`).then((b) => b.projects),
+        createProject: (name: string) => post<{ project: Project }>(`${o}/projects`, { name }).then((b) => b.project),
+        updateProject: (projectId: string, changes: { name?: string; agentInstructions?: string | null; agentModel?: string | null }) =>
+            patch<{ project: Project }>(p(projectId), changes).then((b) => b.project),
+        archiveProject: (projectId: string) => post<{ project: Project }>(`${p(projectId)}/archive`).then((b) => b.project),
+        restoreProject: (projectId: string) => post<{ project: Project }>(`${p(projectId)}/restore`).then((b) => b.project),
+        deleteProject: (projectId: string) => del<{ ok: boolean }>(p(projectId)),
+        overview: (projectId: string) => get<Overview>(`${p(projectId)}/overview`),
+
+        listSessions: (projectId: string) => get<{ sessions: AgentSession[] }>(`${p(projectId)}/sessions`).then((b) => b.sessions),
+        createSession: (projectId: string) => post<{ session: AgentSession }>(`${p(projectId)}/sessions`, {}).then((b) => b.session),
+        startRun: (projectId: string, sessionId: string, prompt: string) =>
+            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { prompt }).then((b) => b.run),
+        thread: (projectId: string) => get<{ messages: ThreadMessage[]; activeRun: Run | null }>(`${p(projectId)}/messages`),
+        getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => b.run),
+
+        listCheckpoints: (projectId: string) =>
+            get<{ checkpoints: Checkpoint[] }>(`${p(projectId)}/checkpoints`).then((b) => b.checkpoints),
+        restoreCheckpoint: (projectId: string, sha: string) => post<{ ok: boolean }>(`${p(projectId)}/checkpoints/${sha}/restore`),
+        previewUrl: (projectId: string) => get<{ url: string }>(`${p(projectId)}/preview-url`).then((b) => b.url),
+
+        listContent: (projectId: string) => get<{ documents: ContentDocument[] }>(`${p(projectId)}/content`).then((b) => b.documents),
+        saveContent: (projectId: string, kind: string, slug: string, draft: Record<string, unknown>) =>
+            put<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}`, draft).then((b) => b.document),
+
+        listReleases: (projectId: string) => get<{ releases: Release[] }>(`${p(projectId)}/releases`).then((b) => b.releases),
+        // "Publish" = freeze the current drafts + code into a release, then make it live.
+        publish: async (projectId: string): Promise<Release> => {
+            const { release } = await post<{ release: Release }>(`${p(projectId)}/releases`);
+            return (await post<{ release: Release }>(`${p(projectId)}/releases/${release.number}/publish`)).release;
+        },
+        rollback: (projectId: string, number: number) =>
+            post<{ release: Release }>(`${p(projectId)}/releases/${number}/rollback`).then((b) => b.release),
+    };
+}
+
+export type OrgApi = ReturnType<typeof orgApi>;

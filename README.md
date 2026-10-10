@@ -131,4 +131,5 @@ pnpm check                      # lint + typecheck + tests (Postgres suite skipp
 docker run -d --rm --name atelier-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:16-alpine
 TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres pnpm test   # + RLS/role suite
 pnpm --filter @atelier/server dev   # in-memory store, RUNTIME_MODE=local (no sandbox; dev only)
+scripts/e2e.sh                      # the real images end to end: sandbox lockdown, network boundaries (needs Docker)
 ```

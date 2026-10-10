@@ -77,7 +77,13 @@ for (const secure of [true, false]) {
         assert.equal(session.admin, true);
 
         // First sign-in bootstrapped an organization, so the API works straight away.
-        assert.equal((await t.app.request("/api/v1/projects", { headers: cookies.header() })).status, 200);
+        const { orgs } = (await (await t.app.request("/api/v1/orgs", { headers: cookies.header() })).json()) as {
+            orgs: { slug: string; role: string }[];
+        };
+        assert.equal(orgs.length, 1);
+        assert.equal(orgs[0]?.role, "owner");
+        const projects = `/api/v1/orgs/${orgs[0]?.slug}/projects`;
+        assert.equal((await t.app.request(projects, { headers: cookies.header() })).status, 200);
         const actions = (await t.store.audit.list({})).map((e) => e.action);
         assert.ok(actions.includes("auth.sign_in"));
 
@@ -88,7 +94,7 @@ for (const secure of [true, false]) {
         assert.equal(logout.status, 200);
         cookies.absorb(logout);
         assert.deepEqual(cookies.names(), []);
-        assert.equal((await t.app.request("/api/v1/projects", { headers: cookies.header() })).status, 401);
+        assert.equal((await t.app.request(projects, { headers: cookies.header() })).status, 401);
     });
 }
 
@@ -107,6 +113,43 @@ test("an uninvited, non-admin account is refused", async () => {
     const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
     assert.equal(res.headers.get("location"), "/login?auth_error=denied");
     assert.equal(await t.store.users.count(), 0);
+});
+
+test("an invited newcomer is let in and joins the inviting organisation, not a studio of their own", async () => {
+    const t = await makeApp(
+        { AUTH_MODE: "oidc" },
+        stubOidc({ groups: [], subject: "newcomer", email: "Newcomer@Example.com", name: "New" }),
+    );
+    const owner = await t.store.users.upsertIdentity({
+        issuer: "https://idp/",
+        subject: "o",
+        email: "o@example.com",
+        name: "O",
+        admin: false,
+    });
+    const org = await t.store.organizations.create({ id: crypto.randomUUID(), slug: "okoro", name: "Okoro" });
+    await t.store.memberships.add({ tenantId: org.id, userId: owner.id, role: "owner" });
+    await t.store.invitations.create({
+        tenantId: org.id,
+        email: "newcomer@example.com",
+        role: "editor",
+        invitedBy: owner.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+    });
+
+    const cookies = jar();
+    cookies.absorb(await t.app.request("/auth/login"));
+    const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
+    assert.equal(res.headers.get("location"), "/studio");
+    cookies.absorb(res);
+    const { orgs } = (await (await t.app.request("/api/v1/orgs", { headers: cookies.header() })).json()) as {
+        orgs: { slug: string; role: string }[];
+    };
+    assert.deepEqual(
+        orgs.map((o) => [o.slug, o.role]),
+        [["okoro", "editor"]],
+    );
+    assert.ok((await t.store.audit.list({ tenantId: org.id })).some((e) => e.action === "invitation.accept"));
 });
 
 test("signing in with no destination lands in the studio", async () => {
@@ -172,7 +215,9 @@ test("after a step-up round trip the person can publish, even if the provider re
         origin: "http://localhost:8080",
         "content-type": "application/json",
     });
-    const created = await t.app.request("/api/v1/projects", { method: "POST", headers: await write(), body: '{"name":"Site"}' });
+    const { orgs } = (await (await t.app.request("/api/v1/orgs", { headers: cookies.header() })).json()) as { orgs: { slug: string }[] };
+    const api = `/api/v1/orgs/${orgs[0]?.slug}`;
+    const created = await t.app.request(`${api}/projects`, { method: "POST", headers: await write(), body: '{"name":"Site"}' });
     const { project } = (await created.json()) as { project: { id: string; slug: string } };
 
     // Time passes: the Atelier session is now older than the step-up window.
@@ -181,7 +226,7 @@ test("after a step-up round trip the person can publish, even if the provider re
     await t.sessions.destroyUserSessions(user.id);
     const old = await t.sessions.createSession(user.id, Date.now() - 60 * 60_000);
     cookies.absorb(new Response(null, { headers: { "set-cookie": `atelier_sid=${old.id}; Path=/` } }));
-    const releases = `/api/v1/projects/${project.id}/releases`;
+    const releases = `${api}/projects/${project.id}/releases`;
     assert.equal((await t.app.request(releases, { method: "POST", headers: await write() })).status, 401);
 
     // The step-up: back to the page they were on, and publishing now works.

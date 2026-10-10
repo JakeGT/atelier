@@ -63,13 +63,16 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier);
             const isAdmin = claims.groups.includes(oidc.adminGroup);
 
-            // Sign-up is invite-gated: platform admins, or people who already have
-            // an account. Org invitations (P2) will add a third way in.
+            // Sign-up is invite-gated. Three ways in: a platform admin, someone who
+            // already has an account, or someone an organisation has invited by
+            // e-mail. The address is trustworthy here: an unverified one was refused
+            // on the line above unless the provider is configured as trusted.
             if (!claims.email) return c.redirect("/login?auth_error=failed");
             if (oidc.trustEmail === false && !claims.verified) return c.redirect("/login?auth_error=unverified");
             if (config.signupMode !== "open" && !isAdmin) {
                 const existing = await store.users.findByIdentity(claims.issuer, claims.subject);
-                if (!existing) return c.redirect("/login?auth_error=denied");
+                const invited = existing ? true : (await store.invitations.pendingFor(claims.email)).length > 0;
+                if (!invited) return c.redirect("/login?auth_error=denied");
             }
 
             const user = await store.users.upsertIdentity({
@@ -80,6 +83,18 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
                 admin: isAdmin,
             });
 
+            // Invitations addressed to this person become memberships now. Someone who
+            // arrives with none, and belongs nowhere yet, gets a studio of their own.
+            const joined = await store.invitations.acceptAll(user.id, user.email);
+            for (const tenantId of joined) {
+                await store.audit.record({
+                    tenantId,
+                    actorId: user.id,
+                    action: "invitation.accept",
+                    target: `user:${user.id}`,
+                    detail: null,
+                });
+            }
             await ensureUserOrg(store, user.id, user.email, user.name);
 
             // A fresh session id on every sign-in (no fixation); replace any old one.

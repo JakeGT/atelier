@@ -101,6 +101,24 @@ if (config.runtimeMode === "container") {
 
 const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey });
 
+// Stop workspaces nobody is using: their files stay, and the next request starts
+// them again in about a second. Keeps a single host from filling up with idle
+// containers.
+if (runtime.kind === "container") {
+    const idleMs = config.workspaceIdleMinutes * 60_000;
+    setInterval(
+        () => {
+            runtime.reapIdle(idleMs).then(
+                (stopped) => {
+                    if (stopped.length) console.log(`Stopped ${stopped.length} idle workspace(s).`);
+                },
+                (err: Error) => console.warn(`Idle workspace check failed: ${err.message}`),
+            );
+        },
+        Math.min(idleMs, 5 * 60_000),
+    ).unref();
+}
+
 const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
     const host = info.address.includes(":") ? `[${info.address}]` : info.address;
     console.log(`Atelier listening on http://${host}:${info.port} (public address ${config.publicOrigin})`);
