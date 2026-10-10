@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Project, Release } from "@atelier/shared";
 import type { Store } from "../store/types.ts";
+import { contentProblems } from "./contentChecks.ts";
 import { type DeployInput, type Hosting, HostingError, siteName } from "./hosting.ts";
 import { filesOf, mimeOfName, storageKey } from "./media.ts";
 import type { MediaStorage } from "./mediaStorage.ts";
@@ -55,6 +56,12 @@ export class ReleaseService {
         if (this.hosting && !codeSha)
             throw new ReleaseError("there is nothing to publish yet: ask your assistant to build the website first", 409);
         const docs = await this.store.content.list(tenantId, projectId);
+        // What the wording must satisfy is checked here, when it is about to go public.
+        const problems = contentProblems(docs.filter((d) => d.draft !== null));
+        if (problems.length > 0) {
+            const more = problems.length > 4 ? `; and ${problems.length - 4} more` : "";
+            throw new ReleaseError(`before this can be published: ${problems.slice(0, 4).join("; ")}${more}`, 422);
+        }
         const documents = docs
             .filter((d) => d.draft !== null)
             .map((d) => ({ documentId: d.id, kind: d.kind, slug: d.slug, rev: d.rev, content: d.draft ?? {} }));

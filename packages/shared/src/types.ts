@@ -98,16 +98,29 @@ export type Project = z.infer<typeof projectSchema>;
 // ---- P1 entities (content store + release workflow) ----
 
 // How one field of a content document is shown and edited (ADR-0014).
-export const FIELD_TYPES = ["text", "long", "rich", "list", "image"] as const;
-export const contentFieldSchema = z.object({
+export const FIELD_TYPES = ["text", "long", "rich", "list", "image", "items"] as const;
+// The parts of one item in a list of items ("a service": its name, summary, photograph).
+export const ITEM_FIELD_TYPES = ["text", "long", "rich", "image", "link"] as const;
+const fieldBase = {
     key: z.string().regex(/^[A-Za-z][\w-]{0,63}$/),
     // In the person's words: "Headline", not "heroTitle".
     label: z.string().min(1).max(80),
-    // text: one line. long: several lines. rich: a little formatting. list: one item per line.
-    // image: a file from the media library ("media/<name>").
-    type: z.enum(FIELD_TYPES),
     help: z.string().max(200).optional(),
+    // Checked when the website is published, not while it is being written.
+    required: z.boolean().optional(),
+    // The most characters (text, long) or entries (list, items) it may have.
+    max: z.number().int().positive().max(100_000).optional(),
+};
+export const itemFieldSchema = z.object({ ...fieldBase, type: z.enum(ITEM_FIELD_TYPES) });
+export const contentFieldSchema = z.object({
+    ...fieldBase,
+    // text: one line. long: several lines. rich: a little formatting. list: one item per line.
+    // image: a file from the media library ("media/<name>"). items: a list whose entries
+    // each have several parts, described by `itemFields`.
+    type: z.enum(FIELD_TYPES),
+    itemFields: z.array(itemFieldSchema).min(1).max(12).optional(),
 });
+export type ItemField = z.infer<typeof itemFieldSchema>;
 export type ContentField = z.infer<typeof contentFieldSchema>;
 
 export const contentDocumentSchema = z.object({

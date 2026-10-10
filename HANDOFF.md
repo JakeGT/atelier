@@ -167,7 +167,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 The order from here (docs/13):
 
-1. **P5 is built** (content studio, media, retention, alerting). What it leaves: lists of items with several fields, limits checked at publish, focal points, video posters, deleting a whole studio.
+1. **P5 is built** (content studio incl. lists of items and checks before publishing, media, retention, alerting). What it leaves: number/date/yes-no fields, focal points, video posters, deleting a whole studio.
 2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
 3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
 

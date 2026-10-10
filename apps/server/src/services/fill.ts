@@ -10,6 +10,8 @@ import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parse, parseFragment,
 //   <div data-content-rich="page/home#story">…</div>    a little formatting
 //   <ul data-content-list="page/home#hours"><li>…</li></ul>   one item per line
 //   <img data-content-image="page/home#photo" src="…">   a file from the media library
+//   <ul data-content-list="page/home#services"><li><h3 data-item="name">…</h3><p data-item="summary">…</p></li></ul>
+//       a list of items with several parts: also data-item-rich, data-item-image, and data-item-href on a link
 //
 // A real HTML parser does the work. A value is inserted as text (or, for rich
 // text, through an allow-list), so nothing a field contains can add markup or
@@ -176,23 +178,81 @@ function fillElement(el: Element, lookup: Lookup, options: FillOptions): void {
     } else if (rich !== undefined) {
         if (typeof value === "string") setChildren(el, cleanRich(parseFragment(value).childNodes));
     } else if (Array.isArray(value)) {
-        // One item per entry, each a copy of the list's first item with the entry as its text.
+        // One item per entry, each a copy of the list's first item. An entry that is a
+        // line of text becomes the item's text; an entry with several parts fills the
+        // elements inside the item that name them (data-item, data-item-rich, …).
         const template = el.childNodes.find(isElement);
         if (!template) return;
-        const items = value
-            .filter((v): v is string | number => typeof v === "string" || typeof v === "number")
-            .slice(0, 500)
-            .map((v) => {
+        const items: Element[] = [];
+        for (const entry of value.slice(0, 500)) {
+            if (typeof entry === "string" || typeof entry === "number") {
                 const item = defaultTreeAdapter.createElement(
                     template.tagName,
                     template.namespaceURI,
                     template.attrs.map((a) => ({ ...a })),
                 );
-                setChildren(item, [text(String(v))]);
-                return item;
-            });
+                setChildren(item, [text(String(entry))]);
+                items.push(item);
+            } else if (entry && typeof entry === "object") {
+                const item = clone(template);
+                fillItem(item, entry as Record<string, unknown>, options);
+                items.push(item);
+            }
+        }
         setChildren(el, items);
     }
+}
+
+function clone(el: Element): Element {
+    const copy = defaultTreeAdapter.createElement(
+        el.tagName,
+        el.namespaceURI,
+        el.attrs.map((a) => ({ ...a })),
+    );
+    setChildren(
+        copy,
+        el.childNodes.map((c) => (isElement(c) ? clone(c) : ({ ...c, parentNode: null } as DefaultTreeAdapterTypes.ChildNode))),
+    );
+    return copy;
+}
+
+const ITEM_KEY = /^[A-Za-z][\w-]{0,63}$/;
+
+// Fills the parts of one item, and returns false if the element should not be in
+// this entry at all. Every entry is a copy of the first, so a part this entry
+// does not have must not show the first entry's: its text is emptied, and a link
+// with nowhere to go or a picture that was not chosen is left out.
+function fillItem(node: Element, entry: Record<string, unknown>, options: FillOptions, depth = 0): boolean {
+    if (depth > 24 || node.tagName === "script" || node.tagName === "style" || node.tagName === "template") return true;
+    const named = (name: string): { value: unknown } | null => {
+        const key = attr(node, name);
+        return key && ITEM_KEY.test(key) ? { value: Object.hasOwn(entry, key) ? entry[key] : undefined } : null;
+    };
+    const href = named("data-item-href");
+    if (href && node.tagName === "a") {
+        const to = typeof href.value === "string" ? href.value.trim() : "";
+        if (!to || !SAFE_HREF.test(to) || /^\s*javascript:/i.test(to)) return false;
+        setAttr(node, "href", to);
+    }
+    const image = named("data-item-image");
+    if (image) {
+        if (typeof image.value !== "string" || !MEDIA_PATH.test(image.value)) return false;
+        fillImage(node, image.value, options);
+        return true;
+    }
+    const plain = named("data-item");
+    if (plain) {
+        const v = plain.value;
+        setChildren(node, [text(typeof v === "string" || typeof v === "number" ? String(v) : "")]);
+        return true;
+    }
+    const rich = named("data-item-rich");
+    if (rich) {
+        setChildren(node, typeof rich.value === "string" ? cleanRich(parseFragment(rich.value).childNodes) : []);
+        return true;
+    }
+    node.childNodes = node.childNodes.filter((child) => !isElement(child) || fillItem(child, entry, options, depth + 1));
+    return true;
 }
 
 const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image"];

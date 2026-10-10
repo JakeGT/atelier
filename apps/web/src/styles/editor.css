@@ -1409,3 +1409,58 @@
     flex-wrap: wrap;
     margin-left: auto;
 }
+
+/* ---- wording: a list of items with several parts ----------------------------------- */
+
+.items {
+    display: grid;
+    gap: 12px;
+}
+
+.item {
+    margin: 0;
+    padding: 14px 16px 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    min-width: 0;
+}
+
+.item legend {
+    padding: 0 6px;
+    font-size: 11px;
+}
+
+.item .field + .field {
+    margin-top: 12px;
+}
+
+.item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 14px;
+}
+
+.items > .btn {
+    justify-self: start;
+}
+
+.field-over {
+    color: var(--seal-deep);
+}
+
+.field-help-first {
+    display: block;
+    margin: -2px 0 10px;
+}
+
+/* On the Content page a long form keeps Save in reach. */
+.content-edit .wording-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-inline: -8px;
+    padding: 12px 8px;
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+}

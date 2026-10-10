@@ -17,16 +17,42 @@ export function contentRoutes(api: Api): void {
     // (and again when a page is filled): nothing else ever reaches a page.
     const prepared = async (tenantId: string, projectId: string, kind: string, slug: string, draft: Record<string, unknown>) => {
         const fields = (await store.content.get(tenantId, projectId, kind, slug))?.fields ?? [];
-        const rich = new Set(fields.filter((f) => f.type === "rich").map((f) => f.key));
-        if (rich.size === 0) return draft;
-        return Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, rich.has(k) && typeof v === "string" ? sanitizeRich(v) : v]));
+        const byKey = new Map(fields.map((f) => [f.key, f]));
+        return Object.fromEntries(
+            Object.entries(draft).map(([k, v]) => {
+                const field = byKey.get(k);
+                if (field?.type === "rich" && typeof v === "string") return [k, sanitizeRich(v)];
+                if (field?.type === "items" && Array.isArray(v)) {
+                    const rich = new Set((field.itemFields ?? []).filter((f) => f.type === "rich").map((f) => f.key));
+                    return [
+                        k,
+                        v
+                            .slice(0, 500)
+                            .map((entry) =>
+                                isObject(entry)
+                                    ? Object.fromEntries(
+                                          Object.entries(entry).map(([ik, iv]) => [
+                                              ik,
+                                              rich.has(ik) && typeof iv === "string" ? sanitizeRich(iv) : iv,
+                                          ]),
+                                      )
+                                    : entry,
+                            ),
+                    ];
+                }
+                return [k, v];
+            }),
+        );
     };
 
     const fieldList = z.array(contentFieldSchema).max(60);
     // Describes how a document's fields are shown: labels, types, help. Its content is untouched.
     const setFields = async (tenantId: string, projectId: string, kind: string, slug: string, body: unknown) => {
         const parsed = fieldList.safeParse(isObject(body) ? body.fields : body);
-        if (!parsed.success) return { error: "fields must be a list of { key, label, type: text | long | rich | list, help? }" } as const;
+        if (!parsed.success)
+            return {
+                error: "fields must be a list of { key, label, type: text | long | rich | list | image | items, help?, required?, max?, itemFields? }",
+            } as const;
         const keys = new Set<string>();
         const fields: ContentField[] = parsed.data.filter((f) => !keys.has(f.key) && keys.add(f.key));
         const document = await store.content.setFields(tenantId, projectId, kind, slug, fields);

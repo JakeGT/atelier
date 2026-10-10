@@ -258,8 +258,23 @@ export interface ContentField {
     label: string;
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
     // image: a file from the media library, held as its path ("media/<name>").
-    type: "text" | "long" | "rich" | "list" | "image";
+    // items: a list whose entries each have several parts, described by `itemFields`.
+    type: "text" | "long" | "rich" | "list" | "image" | "items";
     help?: string;
+    // Checked when the website is published.
+    required?: boolean;
+    // The most characters (text, long) or entries (list, items).
+    max?: number;
+    itemFields?: ItemField[];
+}
+// One part of an entry in a list of items.
+export interface ItemField {
+    key: string;
+    label: string;
+    type: "text" | "long" | "rich" | "image" | "link";
+    help?: string;
+    required?: boolean;
+    max?: number;
 }
 
 export interface ContentRevision {

@@ -1,4 +1,4 @@
-import { Bold, Italic, Link2, List } from "lucide-react";
+import { ArrowDown, ArrowUp, Bold, Italic, Link2, List, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ContentDocument, ContentField } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
@@ -52,6 +52,8 @@ export function fieldsOf(doc: Pick<ContentDocument, "draft" | "fields">): Shown[
 function toText(field: Shown, value: unknown): string {
     if (field.structured) return JSON.stringify(value ?? null, null, 2);
     if (field.type === "list") return isLines(value) ? value.join("\n") : "";
+    // A list of items is carried as text here and edited as proper fields by ItemsField.
+    if (field.type === "items") return JSON.stringify(Array.isArray(value) ? value.filter((v) => v && typeof v === "object") : []);
     return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
 }
 
@@ -117,6 +119,8 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
                     );
                     return;
                 }
+            } else if (f.type === "items") {
+                draft[f.key] = parseItems(text);
             } else if (f.type === "list") {
                 draft[f.key] = text
                     .split("\n")
@@ -146,9 +150,19 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
                     <label htmlFor={`f-${doc.id}-${f.key}`} className="eyebrow">
                         {f.label}
                         {f.type === "list" && <span className="field-note"> · one per line</span>}
+                        {f.required && <span className="field-note"> · needed before publishing</span>}
                         {f.structured && <span className="field-note"> · structured: easier to ask your assistant</span>}
                     </label>
-                    {f.type === "image" ? (
+                    {f.type === "items" && f.help && <span className="field-help field-help-first">{f.help}</span>}
+                    {f.type === "items" ? (
+                        <ItemsField
+                            field={f}
+                            value={values[f.key] ?? "[]"}
+                            onChange={(v) => set(f.key, v)}
+                            readOnly={!canEdit}
+                            id={`f-${doc.id}-${f.key}`}
+                        />
+                    ) : f.type === "image" ? (
                         <PictureField value={values[f.key] ?? ""} onChange={(v) => set(f.key, v)} readOnly={!canEdit} />
                     ) : f.type === "rich" ? (
                         <RichEditor
@@ -183,7 +197,8 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
                             autoFocus={focus === f.key}
                         />
                     )}
-                    {f.help && <span className="field-help">{f.help}</span>}
+                    {f.help && f.type !== "items" && <span className="field-help">{f.help}</span>}
+                    <Room field={f} text={values[f.key] ?? ""} />
                 </div>
             ))}
             {outdated && (
@@ -234,6 +249,141 @@ export function WordingDialog(props: FormProps & { onClose: () => void }) {
 
 // A small editor for text with a little formatting: bold, italic, links, lists.
 // What it produces is cleaned by the server before it is stored or shown.
+type Item = Record<string, unknown>;
+const parseItems = (text: string): Item[] => {
+    try {
+        const v = JSON.parse(text) as unknown;
+        return Array.isArray(v) ? (v.filter((x) => x && typeof x === "object") as Item[]) : [];
+    } catch {
+        return [];
+    }
+};
+
+// How much room is left, said only when it matters: nearly full, or over.
+function Room({ field, text }: { field: { type: string; max?: number }; text: string }) {
+    if (!field.max) return null;
+    const count =
+        field.type === "items"
+            ? parseItems(text).length
+            : field.type === "list"
+              ? text.split("\n").filter((l) => l.trim()).length
+              : text.length;
+    if (field.type !== "text" && field.type !== "long" && field.type !== "list" && field.type !== "items") return null;
+    if (count < field.max * 0.8) return null;
+    const unit = field.type === "text" || field.type === "long" ? "characters" : "entries";
+    return (
+        <span className={`field-help ${count > field.max ? "field-over" : ""}`}>
+            {count > field.max
+                ? `${count - field.max} ${unit} too many: the most is ${field.max}. It can be saved, but not published, like this.`
+                : `${count} of ${field.max} ${unit}`}
+        </span>
+    );
+}
+
+// A list whose entries each have several parts (a service: its name, its summary,
+// its photograph). Each entry is a card of proper fields; entries can be added,
+// removed and moved.
+function ItemsField({
+    field,
+    value,
+    onChange,
+    readOnly,
+    id,
+}: {
+    field: ContentField;
+    value: string;
+    onChange: (text: string) => void;
+    readOnly: boolean;
+    id: string;
+}) {
+    const items = parseItems(value);
+    const parts = field.itemFields ?? [];
+    const write = (next: Item[]) => onChange(JSON.stringify(next));
+    const setPart = (i: number, key: string, v: string) => write(items.map((it, n) => (n === i ? { ...it, [key]: v } : it)));
+    const move = (i: number, by: number) => {
+        const next = [...items];
+        const [it] = next.splice(i, 1);
+        if (it) next.splice(i + by, 0, it);
+        write(next);
+    };
+    const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : String(v));
+    const one = field.label.replace(/s$/i, "").toLowerCase();
+    const full = field.max !== undefined && items.length >= field.max;
+
+    return (
+        <div className="items">
+            {items.length === 0 && <p className="muted">Nothing here yet.</p>}
+            {items.map((item, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: entries have no identity of their own; position is what they are
+                <fieldset key={i} className="item">
+                    <legend className="mono muted">
+                        {i + 1} of {items.length}
+                    </legend>
+                    {parts.map((p) => {
+                        const pid = `${id}-${i}-${p.key}`;
+                        const v = str(item[p.key]);
+                        return (
+                            <div key={p.key} className="field">
+                                <label htmlFor={pid} className="eyebrow">
+                                    {p.label}
+                                    {p.required && <span className="field-note"> · needed before publishing</span>}
+                                </label>
+                                {p.type === "image" ? (
+                                    <PictureField value={v} onChange={(nv) => setPart(i, p.key, nv)} readOnly={readOnly} />
+                                ) : p.type === "rich" ? (
+                                    <RichEditor
+                                        id={pid}
+                                        value={v}
+                                        onChange={(nv) => setPart(i, p.key, nv)}
+                                        readOnly={readOnly}
+                                        focus={false}
+                                    />
+                                ) : p.type === "long" ? (
+                                    <textarea
+                                        id={pid}
+                                        rows={3}
+                                        value={v}
+                                        readOnly={readOnly}
+                                        onChange={(e) => setPart(i, p.key, e.target.value)}
+                                    />
+                                ) : (
+                                    <input
+                                        id={pid}
+                                        value={v}
+                                        readOnly={readOnly}
+                                        placeholder={p.type === "link" ? "A web address, or a page such as about.html" : undefined}
+                                        onChange={(e) => setPart(i, p.key, e.target.value)}
+                                    />
+                                )}
+                                {p.help && <span className="field-help">{p.help}</span>}
+                                <Room field={p} text={v} />
+                            </div>
+                        );
+                    })}
+                    {!readOnly && (
+                        <div className="item-actions">
+                            <button type="button" className="btn btn-sm" onClick={() => move(i, -1)} disabled={i === 0}>
+                                <ArrowUp /> Move up
+                            </button>
+                            <button type="button" className="btn btn-sm" onClick={() => move(i, 1)} disabled={i === items.length - 1}>
+                                <ArrowDown /> Move down
+                            </button>
+                            <button type="button" className="btn btn-sm" onClick={() => write(items.filter((_, n) => n !== i))}>
+                                <Trash2 /> Remove this {one}
+                            </button>
+                        </div>
+                    )}
+                </fieldset>
+            ))}
+            {!readOnly && (
+                <button type="button" className="btn btn-sm" onClick={() => write([...items, {}])} disabled={full}>
+                    <Plus /> {full ? `No more than ${field.max}` : `Add ${/^[aeiou]/.test(one) ? "an" : "a"} ${one}`}
+                </button>
+            )}
+        </div>
+    );
+}
+
 function RichEditor({
     id,
     value,

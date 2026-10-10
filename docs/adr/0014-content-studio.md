@@ -321,3 +321,26 @@ The owner chose Cloudflare R2 for storage on 2026-10-10.
 - R2 is off this machine, so the files survive the loss of the host; their
   records are in Postgres and are in its backups. The bucket itself has no
   second copy.
+
+## As built: lists of items, and checks before publishing (branch `p5-finish`, 2026-10-10)
+
+- **Lists of items with several parts** (services, menu entries, team members).
+  A field of type `items` describes each entry's parts in `itemFields` (text,
+  long text, rich text, image, link); its value is an array of objects. In the
+  page the list is `data-content-list` as before, and inside its first entry
+  each part is marked `data-item`, `data-item-rich`, `data-item-image` or, on a
+  link, `data-item-href`. Every entry is a copy of the first entry's markup. A
+  part an entry does not have is emptied, and its link or picture is left out,
+  so an entry never shows the first entry's sample content. This differs from
+  §1's sketch (`collection/services` with `data-content="#name"`): items live
+  in a field of the page's document, not in a separate collection.
+- **In the editor** each entry is a card of labelled fields with **Add**,
+  **Move up**, **Move down** and **Remove**.
+- **Checks before publishing.** A field (or a part of an item) can be marked
+  `required` and given a `max` (characters, or entries). A draft may break
+  these; creating a release may not, and says which field on which page in a
+  sentence. The form shows "needed before publishing" and how much room is left
+  once it is nearly used.
+
+Still not built: number, date and yes/no fields; reordering by dragging; a
+focal point for images; poster images for video.
