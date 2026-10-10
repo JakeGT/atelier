@@ -160,6 +160,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Wording no page shows is marked **Not on the website yet**, with **Ask my assistant to connect it** (opens the editor with the request written out). Websites made before p5.0 are all in this state until that is done.
 - The editor has a **Content** button, a **Pictures** tab and **Add pictures or files** by the message box.
 
+## The assistant checks and sees its work (branch `assistant-sight`, ADR-0015)
+
+- `content_check` (tool) and `services/coverage.ts`: text and pictures on a page that are not bound to content. The Content page shows the same count with **Ask my assistant to make them editable**.
+- `page_look` (tool), `mcp/look.ts`, `mcp/site.ts`: Chromium in the runtime image, driven over the DevTools protocol. Pictures for models that read images (from the catalog's `vision`), a measured outline for those that do not. The built-in model does not.
+- Workspaces need 2,048 MB (`RUNTIME_MEMORY_MB`) now that a browser runs in them.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

@@ -351,6 +351,8 @@ function ModelLine({ model, provider, showProvider }: { model: CatalogModel; pro
                     </span>
                 )}
                 {model.contextWindow ? <span className="muted">{windowSize(model.contextWindow)} context</span> : null}
+                {/* Whether the assistant can see the pages it builds with this model. */}
+                <span className="muted">{model.vision ? "can look at your pages" : "cannot look at pages"}</span>
             </span>
         </>
     );

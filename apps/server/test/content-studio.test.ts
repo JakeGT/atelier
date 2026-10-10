@@ -210,8 +210,14 @@ test("the deployer fills pages from the content it is given, and leaves unbound 
 test("the page map says which pages show which pieces of wording, and follows the website as it changes", async () => {
     const { t, who, p } = await setup();
     const map = async () =>
-        (await json<{ pages: { path: string; title: string; refs: string[] }[] }>(await get(t, who, `${p}/content/map`))).pages;
-    assert.deepEqual(await map(), [{ path: "index.html", title: "t", refs: ["page/home#headline", "page/home#story", "page/home#hours"] }]);
+        (
+            await json<{
+                pages: { path: string; title: string; refs: string[]; loose: number; examples: { tag: string; text: string }[] }[];
+            }>(await get(t, who, `${p}/content/map`))
+        ).pages;
+    assert.deepEqual(await map(), [
+        { path: "index.html", title: "t", refs: ["page/home#headline", "page/home#story", "page/home#hours"], loose: 0, examples: [] },
+    ]);
     // A later version of the website: another page, and the home page no longer marks anything.
     t.agent.run = async (input) => {
         writeFileSync(join(input.workspaceDir, "index.html"), "<title>Home</title><h1>plain</h1>");
@@ -229,9 +235,10 @@ test("the page map says which pages show which pieces of wording, and follows th
         if ((await json<{ run: RunState }>(await get(t, who, `${p}/runs/${run.id}`))).run.status !== "running") break;
         await new Promise((r) => setTimeout(r, 15));
     }
+    // The home page's heading is now text nobody can edit: the map says so, with what it is.
     assert.deepEqual(await map(), [
-        { path: "index.html", title: "Home", refs: [] },
-        { path: "about.html", title: "About us", refs: ["page/about#headline", "page/shared#footer"] },
+        { path: "index.html", title: "Home", refs: [], loose: 1, examples: [{ tag: "h1", text: "plain" }] },
+        { path: "about.html", title: "About us", refs: ["page/about#headline", "page/shared#footer"], loose: 0, examples: [] },
     ]);
     // Someone outside the studio cannot read it.
     const other = await signIn(t);

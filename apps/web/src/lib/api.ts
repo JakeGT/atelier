@@ -231,6 +231,16 @@ export interface ContentDocument {
     updatedAt: string;
 }
 
+// One page of a website: the pieces of wording it shows, and how much of what a
+// visitor reads on it cannot be edited (with the first few examples).
+export interface SitePage {
+    path: string;
+    title: string;
+    refs: string[];
+    loose: number;
+    examples: { tag: string; text: string }[];
+}
+
 // A file in a website's media library.
 export interface MediaAsset {
     id: string;
@@ -528,8 +538,7 @@ export function orgApi(org: string) {
         removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}`),
 
         // For each page of the website, the pieces of wording it shows ("page/home#headline").
-        contentMap: (projectId: string) =>
-            get<{ pages: { path: string; title: string; refs: string[] }[] }>(`${p(projectId)}/content/map`).then((b) => b.pages),
+        contentMap: (projectId: string) => get<{ pages: SitePage[] }>(`${p(projectId)}/content/map`).then((b) => b.pages),
         listMedia: (projectId: string) => get<MediaLibrary>(`${p(projectId)}/media`),
         uploadMedia: (projectId: string, file: File, about: { alt: string; decorative: boolean }) => {
             const form = new FormData();

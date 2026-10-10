@@ -30,7 +30,20 @@ function words(s: string): string {
     return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-type Kind = "read" | "write" | "edit" | "look" | "check" | "wording-save" | "wording-read" | "web" | "plan" | "other";
+type Kind =
+    | "read"
+    | "write"
+    | "edit"
+    | "look"
+    | "check"
+    | "wording-save"
+    | "wording-read"
+    | "web"
+    | "plan"
+    | "see"
+    | "editable"
+    | "files"
+    | "other";
 
 function kindOf(name: string): Kind {
     if (name === "read") return "read";
@@ -38,6 +51,9 @@ function kindOf(name: string): Kind {
     if (name === "edit" || name === "patch" || name === "multiedit") return "edit";
     if (name === "glob" || name === "grep" || name === "list") return "look";
     if (name === "bash") return "check";
+    if (name.includes("page_look")) return "see";
+    if (name.includes("content_check")) return "editable";
+    if (name.includes("media_list")) return "files";
     if (name.includes("content_upsert")) return "wording-save";
     if (name.includes("content_")) return "wording-read";
     if (name.includes("webfetch") || name.includes("websearch") || name.includes("web_")) return "web";
@@ -59,6 +75,14 @@ export function stepDone(step: AgentToolEvent): string {
             return "Looked through your pages";
         case "check":
             return "Checked its work";
+        case "see":
+            return step.target
+                ? `Looked at ${plainFile(step.target.split("@")[0])} ${step.target.endsWith("@desktop") ? "on a desktop" : step.target.endsWith("@tablet") ? "on a tablet" : "on a phone"}`
+                : "Looked at the page";
+        case "editable":
+            return "Checked that everything can be edited";
+        case "files":
+            return "Looked through your pictures and files";
         case "wording-save":
             return "Saved your wording";
         case "wording-read":
@@ -97,6 +121,7 @@ export function summary(steps: AgentToolEvent[]): string {
     if (changed.size === 1) parts.push(`worked on ${[...changed][0]}`);
     else if (changed.size > 1) parts.push(`worked on ${changed.size} parts of the website`);
     if (count(["wording-save"])) parts.push("saved your wording");
+    if (count(["see"])) parts.push("looked at the result");
     if (count(["web"])) parts.push("looked something up");
     if (!parts.length && count(["read", "look", "wording-read"])) parts.push("looked through the website");
     const text = parts.join(" · ");

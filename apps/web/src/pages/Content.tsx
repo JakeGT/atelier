@@ -2,7 +2,7 @@ import { ArrowLeft, Crosshair, History, Images, Search, Type, Undo2, Unlink } fr
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MediaLibrary, MediaProvider } from "../editor/Media";
 import { countPieces, documentName, fieldsOf, WordingForm } from "../editor/Wording";
-import type { ContentDocument, ContentRevision, Org, Project, Session } from "../lib/api";
+import type { ContentDocument, ContentRevision, Org, Project, Session, SitePage } from "../lib/api";
 import { can, orgApi } from "../lib/api";
 import { navigate, type Theme, timeAgo } from "../lib/hooks";
 import { Dots, UserMenu, useToast, Wordmark } from "../ui/kit";
@@ -13,12 +13,6 @@ interface Props {
     session: Session;
     theme: Theme;
     onToggleTheme: () => void;
-}
-
-interface SitePage {
-    path: string;
-    title: string;
-    refs: string[];
 }
 
 const unpublished = (d: ContentDocument): boolean => JSON.stringify(d.draft) !== JSON.stringify(d.published);
@@ -40,6 +34,10 @@ export function pageName(path: string): string {
 // The request that connects older wording to the pages. Shown to the person before it is sent.
 const CONNECT_REQUEST =
     "Connect all of this website's saved wording to its pages, so I can edit it myself on the Content page. Keep every word and the design exactly as they are. Give every piece a plain label and mark where it appears on each page.";
+
+// The request that makes the rest of a page editable.
+const EDITABLE_REQUEST =
+    "Some text on this website cannot be edited on the Content page yet. Run your content check, connect every piece of text and every picture it lists so that I can edit them myself, and give each a plain label. Keep every word and the design exactly as they are.";
 
 // The request that gives older wording proper labels.
 const LABEL_REQUEST =
@@ -185,6 +183,9 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
     const waiting = (documents ?? []).filter(unpublished);
     const loose = (documents ?? []).filter((d) => connected(d) < fieldsOf(d).length);
     const askToConnect = () => navigate(`${editor}?ask=${encodeURIComponent(CONNECT_REQUEST)}`);
+    // Pages with text a visitor can read that nobody can edit here.
+    const patchy = (pages ?? []).filter((p) => p.loose > 0);
+    const looseCount = patchy.reduce((n, p) => n + p.loose, 0);
     // Wording whose names were worked out from how it is stored, rather than given by the assistant.
     const unlabelled = (documents ?? []).filter((d) => !d.fields?.length && fieldsOf(d).length > 0);
 
@@ -315,7 +316,44 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                                 )}
                             </div>
                         )}
-                        {loose.length === 0 && unlabelled.length > 0 && (
+                        {loose.length === 0 && looseCount > 0 && (
+                            <div className="content-loose" role="status">
+                                <Unlink />
+                                <div>
+                                    <strong>
+                                        {looseCount} {looseCount === 1 ? "piece" : "pieces"} of text on your website cannot be edited here
+                                        yet.
+                                    </strong>
+                                    <p>
+                                        Your assistant did not connect everything on{" "}
+                                        {patchy.length === 1
+                                            ? `the ${pageName(patchy[0]?.path ?? "").toLowerCase()}`
+                                            : `${patchy.length} pages`}
+                                        . For example:{" "}
+                                        {patchy
+                                            .flatMap((p) =>
+                                                p.examples.map(
+                                                    (e) =>
+                                                        `“${e.text.length > 44 ? `${e.text.slice(0, 44)}…` : e.text}” (${pageName(p.path)})`,
+                                                ),
+                                            )
+                                            .slice(0, 4)
+                                            .join(", ")}
+                                        . It can finish the job without changing a word.
+                                    </p>
+                                </div>
+                                {canEdit && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        onClick={() => navigate(`${editor}?ask=${encodeURIComponent(EDITABLE_REQUEST)}`)}
+                                    >
+                                        Ask my assistant to make them editable
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                        {loose.length === 0 && looseCount === 0 && unlabelled.length > 0 && (
                             <div className="content-loose content-quiet" role="status">
                                 <Type />
                                 <div>

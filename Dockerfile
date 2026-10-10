@@ -62,7 +62,8 @@ CMD ["node", "apps/server/src/main.ts"]
 # ---- runtime (per-project agent workspace) --------------------------------------------------------------
 FROM app AS runtime
 ARG OPENCODE_VERSION=1.18.35
-RUN apk add --no-cache git curl && \
+# Chromium and a few fonts: the assistant looks at the pages it builds (mcp/look.ts).
+RUN apk add --no-cache git curl chromium font-liberation font-dejavu font-noto-emoji && \
     ARCH=$([ "$(uname -m)" = "aarch64" ] && echo arm64 || echo x64) && \
     curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}-musl.tar.gz" -o /tmp/opencode.tgz && \
     tar -xzf /tmp/opencode.tgz -C /tmp && \
@@ -72,7 +73,7 @@ RUN apk add --no-cache git curl && \
     apk del curl && \
     # The project volume is mounted here; a new named volume copies this ownership.
     mkdir -p /workspace && chown node:node /workspace
-ENV WORKSPACE_DIR=/workspace AGENT_STATE_DIR=/tmp/agent PORT=8090 HOME=/tmp/agent
+ENV WORKSPACE_DIR=/workspace AGENT_STATE_DIR=/tmp/agent PORT=8090 HOME=/tmp/agent CHROMIUM_PATH=/usr/bin/chromium
 USER node
 EXPOSE 8090
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:8090/healthz >/dev/null || exit 1

@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "@atelier/shared";
 import sharp from "sharp";
+import { signAgentToken } from "../src/services/agentToken.ts";
 import type { DeployInput, Hosting } from "../src/services/hosting.ts";
 import { MemoryStorage } from "../src/services/mediaStorage.ts";
 import type { RunState } from "../src/services/runs.ts";
-import { json, makeApp, signIn, type TestApp } from "./helpers.ts";
+import { json, makeApp, SECRETS_KEY, signIn, type TestApp } from "./helpers.ts";
 
 interface Asset {
     id: string;
@@ -209,4 +210,22 @@ test("publishing sends the files a release uses, and only those; a removed file 
     const second = await json<{ release: { number: number } }>(await me.post(`/projects/${project.id}/releases`, {}));
     assert.equal((await me.post(`/projects/${project.id}/releases/${second.release.number}/publish`, {})).status, 200);
     assert.ok(hosting.deploys[1]?.media?.some((m) => m.name === bound.name));
+});
+
+test("the assistant can read a library file with its own token, and only its own website's", async () => {
+    const { t, project, upload } = await setup();
+    const { asset } = await json<{ asset: Asset }>(await upload("a.jpg", await photo(600), { alt: "A photo" }));
+    const token = (projectId: string) =>
+        signAgentToken({ tenantId: project.tenantId, projectId, sessionId: "s", exp: Math.floor(Date.now() / 1000) + 60 }, SECRETS_KEY);
+    const get = (name: string, auth?: string) =>
+        t.app.request(`/api/agent/media/file/${name}`, { headers: auth ? { authorization: `Bearer ${auth}` } : {} });
+    const mine = await get(asset.name, token(project.id));
+    assert.equal(mine.status, 200);
+    assert.equal(mine.headers.get("content-type"), "image/jpeg");
+    assert.equal((await get(asset.name)).status, 401);
+    assert.equal((await get(asset.name, "not-a-token")).status, 401);
+    assert.equal((await get("nothing-000000.jpg", token(project.id))).status, 404);
+    assert.equal((await get("..%2f..%2fetc", token(project.id))).status, 404);
+    // A token for another website does not reach this one's files.
+    assert.equal((await get(asset.name, token("33333333-3333-4333-8333-333333333333"))).status, 401);
 });

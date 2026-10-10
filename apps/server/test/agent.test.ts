@@ -121,3 +121,16 @@ test("carrying on continues the engine's last session; a normal request does not
     await runWith(resumed, { resume: true });
     assert.ok(readFileSync(join(resumed.dir, "args"), "utf8").includes("--continue"));
 });
+
+test("looking at a page is reported as which page and at what size, and nothing else", () => {
+    const look = (input: unknown) =>
+        parseRunOutput(
+            line({ type: "tool_use", part: { tool: "atelier-content_page_look", state: { status: "completed", input } } }),
+            "/site",
+        ).toolEvents[0]?.target;
+    assert.equal(look({ page: "about.html", size: "desktop" }), "about.html@desktop");
+    assert.equal(look({ page: "blog/first.html" }), "blog/first.html@phone");
+    // Anything odd falls back to the home page on a phone rather than being passed on.
+    assert.equal(look({ page: "../../etc/passwd", size: "huge" }), "index.html@phone");
+    assert.equal(look({ page: "<script>", size: 3 }), "index.html@phone");
+});

@@ -123,6 +123,8 @@ export function workspaceRoutes(api: Api): void {
                 apiUrl,
                 agentToken,
                 resume,
+                // With no model chosen the built-in one is used, which cannot read pictures.
+                vision: model ? ((await api.catalog.get()).models.find((m) => m.ref === model)?.vision ?? false) : false,
             });
             presence.setRun(project.id, { runId: run.id, userId: c.get("user").id, name: c.get("user").name });
             await store.messages.add({

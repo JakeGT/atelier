@@ -196,7 +196,7 @@ function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise
                     value={org.defaultModel}
                     onChange={(m) => void setDefault(m)}
                     automatic="The built-in model"
-                    automaticHint="The assistant's built-in model. No key needed."
+                    automaticHint="The assistant's built-in model. No key needed. It cannot look at pictures of your pages; it checks its layouts by measurement instead."
                     mayManage
                     refresh={changes}
                 />

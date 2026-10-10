@@ -2,6 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { coverageReport } from "../services/coverage.ts";
+import { Browser, browserPath } from "./look.ts";
+import { inside, readPages, serveSite } from "./site.ts";
 
 // A stdio MCP server that exposes the project's content store to the agent.
 // It calls the Atelier API (never the database) with a short-lived token scoped
@@ -80,6 +83,125 @@ server.tool(
         if (fields?.length)
             result = (await api(`${path}/fields`, { method: "PUT", body: JSON.stringify({ fields }) })) as { document: unknown };
         return json(result.document);
+    },
+);
+
+// ---- the assistant checking its own work --------------------------------------------------
+
+// The website's files as they are right now, including what this request has changed.
+const workspace = process.env.ATELIER_WORKSPACE ?? process.cwd();
+
+interface SavedDocument {
+    kind: string;
+    slug: string;
+    draft: Record<string, unknown> | null;
+    fields: { key: string }[] | null;
+}
+const savedDocuments = async (): Promise<SavedDocument[]> =>
+    ((await api("/api/agent/content")) as { documents: SavedDocument[] }).documents;
+
+server.tool(
+    "content_check",
+    "Check that everything a visitor can read is wording the person can edit. Reads the website's pages as they are now and reports, per page: text and pictures not connected to content (`notEditable`), elements marked for a field that has nothing saved (`markedButNothingSaved`); and overall: saved wording no page shows (`savedButOnNoPage`) and saved wording with no described field (`notDescribed`). Call it before you finish any request that added or changed pages or wording, fix what it reports, and call it again until `ok` is true. Text that is truly not wording to edit (a decorative symbol, a version number) can be marked with the attribute data-content-skip instead.",
+    {},
+    async () => {
+        const report = coverageReport(await readPages(workspace), await savedDocuments());
+        const left = report.pages.reduce((n, p) => n + p.notEditable.length, 0);
+        const summary = report.ok
+            ? "Everything a visitor can read is connected to wording the person can edit."
+            : `Not finished: ${left} pieces of text or pictures are not editable, ${report.pages.reduce((n, p) => n + p.markedButNothingSaved.length, 0)} marked elements have nothing saved, ${report.savedButOnNoPage.length} saved pieces are on no page, ${report.notDescribed.length} saved pieces have no described field.`;
+        return json({ summary, ...report });
+    },
+);
+
+const SIZE = z.enum(["phone", "tablet", "desktop"]);
+const browser = (() => {
+    const path = browserPath();
+    return path ? new Browser(path) : null;
+})();
+let site: Awaited<ReturnType<typeof serveSite>> | null = null;
+const vision = process.env.ATELIER_VISION === "1";
+let looks = 0;
+const MAX_LOOKS = 16;
+
+const libraryFiles = async () =>
+    (
+        (await api("/api/agent/media")) as {
+            files: {
+                path: string;
+                description: string;
+                width: number | null;
+                height: number | null;
+                smallerCopies: { path: string; width: number }[];
+            }[];
+        }
+    ).files;
+
+server.tool(
+    "page_look",
+    "Look at a page of the website as a visitor would see it: opens it in a real browser at phone, tablet or desktop width and returns pictures of it (a long page comes in up to three pictures from the top; pass `from` to look further down), with the page's height and anything wrong that a picture may not make obvious (content wider than the screen, pictures that did not load, script errors, text too small). Use it after you build or change how a page looks, at phone and at desktop width, and fix what you see before you finish. `page` is the file's path, e.g. index.html.",
+    { page: z.string().default("index.html"), size: SIZE.default("phone"), from: z.number().int().min(0).default(0) },
+    async ({ page, size, from }) => {
+        if (!browser)
+            return json({ unavailable: "Looking at pages is not available in this workspace. Check the HTML and CSS carefully instead." });
+        if (++looks > MAX_LOOKS)
+            return json({
+                unavailable: `You have looked ${MAX_LOOKS} times in this request, which is the most allowed. Finish with what you know.`,
+            });
+        const file = inside(workspace, page);
+        if (!file || !/\.html?$/i.test(page))
+            return json({ error: "page must be the path of an .html file in the website, e.g. index.html" });
+        try {
+            site ??= await serveSite(workspace, {
+                documents: savedDocuments,
+                media: async () =>
+                    (await libraryFiles()).map((f) => ({
+                        name: f.path.replace(/^media\//, ""),
+                        alt: f.description.startsWith("(") ? "" : f.description,
+                        width: f.width,
+                        height: f.height,
+                        variants: f.smallerCopies.map((c) => ({ name: c.path.replace(/^media\//, ""), width: c.width })),
+                    })),
+                mediaFile: async (name) => {
+                    const res = await fetch(`${apiUrl}/api/agent/media/file/${encodeURIComponent(name)}`, {
+                        headers: { authorization: `Bearer ${token}` },
+                    });
+                    return res.ok
+                        ? {
+                              body: new Uint8Array(await res.arrayBuffer()),
+                              type: res.headers.get("content-type") ?? "application/octet-stream",
+                          }
+                        : null;
+                },
+            });
+            const seen = await browser.look(`${site.url}${page.replace(/^\/+/, "")}`, size, from);
+            const more = seen.to < seen.pageHeight ? ` There is more below: call again with from=${seen.to}.` : "";
+            const text = `${page} at ${size} width (${seen.width}px). The page is ${seen.pageHeight}px tall; these pictures show ${seen.from}px to ${seen.to}px.${more}\n${
+                seen.problems.length
+                    ? `Problems found:\n- ${seen.problems.join("\n- ")}`
+                    : "No problems were detected automatically; judge the pictures yourself."
+            }`;
+            // A model that cannot read pictures is given the layout in words and numbers instead.
+            if (!vision) {
+                const outline = seen.outline.join("\n- ") || "(nothing visible)";
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `${text}\nYou cannot be shown pictures with the model in use, so here is what is on this stretch of the page, top to bottom, as measured in the browser:\n- ${outline}`,
+                        },
+                    ],
+                };
+            }
+            return {
+                content: [
+                    { type: "text", text },
+                    ...seen.pictures.map((data) => ({ type: "image" as const, data, mimeType: "image/jpeg" })),
+                ],
+            };
+        } catch (err) {
+            return json({ error: `The page could not be looked at: ${(err as Error).message}` });
+        }
     },
 );
 
