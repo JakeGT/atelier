@@ -290,3 +290,45 @@ test("the model proxy stops forwarding once the studio reaches its daily ceiling
     assert.equal((await call()).status, 429);
     assert.equal(providers.seen.length, 0);
 });
+
+test("a finished request records what it probably cost, from the model's list price; the built-in model has none", async () => {
+    const { ModelCatalog: Catalog } = await import("../src/services/catalog.ts");
+    const t = await makeApp({}, undefined, { catalog: new Catalog(catalogFetch) });
+    const who = await signIn(t);
+    const h = who.write;
+    const { project } = (await (
+        await t.app.request(`${who.api}/projects`, { method: "POST", headers: h, body: JSON.stringify({ name: "Shop" }) })
+    ).json()) as { project: { id: string } };
+    const p = `${who.api}/projects/${project.id}`;
+    const ask = async () => {
+        t.agent.run = async () => ({ text: "done", toolEvents: [], tokens: { input: 200_000, output: 40_000 } });
+        const { session } = (await (await t.app.request(`${p}/sessions`, { method: "POST", headers: h })).json()) as {
+            session: { id: string };
+        };
+        const { run } = (await (
+            await t.app.request(`${p}/sessions/${session.id}/messages`, {
+                method: "POST",
+                headers: h,
+                body: JSON.stringify({ prompt: "x" }),
+            })
+        ).json()) as { run: { id: string } };
+        for (let i = 0; i < 200; i++) {
+            const state = (await (await t.app.request(`${p}/runs/${run.id}`, { headers: who.read })).json()) as { run: { status: string } };
+            if (state.run.status !== "running") break;
+            await new Promise((r) => setTimeout(r, 15));
+        }
+    };
+    const cost = async () => (await t.store.usage.monthly(who.org.id, new Date(0))).find((m) => m.kind === "agent.cost_micros")?.units ?? 0;
+    // The built-in model: tokens are counted, no cost is claimed.
+    await ask();
+    assert.equal(await cost(), 0);
+    // A priced model ($1 in, $5 out, per million tokens): 0.2 x 1 + 0.04 x 5 = $0.40.
+    await t.store.providerKeys.put({ tenantId: who.org.id, provider: "anthropic", sealed: "sealed", hint: "x", createdBy: who.user.id });
+    await t.store.organizations.update(who.org.id, { defaultModel: "anthropic/claude-x" });
+    await ask();
+    assert.equal(await cost(), 400_000);
+    const { months } = (await (await t.app.request(`${who.api}/usage/monthly`, { headers: who.read })).json()) as {
+        months: { cost: number | null }[];
+    };
+    assert.equal(months[0]?.cost, 0.4);
+});

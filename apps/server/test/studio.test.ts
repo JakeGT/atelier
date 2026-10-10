@@ -68,10 +68,17 @@ test("usage month by month", async () => {
     await at("agent.seconds", 600, "a");
     await at("agent.input_tokens", 1200, "a");
     await at("agent.output_tokens", 300, "a");
-    const { months } = await json<{ months: { month: string; requests: number; minutes: number; tokensIn: number; tokensOut: number }[] }>(
-        await get(t, who, `${who.api}/usage/monthly`),
-    );
-    assert.deepEqual(months, [{ month: new Date().toISOString().slice(0, 7), requests: 2, minutes: 10, tokensIn: 1200, tokensOut: 300 }]);
+    const { months } = await json<{
+        months: { month: string; requests: number; minutes: number; tokensIn: number; tokensOut: number; cost: number | null }[];
+    }>(await get(t, who, `${who.api}/usage/monthly`));
+    assert.deepEqual(months, [
+        { month: new Date().toISOString().slice(0, 7), requests: 2, minutes: 10, tokensIn: 1200, tokensOut: 300, cost: null },
+    ]);
+    // With a priced model in use, the estimate is recorded as each request finishes.
+    await t.store.usage.record({ tenantId: who.org.id, projectId: null, kind: "agent.cost_micros", units: 1_234_567, sourceId: "a" });
+    await t.store.usage.record({ tenantId: who.org.id, projectId: null, kind: "agent.cost_micros", units: 400_000, sourceId: "b" });
+    const again = await json<{ months: { cost: number | null }[] }>(await get(t, who, `${who.api}/usage/monthly`));
+    assert.equal(again.months[0]?.cost, 1.63);
 });
 
 test("export: the owner can download everything in a studio; the link is theirs alone", async () => {

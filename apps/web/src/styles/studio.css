@@ -1611,3 +1611,21 @@ button.where:hover {
     height: 100%;
     border: 0;
 }
+
+.content-back {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.content-back svg {
+    width: 14px;
+    height: 14px;
+}
+
+@media (max-width: 720px) {
+    .content-back {
+        display: inline-flex;
+    }
+}

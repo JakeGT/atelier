@@ -74,6 +74,8 @@ export interface MonthUsage {
     minutes: number;
     tokensIn: number;
     tokensOut: number;
+    // Estimated US dollars at the model's list price; null when no price was known.
+    cost: number | null;
 }
 
 export interface Project {
