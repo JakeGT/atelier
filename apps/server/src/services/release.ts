@@ -94,6 +94,51 @@ export class ReleaseService {
         return mine.find((d) => active.has(d.hostname))?.hostname ?? null;
     }
 
+    // Domains the website has that the host does not (it was taken offline and is
+    // back, say) are attached again. A domain that cannot be attached must not fail
+    // a publish that has already succeeded: it shows as unverified in the editor.
+    private async attachDomains(tenantId: string, projectId: string, site: string): Promise<void> {
+        if (!this.hosting) return;
+        const mine = await this.store.domains.list(tenantId, projectId);
+        if (mine.length === 0) return;
+        try {
+            const attached = new Set((await this.hosting.listDomains(site)).map((d) => d.name));
+            for (const d of mine) if (!attached.has(d.hostname)) await this.hosting.addDomain(site, d.hostname);
+        } catch (err) {
+            console.error(`could not reattach domains for ${projectId}: ${(err as Error).message}`);
+        }
+    }
+
+    // Takes the website offline: nothing is served at its address or its domains
+    // until it is published again. Files, versions and release history stay. The
+    // host's project is removed (so nothing is left answering) and created again,
+    // under the same name, by the next publish.
+    async unpublish(tenantId: string, projectId: string): Promise<Release> {
+        const live = await this.store.releases.findLive(tenantId, projectId);
+        if (!live) throw new ReleaseError("this website is not published", 409);
+        if (this.deploying.has(projectId)) throw new ReleaseError("this website is being published; try again in a moment", 409);
+        this.deploying.add(projectId);
+        try {
+            const project = await this.store.projects.findById(tenantId, projectId);
+            if (this.hosting && project?.hostingRef) {
+                try {
+                    await this.hosting.deleteSite(project.hostingRef);
+                } catch (err) {
+                    // Still up: say so, and change nothing here.
+                    console.error(`could not take down ${project.hostingRef}: ${(err as Error).message}`);
+                    throw new ReleaseError(
+                        "the website could not be taken offline just now, so it is still live; try again in a moment",
+                        502,
+                    );
+                }
+                await this.store.projects.setHosting(tenantId, projectId, { hostingRef: project.hostingRef, productionRef: null });
+            }
+            return (await this.store.releases.takeDown(tenantId, projectId)) ?? live;
+        } finally {
+            this.deploying.delete(projectId);
+        }
+    }
+
     private async deploy(tenantId: string, projectId: string, release: Release): Promise<Release> {
         const hosting = this.hosting;
         if (!hosting) {
@@ -140,6 +185,7 @@ export class ReleaseService {
                 commit: release.codeSha,
             });
             await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
+            await this.attachDomains(tenantId, projectId, site);
             await this.store.projects.setHosting(tenantId, projectId, { hostingRef: site, productionRef: result.siteUrl });
             return await this.store.releases.goLive(tenantId, projectId, release.id);
         } catch (err) {

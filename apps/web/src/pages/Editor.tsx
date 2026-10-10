@@ -1,4 +1,16 @@
-import { ArrowLeft, ArrowUpRight, Eye, Globe, History, MessageSquare, PanelRight, Rocket, SlidersHorizontal } from "lucide-react";
+import {
+    ArrowLeft,
+    ArrowUpRight,
+    Check,
+    Copy,
+    Eye,
+    Globe,
+    History,
+    MessageSquare,
+    PanelRight,
+    Rocket,
+    SlidersHorizontal,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Address } from "../editor/Address";
 import { Chat, type Message } from "../editor/Chat";
@@ -63,6 +75,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [acting, setActing] = useState(false);
     const [confirmPublish, setConfirmPublish] = useState(false);
     const [addressOpen, setAddressOpen] = useState(false);
+    const [published, setPublished] = useState<{ number: number; url: string } | null>(null);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
     const loadThread = useCallback(async () => {
@@ -201,7 +214,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     async function act(fn: () => Promise<string>, intent?: Intent, resuming = false) {
         setActing(true);
         try {
-            toast(await fn());
+            const message = await fn();
+            if (message) toast(message);
             await refresh();
         } catch (err) {
             if (!(err instanceof ReauthRequired)) toast((err as Error).message, "error");
@@ -241,7 +255,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 const r = await a.publish(pid);
                 setTab("releases");
                 const { url } = await a.hosting(pid).catch(() => ({ url: null }));
-                return url ? `Release ${r.number} is live at ${new URL(url).host}.` : `Release ${r.number} is live.`;
+                // With an address to show, say so properly; otherwise a line will do.
+                if (url) setPublished({ number: r.number, url });
+                return url ? "" : `Release ${r.number} is live.`;
             },
             { action: "publish" },
             resuming,
@@ -416,7 +432,21 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 ))}
             </nav>
 
-            {addressOpen && <Address project={project} api={a} mayManage={mayManage} onClose={() => setAddressOpen(false)} />}
+            {addressOpen && (
+                <Address
+                    project={project}
+                    api={a}
+                    mayManage={mayManage}
+                    canPublish={canPublish}
+                    onUnpublished={() => {
+                        setAddressOpen(false);
+                        void refresh();
+                    }}
+                    onClose={() => setAddressOpen(false)}
+                />
+            )}
+
+            {published && <Published project={project} published={published} onClose={() => setPublished(null)} />}
 
             {settingsOpen && (
                 <ProjectSettings
@@ -487,5 +517,45 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 </Dialog>
             )}
         </div>
+    );
+}
+
+// Shown once a publish has gone through: where the website now lives.
+function Published({ project, published, onClose }: { project: Project; published: { number: number; url: string }; onClose: () => void }) {
+    const [copied, setCopied] = useState(false);
+    const host = new URL(published.url).host;
+    return (
+        <Dialog onClose={onClose} wide>
+            <p className="eyebrow">Release {published.number}</p>
+            <h2>
+                {project.name} is <em className="live-word">live.</em>
+            </h2>
+            <p>Anyone with this address can see it now. A brand-new address can take a minute to start answering.</p>
+            <div className="address-line">
+                <a href={published.url} target="_blank" rel="noreferrer" className="mono">
+                    {host} <ArrowUpRight />
+                </a>
+                <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                        void navigator.clipboard.writeText(published.url).then(() => {
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 1600);
+                        })
+                    }
+                >
+                    {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy link"}
+                </button>
+            </div>
+            <div className="dialog-actions">
+                <button type="button" className="btn" onClick={onClose}>
+                    Done
+                </button>
+                <a className="btn btn-seal" href={published.url} target="_blank" rel="noreferrer" onClick={onClose}>
+                    Open website <ArrowUpRight />
+                </a>
+            </div>
+        </Dialog>
     );
 }

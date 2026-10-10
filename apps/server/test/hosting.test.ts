@@ -463,3 +463,55 @@ test("without a deployer configured, publishing still records releases and serve
     assert.deepEqual([info.enabled, info.url], [false, null]);
     assert.equal((await post(t, owner, `${owner.api}/projects/${project.id}/domains`, { hostname: "www.example.com" })).status, 409);
 });
+
+test("unpublishing takes the website offline and keeps everything else; publishing brings it back with its domains", async () => {
+    const { t, owner, cf } = await setup();
+    const editor = await signIn(t, { tenantId: owner.org.id, role: "editor" });
+    const project = await newProject(t, owner);
+    const p = `${owner.api}/projects/${project.id}`;
+    const releases = async () =>
+        (await json<{ releases: Release[] }>(await t.app.request(`${p}/releases`, { headers: owner.read }))).releases;
+    // Nothing is live yet.
+    assert.equal((await post(t, owner, `${p}/unpublish`)).status, 409);
+
+    await build(t, owner, project, "v1");
+    await publish(t, owner, project);
+    await t.app.request(`${p}/content/page/home`, { method: "PUT", headers: owner.write, body: JSON.stringify({ title: "Hello" }) });
+    await publish(t, owner, project);
+    const site = (await getProject(t, owner, project)).hostingRef ?? "";
+    await post(t, owner, `${p}/domains`, { hostname: "www.okoro.example" });
+    assert.ok(cf.projects.has(site));
+
+    assert.equal((await post(t, editor, `${p}/unpublish`)).status, 404);
+    // If the host cannot be reached the website is still up, and nothing here says otherwise.
+    cf.setDown(true);
+    assert.equal((await post(t, owner, `${p}/unpublish`)).status, 502);
+    cf.setDown(false);
+    assert.ok((await releases()).some((r) => r.state === "live"));
+    assert.ok((await getProject(t, owner, project)).productionRef);
+
+    assert.equal((await post(t, owner, `${p}/unpublish`)).status, 200);
+    // Gone from the host, domain and all.
+    assert.equal(cf.projects.has(site), false);
+    const after = await getProject(t, owner, project);
+    assert.deepEqual([after.productionRef, after.hostingRef], [null, site]);
+    // No release is live and no content is published; the history is all still there.
+    assert.deepEqual(
+        (await releases()).map((r) => r.state),
+        ["superseded", "superseded"],
+    );
+    const docs = await t.store.content.list(owner.org.id, project.id);
+    assert.ok(docs.length > 0 && docs.every((d) => d.published === null && d.draft !== null));
+    const overview = await json<{ liveRelease: Release | null; hasChanges: boolean }>(
+        await t.app.request(`${p}/overview`, { headers: owner.read }),
+    );
+    assert.deepEqual([overview.liveRelease, overview.hasChanges], [null, true]);
+    assert.equal((await post(t, owner, `${p}/unpublish`)).status, 409);
+    assert.ok(JSON.stringify(await t.store.audit.list({ tenantId: owner.org.id })).includes("release.unpublish"));
+
+    // Publishing again: same address, and the domain it had is attached again.
+    assert.equal((await publish(t, owner, project)).status, 200);
+    assert.equal((await getProject(t, owner, project)).productionRef, `https://${site}.pages.dev`);
+    assert.equal(cf.served(site)["/index.html"], "<h1>v1</h1>");
+    assert.ok(cf.projects.get(site)?.domains.has("www.okoro.example"));
+});

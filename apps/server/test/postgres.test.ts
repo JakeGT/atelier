@@ -639,3 +639,37 @@ test("hosting: a project's hosting details and deployment results are stored; a 
     await store.domains.remove(a.tenantId, a.project.id, hostname);
     assert.equal((await store.domains.list(a.tenantId, a.project.id)).length, 0);
 });
+
+test("taking a website down: no release is live, nothing is published, and its address is cleared", { skip }, async () => {
+    const a = await seedTenant("tenant-down-a");
+    const b = await seedTenant("tenant-down-b");
+    const make = async (t: { tenantId: string; project: { id: string }; doc: { id: string } }) => {
+        const r = await store.releases.create({
+            id: randomUUID(),
+            tenantId: t.tenantId,
+            projectId: t.project.id,
+            codeSha: null,
+            actorId: null,
+            rollbackOf: null,
+            documents: [{ documentId: t.doc.id, kind: "home", slug: "index", rev: 1, content: { v: 1 } }],
+        });
+        return store.releases.goLive(t.tenantId, t.project.id, r.id);
+    };
+    await make(a);
+    await make(b);
+    await store.projects.setHosting(a.tenantId, a.project.id, { hostingRef: "atl-x", productionRef: "https://atl-x.pages.dev" });
+
+    // Another tenant cannot take it down.
+    assert.equal(await store.releases.takeDown(b.tenantId, a.project.id), null);
+    assert.ok(await store.releases.findLive(a.tenantId, a.project.id));
+
+    const down = await store.releases.takeDown(a.tenantId, a.project.id);
+    assert.equal(down?.state, "superseded");
+    assert.equal(await store.releases.findLive(a.tenantId, a.project.id), null);
+    assert.ok((await store.content.list(a.tenantId, a.project.id)).every((d) => d.published === null && d.draft !== null));
+    assert.equal(await store.releases.takeDown(a.tenantId, a.project.id), null);
+    const cleared = await store.projects.setHosting(a.tenantId, a.project.id, { hostingRef: "atl-x", productionRef: null });
+    assert.deepEqual([cleared.hostingRef, cleared.productionRef], ["atl-x", null]);
+    // The other tenant's website is untouched.
+    assert.ok(await store.releases.findLive(b.tenantId, b.project.id));
+});

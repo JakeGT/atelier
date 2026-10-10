@@ -273,7 +273,11 @@ export class MemoryStore implements Store {
         setHosting: async (tenantId, id, hosting) => {
             const p = this.projectMap.get(id);
             if (!p || p.tenantId !== tenantId) throw new Error("project not found");
-            const next = { ...p, hostingRef: hosting.hostingRef, productionRef: hosting.productionRef ?? p.productionRef };
+            const next = {
+                ...p,
+                hostingRef: hosting.hostingRef,
+                productionRef: hosting.productionRef === undefined ? p.productionRef : hosting.productionRef,
+            };
             this.projectMap.set(id, next);
             return next;
         },
@@ -496,6 +500,18 @@ export class MemoryStore implements Store {
             const live: Release = { ...release, state: "live", deployedAt: at };
             this.releaseMap.set(releaseId, live);
             return live;
+        },
+        takeDown: async (tenantId, projectId) => {
+            const live = [...this.releaseMap.values()].find(
+                (r) => r.tenantId === tenantId && r.projectId === projectId && r.state === "live",
+            );
+            if (!live) return null;
+            const down: Release = { ...live, state: "superseded" };
+            this.releaseMap.set(live.id, down);
+            for (const doc of this.contentMap.values()) {
+                if (doc.projectId === projectId) this.contentMap.set(doc.id, { ...doc, published: null, publishedAt: null });
+            }
+            return down;
         },
         markFailed: async (tenantId, releaseId) => {
             const r = this.releaseMap.get(releaseId);

@@ -590,7 +590,7 @@ export class PostgresStore implements Store {
                     const rows = await tx<ProjectRow[]>`
                         UPDATE projects SET
                             hosting_ref = ${hosting.hostingRef},
-                            production_ref = COALESCE(${hosting.productionRef ?? null}, production_ref),
+                            production_ref = CASE WHEN ${hosting.productionRef !== undefined} THEN ${hosting.productionRef ?? null} ELSE production_ref END,
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(PROJECT_COLS)}`;
                     return rowToProject(firstRow(rows));
@@ -797,6 +797,15 @@ export class PostgresStore implements Store {
                         UPDATE content_documents SET published = NULL, published_at = NULL
                         WHERE project_id = ${projectId}
                           AND id NOT IN (SELECT document_id FROM release_documents WHERE release_id = ${releaseId})`;
+                    return rowToRelease(firstRow(rows));
+                }),
+            takeDown: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<ReleaseRow[]>`
+                        UPDATE releases SET state = 'superseded' WHERE project_id = ${projectId} AND state = 'live'
+                        RETURNING ${tx.unsafe(RELEASE_COLS)}`;
+                    if (rows.length === 0) return null;
+                    await tx`UPDATE content_documents SET published = NULL, published_at = NULL WHERE project_id = ${projectId}`;
                     return rowToRelease(firstRow(rows));
                 }),
             markFailed: async (tenantId, releaseId) =>

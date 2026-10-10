@@ -73,7 +73,8 @@ export interface ProjectStore {
     list(tenantId: string): Promise<Project[]>;
     update(tenantId: string, id: string, patch: ProjectPatch): Promise<Project>;
     // Where the website is hosted: its project there, and its stable public address.
-    setHosting(tenantId: string, id: string, hosting: { hostingRef: string; productionRef?: string }): Promise<Project>;
+    // `productionRef`: omitted keeps the address, null clears it (the website was taken offline).
+    setHosting(tenantId: string, id: string, hosting: { hostingRef: string; productionRef?: string | null }): Promise<Project>;
     // Removes the project and everything that hangs off it (content, releases, conversation).
     delete(tenantId: string, id: string): Promise<void>;
 }
@@ -167,6 +168,9 @@ export interface ReleaseStore {
     // documents the release does not ship).
     goLive(tenantId: string, projectId: string, releaseId: string): Promise<Release>;
     markFailed(tenantId: string, releaseId: string): Promise<Release>;
+    // Nothing is live any more: the live release becomes superseded and no document
+    // is published. Returns the release that was live, or null if none was.
+    takeDown(tenantId: string, projectId: string): Promise<Release | null>;
 }
 
 export interface DeploymentStore {

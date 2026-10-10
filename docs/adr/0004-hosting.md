@@ -75,6 +75,11 @@ possible without re-platforming.
   throwaway `atl-smoke-…` site): create, deploy, redeploy with one changed file
   (one upload), redeploy the first version (no uploads), delete. An account API
   token with **Pages Write** is sufficient.
+- **Unpublish** takes a website offline: the Pages project is deleted (so
+  nothing is left answering at its address or domains), the live release
+  becomes `superseded`, and no content is `published`. Files, versions and
+  releases stay. The next publish creates the project again under the same name
+  and reattaches the website's domains, which re-verify.
 - **The seam for another host** is `services/hosting.ts` (`Hosting`).
 - **Not built:** preview deployments as a feature (the deployer accepts a
   branch, nothing offers it yet); the published content snapshot (websites

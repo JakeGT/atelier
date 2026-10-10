@@ -937,3 +937,26 @@
         display: none;
     }
 }
+
+.live-word {
+    font-style: italic;
+    color: var(--seal);
+}
+
+.offline-confirm {
+    margin-top: 24px;
+    padding: 16px 18px 18px;
+    border: 1px solid var(--seal);
+    border-radius: var(--radius-l);
+    background: var(--seal-wash);
+}
+
+.dialog .offline-confirm p {
+    margin: 0;
+    color: var(--ink);
+    font-size: 14px;
+}
+
+.offline-confirm .dialog-actions {
+    margin-top: 14px;
+}

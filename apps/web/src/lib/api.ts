@@ -370,6 +370,8 @@ export function orgApi(org: string) {
             const { release } = await post<{ release: Release }>(`${p(projectId)}/releases`);
             return (await post<{ release: Release }>(`${p(projectId)}/releases/${release.number}/publish`)).release;
         },
+        // Takes the website offline; its files and history stay.
+        unpublish: (projectId: string) => post<{ ok: boolean }>(`${p(projectId)}/unpublish`),
         rollback: (projectId: string, number: number) =>
             post<{ release: Release }>(`${p(projectId)}/releases/${number}/rollback`).then((b) => b.release),
     };

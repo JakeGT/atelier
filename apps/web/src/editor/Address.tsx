@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { Check, CloudOff, Copy, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { HostedDomain, Hosting, OrgApi, Project } from "../lib/api";
@@ -10,6 +10,10 @@ interface Props {
     api: OrgApi;
     // Owners and admins add and remove domains; everyone else can look.
     mayManage: boolean;
+    // Shown the option to take the website offline.
+    canPublish: boolean;
+    // The website was taken offline.
+    onUnpublished: () => void;
     onClose: () => void;
 }
 
@@ -21,12 +25,13 @@ const STATUS: Record<string, { label: string; chip: string }> = {
 };
 
 // Where the website lives: its address, and the owner's own domains.
-export function Address({ project, api, mayManage, onClose }: Props) {
+export function Address({ project, api, mayManage, canPublish, onUnpublished, onClose }: Props) {
     const toast = useToast();
     const [hosting, setHosting] = useState<Hosting | null>(null);
     const [hostname, setHostname] = useState("");
     const [busy, setBusy] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [confirmOffline, setConfirmOffline] = useState(false);
 
     const load = useCallback(async () => {
         try {
@@ -82,6 +87,18 @@ export function Address({ project, api, mayManage, onClose }: Props) {
             await load();
         } catch (err) {
             fail(err);
+        }
+    }
+
+    async function takeOffline() {
+        setBusy(true);
+        try {
+            await api.unpublish(project.id);
+            toast(`${project.name} is offline. Publish to bring it back.`);
+            onUnpublished();
+        } catch (err) {
+            fail(err);
+            setBusy(false);
         }
     }
 
@@ -202,11 +219,37 @@ export function Address({ project, api, mayManage, onClose }: Props) {
                     )}
                 </>
             )}
-            <div className="dialog-actions">
-                <button type="button" className="btn" onClick={onClose}>
-                    Close
-                </button>
-            </div>
+            {confirmOffline ? (
+                <div className="offline-confirm">
+                    <p>
+                        <strong>Take {project.name} offline?</strong> Its address{hosting?.domains.length ? " and domains" : ""} will stop
+                        working straight away. Your pages, versions and releases stay here, and Publish brings it back at the same address.
+                    </p>
+                    <div className="dialog-actions">
+                        <button type="button" className="btn" onClick={() => setConfirmOffline(false)} disabled={busy}>
+                            Keep it live
+                        </button>
+                        <button type="button" className="btn btn-danger-solid" onClick={() => void takeOffline()} disabled={busy}>
+                            {busy ? <Dots /> : <CloudOff />} Take offline
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <div className="dialog-actions dialog-actions-split">
+                    {canPublish && hosting?.url ? (
+                        <button type="button" className="btn btn-danger" onClick={() => setConfirmOffline(true)}>
+                            <CloudOff /> Unpublish
+                        </button>
+                    ) : (
+                        <span />
+                    )}
+                    <span>
+                        <button type="button" className="btn" onClick={onClose}>
+                            Close
+                        </button>
+                    </span>
+                </div>
+            )}
         </Dialog>
     );
 }

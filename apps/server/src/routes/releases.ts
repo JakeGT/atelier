@@ -56,6 +56,18 @@ export function releaseRoutes(api: Api): void {
             throw err;
         }
     };
+    // Takes the website offline. Its files and history stay; Publish brings it back.
+    route("post", `${PROJECT}/unpublish`, "release.publish", stepUp, async (c) => {
+        try {
+            const release = await releases.unpublish(c.get("org").id, c.get("project").id);
+            await audit(c, "release.unpublish", `project:${c.get("project").id}`, { number: release.number });
+            return c.json({ ok: true });
+        } catch (err) {
+            if (err instanceof ReleaseError) return c.json({ error: err.message }, err.status);
+            throw err;
+        }
+    });
+
     route("post", `${PROJECT}/releases/:number/publish`, "release.publish", stepUp, releaseAction("publish"));
     route("post", `${PROJECT}/releases/:number/rollback`, "release.rollback", stepUp, releaseAction("rollback"));
 }
