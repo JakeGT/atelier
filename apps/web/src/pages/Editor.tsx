@@ -19,8 +19,9 @@ import { Chat, type Message } from "../editor/Chat";
 import { type Device, Preview } from "../editor/Preview";
 import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
-import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Release, Run, Session } from "../lib/api";
-import { ApiError, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
+import { changedFiles } from "../lib/activity";
+import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Pulse, Release, Run, Session } from "../lib/api";
+import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, useClickOutside, useStored } from "../lib/hooks";
 import { Dialog, Dots, UserMenu, useToast } from "../ui/kit";
 import { FIRST_PROMPT_KEY } from "./Studio";
@@ -61,6 +62,12 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [messages, setMessages] = useState<Message[] | null>(null);
     const [pending, setPending] = useState<Message[]>([]);
     const [activeRun, setActiveRun] = useState<Run | null>(null);
+    // Several people can have one website open: who else is here, whose request
+    // is being worked on, and the names of the people in the conversation.
+    const [people, setPeople] = useState<Pulse["people"]>([]);
+    const [runBy, setRunBy] = useState<Pulse["runBy"]>(null);
+    const [authors, setAuthors] = useState<Record<string, string>>({});
+    const typing = useRef(false);
 
     const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
     const [releases, setReleases] = useState<Release[]>([]);
@@ -90,6 +97,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         try {
             const thread = await a.thread(pid);
             setMessages(thread.messages);
+            setAuthors(thread.authors ?? {});
             setPending([]);
             setActiveRun(thread.activeRun);
         } catch {
@@ -168,34 +176,81 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         [a, agent, activeRun, note, pid],
     );
 
-    const runId = activeRun?.id ?? null;
+    // ---- the pulse: one heartbeat that keeps this editor in step with the website ---------
+    // Every couple of seconds it says "I am here" (and whether I am typing) and
+    // learns who else is, how the request being worked on is getting along, and
+    // whether anything changed. That is what lets two people share a website:
+    // either one's request, reply, saved wording or publish shows up for the other.
+    const seen = useRef<{ stamp: number | null; runId: string | null; written: number }>({ stamp: null, runId: null, written: 0 });
+    const [stale, setStale] = useState(0);
     useEffect(() => {
-        if (!runId) return;
         let stopped = false;
         let misses = 0;
-        const finish = () => {
-            // The server has stored the reply; reload the thread and everything it may have changed.
-            void loadThread();
-            void refresh();
-            reloadPreview();
-        };
-        const tick = async () => {
+        const beat = async () => {
+            // A hidden tab stops saying "I am here", and catches up when it is looked at again.
+            if (document.hidden) return;
             try {
-                const run = await a.getRun(pid, runId);
+                const pulse = await a.pulse(pid, typing.current);
+                if (stopped) return;
                 misses = 0;
-                if (!stopped && run.status !== "running") finish();
-            } catch (err) {
-                // The run is gone (workspace restarted) or the network is flaky: give it a few tries.
-                misses++;
-                if (!stopped && (misses >= 5 || (err instanceof ApiError && err.status === 404))) finish();
+                setPeople(pulse.people);
+                setRunBy(pulse.runBy);
+                setActiveRun(pulse.run);
+                const was = seen.current;
+                // Pages written while it works show in the preview straight away.
+                const written = pulse.run ? pulse.run.steps.filter(changedFiles).length : 0;
+                if (pulse.run && written > was.written) reloadPreview();
+                const finished = was.runId !== null && pulse.run === null;
+                const changed = was.stamp !== null && pulse.stamp !== was.stamp;
+                seen.current = { stamp: pulse.stamp, runId: pulse.run?.id ?? null, written };
+                // A request finished, or someone changed something: show it.
+                if (finished || changed) setStale((n) => n + 1);
+            } catch {
+                // The network is flaky or the server is restarting: after a few misses, reload what we show.
+                if (++misses === 5) setStale((n) => n + 1);
             }
         };
-        const timer = setInterval(tick, 1500);
+        void beat();
+        const timer = setInterval(beat, 2000);
+        const onVisible = () => void beat();
+        document.addEventListener("visibilitychange", onVisible);
         return () => {
             stopped = true;
             clearInterval(timer);
+            document.removeEventListener("visibilitychange", onVisible);
         };
-    }, [a, runId, pid, loadThread, refresh, reloadPreview]);
+    }, [a, pid, reloadPreview]);
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `stale` is the signal to reload
+    useEffect(() => {
+        if (stale === 0) return;
+        void loadThread();
+        void refresh();
+        reloadPreview();
+    }, [stale]);
+
+    const stopRun = () => {
+        if (activeRun) a.stopRun(pid, activeRun.id).catch((err: Error) => toast(err.message, "error"));
+    };
+    const moreTime = () => {
+        if (!activeRun) return;
+        a.extendRun(pid, activeRun.id).then(
+            (run) => {
+                setActiveRun(run);
+                toast("It has 10 more minutes.");
+            },
+            (err: Error) => toast(err.message, "error"),
+        );
+    };
+    const carryOn = async () => {
+        if (!agent || activeRun) return;
+        try {
+            setActiveRun(await a.carryOn(pid, agent.id));
+            void loadThread();
+        } catch (err) {
+            note("error", (err as Error).message);
+        }
+    };
 
     // A brief typed on the dashboard becomes the first message, once the workspace is ready.
     const sentFirst = useRef(false);
@@ -297,7 +352,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     }, [a, pid]);
 
     const saveDocument = async (doc: ContentDocument, draft: Record<string, unknown>) => {
-        await a.saveContent(pid, doc.kind, doc.slug, draft);
+        await a.saveContent(pid, doc.kind, doc.slug, draft, doc.rev);
         toast("Saved. It shows in the preview, and goes public when you publish.");
         await refresh();
     };
@@ -381,7 +436,17 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 <Chat
                     messages={[...(messages ?? []), ...pending]}
                     loading={messages === null}
-                    runningSince={activeRun?.startedAt ?? null}
+                    run={activeRun}
+                    runBy={runBy}
+                    people={people}
+                    authors={authors}
+                    me={session.id}
+                    onTyping={(t) => {
+                        typing.current = t;
+                    }}
+                    onStop={stopRun}
+                    onMoreTime={moreTime}
+                    onCarryOn={() => void carryOn()}
                     ready={agent !== null && mayEdit}
                     starting={starting}
                     locked={
@@ -400,7 +465,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     device={device}
                     onDevice={setDevice}
                     onReload={reloadPreview}
-                    hasPage={checkpoints.length > 0}
+                    hasPage={checkpoints.length > 0 || (activeRun?.steps.some(changedFiles) ?? false)}
                     working={running}
                 />
                 <Sidebar

@@ -22,6 +22,7 @@ wrong, and the fix is to the design, not to the explanation.
 | [04 — States and consequences](04-states-and-consequences.md) | Risky actions, confirmations, disabled controls, empty states, errors |
 | [05 — Visual language](05-visual-language.md) | Colour, type, spacing, components |
 | [06 — Review checklist](06-review-checklist.md) | What to check before any interface change ships, and how to audit |
+| [07 — Working and sharing](07-working-and-sharing.md) | What is shown while the assistant works; several people on one website |
 | [Audit, 2026-10-10](audit-2026-10-10.md) | What the first full audit found and what was done |
 
 ---
@@ -83,6 +84,19 @@ without using the mouse to hover. Then run the checklist.
 
 ---
 
+## 7. No opaque waits, no surprises from other people
+
+While the assistant works, the person sees what it has just done in plain
+words, how long it has been going, and a Stop button; the preview fills in as
+pages are written. Long requests are paused, not lost, and can be given more
+time or carried on. When several people have a website open they see who else
+is there, who is typing, and whose request is being worked on; everything stays
+in step without reloading, and nobody's work is silently overwritten.
+
+→ [07 — Working and sharing](07-working-and-sharing.md)
+
+---
+
 ## Where this applies in the code
 
 | What | Where |
@@ -90,6 +104,8 @@ without using the mouse to hover. Then run the checklist.
 | Design tokens (colour, type, spacing) | `apps/web/src/styles/tokens.css` |
 | Shared pieces (dialog, menus, toasts, account menu) | `apps/web/src/ui/kit.tsx` |
 | The model picker (searchable list pattern) | `apps/web/src/ui/ModelPicker.tsx` |
+| Plain words for what the assistant did | `apps/web/src/lib/activity.ts` |
+| The live "working" card, who's here, typing | `apps/web/src/editor/Chat.tsx` |
 | The editor bar and the Live status menu | `apps/web/src/pages/Editor.tsx` |
 | Website cards and their More menu | `apps/web/src/pages/Studio.tsx` |
 

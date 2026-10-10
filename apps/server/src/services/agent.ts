@@ -18,7 +18,9 @@ export interface AgentResult {
     tokens?: { input: number; output: number };
 }
 
-export const DEFAULT_RUN_MINUTES = 15;
+// How long a request may run before it is paused. AGENT_RUN_MINUTES changes it
+// (the daemon passes its environment through; useful for trying the pause locally).
+export const DEFAULT_RUN_MINUTES = Number(process.env.AGENT_RUN_MINUTES) > 0 ? Number(process.env.AGENT_RUN_MINUTES) : 15;
 export const EXTEND_MINUTES = 10;
 export const MAX_RUN_MINUTES = 60;
 

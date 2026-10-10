@@ -139,3 +139,38 @@ capability. Publishing remains a browser-origin action in the UI.
   `CONTINUOUS-IMPROVEMENT-PLAN.md`, generalized per project.
 - Workspaces are re-provisionable from the last checkpoint; nothing critical
   lives only inside the sandbox.
+
+## Runs as people see them (branch `live-activity`, 2026-10-10)
+
+- **Steps arrive live.** `services/agent.ts` reads the engine's event stream
+  line by line as it is produced. Each finished tool call becomes a step
+  (`{name, state, target}`; `target` is the file for file tools, relative to
+  the website, and nothing else is passed on). `RunState.steps` grows while the
+  run is in progress; the same steps are stored with the reply.
+- **Stop.** `POST …/runs/:id/stop` kills the engine's whole process group (it is
+  spawned detached), so its tools and the content server go with it.
+- **Time.** A run has 15 minutes (`AGENT_RUN_MINUTES`). `POST …/runs/:id/extend`
+  adds 10, up to 60 in all (`RunControl`).
+- **Stopped or out of time is not a failure.** The work so far is saved as a
+  version titled "… (unfinished)", the run ends as `stopped` or `timed_out`,
+  and the conversation gets a `note` (migration 0011), not an error.
+- **Carry on.** `POST …/messages {resume: true}` starts a run with the engine's
+  `--continue`, which picks up its last session if the workspace still has it
+  and starts afresh if not; the prompt restates the original request so it
+  works either way.
+
+## Several people on one website
+
+- **The pulse.** Every open editor posts `…/pulse {typing}` every two seconds
+  (not while its tab is hidden). The answer: who else is here and typing, the
+  run in progress with its steps and who asked for it, and a `stamp`.
+- **The stamp** moves whenever a request to change the website succeeds (a
+  middleware on every project route) and when a run is settled. An editor that
+  sees it move reloads its conversation, versions, releases, wording and
+  preview. This is how one person's change reaches another.
+- **Presence is in memory** (`services/presence.ts`): it describes this moment
+  and one server process serves everyone. More than one server process would
+  need it moved to the database or a shared cache.
+- **One run at a time per website** is enforced by the workspace, as before.
+- **Wording saves carry the revision they were based on** (`?rev=`); a save
+  based on an older revision is refused with who changed it.

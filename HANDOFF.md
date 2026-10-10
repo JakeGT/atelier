@@ -124,6 +124,14 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Shared studios**: owners and admins add people by e-mail under Studio settings → Members; it shows up the next time that person opens Atelier.
 - Details: `docs/07-auth-and-rbac.md` §3.
 
+## The assistant at work, and sharing (branch `live-activity`)
+
+- A run reports its steps live; the editor shows them in plain words, with Stop, "Give it 10 more minutes" and "Carry on from here". Stopped and paused work is kept as a version.
+- Open editors exchange a pulse every two seconds: who is here, who is typing, the run in progress, and a stamp that makes everyone reload when anything changes.
+- Wording saves are refused if someone else changed the same piece meanwhile.
+- Rules: `docs/design/07-working-and-sharing.md`. Mechanics: the last two sections of `docs/08-ai-runtime.md`.
+- To try two people locally: `AUTH_MODE=dev` accepts `/auth/login?as=sol` for a second person.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
