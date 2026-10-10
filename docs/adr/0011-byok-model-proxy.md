@@ -54,7 +54,7 @@ agent, which is untrusted.
   `PROVIDER_UPSTREAMS` points a provider at an operator's own gateway.
 - **The proxy** (`/internal/model/<provider>/*`, `routes/models.ts`) is a
   pass-through, not a per-provider translator: it checks the run's token and
-  that the website is not archived, enforces the studio's daily ceiling, swaps
+  that the website is not archived, enforces the studio's daily limit if it has set one, swaps
   the credential header, and streams the request and response untouched. It
   never follows a redirect and only ever calls the provider's own base address.
   OpenCode is given a `provider.<id>.options.baseURL` + `apiKey` (the token) for
@@ -66,6 +66,11 @@ agent, which is untrusted.
   computed: for each first-party lab, the newest priced model of each of its
   own model lines released in the last 400 days, at most four; the dearest is
   marked most capable and the cheapest fast.
+
+- **No token ceiling by default.** A studio pays its providers directly, so
+  usage is measured but not capped. Owners and admins may set a daily limit for
+  their own studio (Settings → Usage); an operator may impose a default with
+  `DEFAULT_DAILY_TOKEN_LIMIT`.
 
 **Not yet built from the decision above:**
 

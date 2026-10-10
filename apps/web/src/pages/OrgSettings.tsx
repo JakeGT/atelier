@@ -558,20 +558,124 @@ function Meter({ label, used, limit, unit }: { label: string; used: number; limi
     );
 }
 
+// A plain figure, for usage that is measured but not capped.
+function Figure({ label, value, unit }: { label: string; value: number; unit: string }) {
+    return (
+        <div className="meter">
+            <div className="meter-head">
+                <span className="eyebrow">{label}</span>
+                <span className="mono">
+                    {compact.format(value)} <span className="muted">{unit}</span>
+                </span>
+            </div>
+        </div>
+    );
+}
+
+// The studio's own daily limit on assistant tokens: off unless an owner or admin sets one.
+function DailyLimit({ limit, onSave }: { limit: number | null; onSave: (limit: number | null) => Promise<void> }) {
+    const [editing, setEditing] = useState(false);
+    const [millions, setMillions] = useState("");
+    const [busy, setBusy] = useState(false);
+    const tokens = Math.round(Number(millions) * 1_000_000);
+    const valid = millions.trim() !== "" && Number.isFinite(tokens) && tokens >= 1000;
+
+    async function save(next: number | null) {
+        setBusy(true);
+        await onSave(next);
+        setBusy(false);
+        setEditing(false);
+    }
+
+    if (!editing) {
+        return (
+            <p className="field-help limit-line">
+                {limit === null
+                    ? "No daily limit. Your assistant runs on your own provider keys, so usage is measured here but not capped."
+                    : "When the daily limit is reached, the assistant pauses until midnight UTC."}{" "}
+                <button
+                    type="button"
+                    className="link"
+                    onClick={() => {
+                        setMillions(limit === null ? "" : String(limit / 1_000_000));
+                        setEditing(true);
+                    }}
+                >
+                    {limit === null ? "Set a daily limit" : "Change"}
+                </button>
+                {limit !== null && (
+                    <>
+                        {" · "}
+                        <button type="button" className="link" disabled={busy} onClick={() => void save(null)}>
+                            Remove the limit
+                        </button>
+                    </>
+                )}
+            </p>
+        );
+    }
+    return (
+        <form
+            className="limit-form"
+            onSubmit={(e) => {
+                e.preventDefault();
+                if (valid && !busy) void save(tokens);
+            }}
+        >
+            <label>
+                <span className="eyebrow">Daily limit</span>
+                <span className="limit-input">
+                    <input
+                        // biome-ignore lint/a11y/noAutofocus: shown only after asking to set the limit
+                        autoFocus
+                        inputMode="decimal"
+                        value={millions}
+                        onChange={(e) => setMillions(e.target.value.replace(/[^0-9.]/g, ""))}
+                        placeholder="5"
+                        aria-label="Daily limit, in millions of tokens"
+                    />
+                    <span className="muted">million tokens a day</span>
+                </span>
+            </label>
+            <button type="button" className="btn btn-sm" onClick={() => setEditing(false)}>
+                Cancel
+            </button>
+            <button type="submit" className="btn btn-sm btn-primary" disabled={!valid || busy}>
+                {busy ? <Dots /> : "Save limit"}
+            </button>
+        </form>
+    );
+}
+
 function UsagePanel({ org }: { org: Org }) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [usage, setUsage] = useState<Usage | null>(null);
     const [projects, setProjects] = useState<Project[]>([]);
 
+    const load = useCallback(
+        () =>
+            Promise.all([a.usage(), a.listProjects(), a.listProjects(true)])
+                .then(([u, live, archived]) => {
+                    setUsage(u);
+                    setProjects([...live, ...archived]);
+                })
+                .catch((err: Error) => toast(err.message, "error")),
+        [a, toast],
+    );
     useEffect(() => {
-        Promise.all([a.usage(), a.listProjects(), a.listProjects(true)])
-            .then(([u, live, archived]) => {
-                setUsage(u);
-                setProjects([...live, ...archived]);
-            })
-            .catch((err: Error) => toast(err.message, "error"));
-    }, [a, toast]);
+        void load();
+    }, [load]);
+
+    async function setLimit(limit: number | null) {
+        try {
+            await a.update({ dailyTokenLimit: limit });
+            await load();
+            toast(limit === null ? "The daily limit is removed." : "Daily limit saved.");
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    }
 
     if (!usage) {
         return (
@@ -595,12 +699,19 @@ function UsagePanel({ org }: { org: Org }) {
 
     return (
         <div className="panel">
-            <Meter label="Assistant today" used={usage.today.tokens} limit={usage.limits.dailyTokenLimit} unit="tokens" />
+            {usage.limits.dailyTokenLimit === null ? (
+                <Figure label="Assistant today" value={usage.today.tokens} unit="tokens" />
+            ) : (
+                <Meter label="Assistant today" used={usage.today.tokens} limit={usage.limits.dailyTokenLimit} unit="tokens" />
+            )}
+            {can.manage(org.role) ? (
+                <DailyLimit limit={usage.limits.dailyTokenLimit} onSave={setLimit} />
+            ) : (
+                usage.limits.dailyTokenLimit !== null && (
+                    <p className="field-help limit-line">When the daily limit is reached, the assistant pauses until midnight UTC.</p>
+                )
+            )}
             <Meter label="Websites" used={usage.projects} limit={usage.limits.maxProjects} unit="" />
-            <p className="field-help">
-                These are safety ceilings, not charges. The daily one resets at midnight UTC; when it is reached, the assistant pauses until
-                then.
-            </p>
 
             <h2 className="panel-title">Last 30 days</h2>
             {table.length === 0 ? (

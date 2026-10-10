@@ -65,8 +65,8 @@ export function workspaceRoutes(api: Api): void {
         // own key: refuse clearly rather than overrun quietly (docs/12 §3).
         const { dailyTokenLimit } = limits(org);
         const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
-        if (used >= dailyTokenLimit) {
-            return c.json({ error: "this organisation has reached today's usage limit for the assistant; it resets at midnight UTC" }, 429);
+        if (dailyTokenLimit !== null && used >= dailyTokenLimit) {
+            return c.json({ error: "this studio has reached today's usage limit for the assistant; it resets at midnight UTC" }, 429);
         }
 
         // With a model chosen, its provider's key must be connected (BYOK). With none

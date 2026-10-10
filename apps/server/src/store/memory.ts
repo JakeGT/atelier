@@ -123,6 +123,7 @@ export class MemoryStore implements Store {
                 ...org,
                 name: patch.name ?? org.name,
                 defaultModel: patch.defaultModel === undefined ? org.defaultModel : patch.defaultModel,
+                dailyTokenLimit: patch.dailyTokenLimit === undefined ? org.dailyTokenLimit : patch.dailyTokenLimit,
             };
             this.orgMap.set(id, next);
             return next;

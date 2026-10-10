@@ -140,12 +140,13 @@ export function modelRoutes(api: Api): void {
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return refuse(c, 401, "missing or expired token");
 
-        // The studio's daily ceiling holds here too, on every request: a run that
+        // The studio's daily ceiling, if it set one, holds here too, on every request: a run that
         // started under it cannot spend on past it without limit.
         const org = await store.organizations.findById(claims.tenantId);
         if (!org) return refuse(c, 401, "missing or expired token");
         const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
-        if (used >= limits(org).dailyTokenLimit) return refuse(c, 429, "this studio has reached today's usage limit for the assistant");
+        const ceiling = limits(org).dailyTokenLimit;
+        if (ceiling !== null && used >= ceiling) return refuse(c, 429, "this studio has reached today's usage limit for the assistant");
 
         const sealed = await store.providerKeys.getSealed(claims.tenantId, provider.id);
         const key = sealed ? box.open(sealed, providerKeyAddress(claims.tenantId, provider.id)) : null;

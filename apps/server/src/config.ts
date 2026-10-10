@@ -32,7 +32,9 @@ const envSchema = z.object({
     STEP_UP_MINUTES: z.coerce.number().default(15),
     // Safety ceilings applied to organisations that have not been given their own.
     DEFAULT_MAX_PROJECTS: z.coerce.number().int().positive().default(25),
-    DEFAULT_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().default(5_000_000),
+    // Studios run on their own provider keys (BYOK), so there is no daily token ceiling
+    // unless a studio sets one for itself. An operator may impose one here.
+    DEFAULT_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().optional(),
     // Point a provider at your own gateway: {"openai":"https://gateway.example/v1"} (ADR-0011).
     PROVIDER_UPSTREAMS: z.string().optional(),
     INVITE_TTL_DAYS: z.coerce.number().positive().default(14),
@@ -121,7 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         secretsKey,
         stepUpMinutes: e.STEP_UP_MINUTES,
         defaultMaxProjects: e.DEFAULT_MAX_PROJECTS,
-        defaultDailyTokenLimit: e.DEFAULT_DAILY_TOKEN_LIMIT,
+        defaultDailyTokenLimit: e.DEFAULT_DAILY_TOKEN_LIMIT ?? null,
         inviteTtlDays: e.INVITE_TTL_DAYS,
         providerUpstreams,
         workspaceIdleMinutes: e.WORKSPACE_IDLE_MINUTES,

@@ -407,6 +407,7 @@ export class PostgresStore implements Store {
                         UPDATE organizations SET
                             name = COALESCE(${patch.name ?? null}, name),
                             default_model = CASE WHEN ${patch.defaultModel !== undefined} THEN ${patch.defaultModel ?? null} ELSE default_model END,
+                            daily_token_limit = CASE WHEN ${patch.dailyTokenLimit !== undefined} THEN ${patch.dailyTokenLimit ?? null}::bigint ELSE daily_token_limit END,
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(ORG_COLS)}`;
                     return rowToOrg(firstRow(rows));

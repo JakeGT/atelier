@@ -97,7 +97,8 @@ export function createApi(deps: ApiDeps) {
             console.error(`workspace error: ${(err as Error).message}`);
             return c.json({ error: (err as Error).message }, 502);
         },
-        // An organisation's ceilings: its own, or the server defaults.
+        // An organisation's ceilings: its own, or the server defaults. The daily token
+        // ceiling is null (none) unless the studio or the operator set one.
         limits: (o: Organization) => ({
             maxProjects: o.maxProjects ?? config.defaultMaxProjects,
             dailyTokenLimit: o.dailyTokenLimit ?? config.defaultDailyTokenLimit,

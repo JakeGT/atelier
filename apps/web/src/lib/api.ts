@@ -34,7 +34,8 @@ export interface Invitation {
 }
 
 export interface Usage {
-    limits: { maxProjects: number; dailyTokenLimit: number };
+    // dailyTokenLimit is null unless the studio set its own.
+    limits: { maxProjects: number; dailyTokenLimit: number | null };
     today: { tokens: number };
     projects: number;
     last30Days: { projectId: string | null; kind: string; units: number }[];
@@ -294,7 +295,8 @@ export function orgApi(org: string) {
     const o = `/api/v1/orgs/${org}`;
     const p = (projectId: string) => `${o}/projects/${projectId}`;
     return {
-        update: (changes: { name?: string; defaultModel?: string | null }) => patch<{ org: Org }>(o, changes).then((b) => b.org),
+        update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
+            patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
         providers: () => get<{ providers: ProviderInfo[] }>(`${o}/providers`).then((b) => b.providers),
         connectProvider: (id: string, apiKey: string) => put<{ ok: boolean; verified: boolean }>(`${o}/providers/${id}`, { apiKey }),

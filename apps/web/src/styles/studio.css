@@ -489,3 +489,49 @@
     top: auto;
     bottom: calc(100% + 8px);
 }
+
+.limit-line {
+    margin: 8px 0 26px;
+}
+
+.link:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.limit-form {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin: 14px 0 26px;
+}
+
+.limit-form label {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.limit-input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+}
+
+.limit-input input {
+    width: 110px;
+    padding: 7px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    outline: 0;
+}
+
+.limit-input input:focus {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 3px var(--line);
+}

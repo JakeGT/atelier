@@ -48,7 +48,7 @@ export function orgRoutes(api: Api): void {
 
     route("patch", ORG, "org.manage", async (c) => {
         const body = await c.req.json().catch(() => null);
-        const patch: { name?: string; defaultModel?: string | null } = {};
+        const patch: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null } = {};
         if (typeof body?.name === "string") {
             const name = body.name.trim();
             if (!name || name.length > 80) return c.json({ error: "the name must be 1 to 80 characters" }, 400);
@@ -58,6 +58,15 @@ export function orgRoutes(api: Api): void {
             const model = typeof body.defaultModel === "string" ? body.defaultModel.trim() : "";
             if (model && !validModelRef(model)) return c.json({ error: "choose a model from a supported provider" }, 400);
             patch.defaultModel = model || null;
+        }
+        // The studio's own daily ceiling on assistant tokens; null removes it.
+        if (body?.dailyTokenLimit === null) patch.dailyTokenLimit = null;
+        else if (body?.dailyTokenLimit !== undefined) {
+            const limit = body.dailyTokenLimit;
+            if (!Number.isInteger(limit) || limit < 1000 || limit > 100_000_000_000) {
+                return c.json({ error: "the daily limit must be a whole number of tokens, at least 1,000" }, 400);
+            }
+            patch.dailyTokenLimit = limit;
         }
         const org = await store.organizations.update(c.get("org").id, patch);
         await audit(c, "org.update", `org:${org.id}`, patch);

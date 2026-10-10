@@ -36,7 +36,7 @@ export interface OrganizationStore {
     findById(id: string): Promise<Organization | null>;
     // With the caller's role in each, oldest membership first.
     listForUser(userId: string): Promise<(Organization & { role: OrgRole })[]>;
-    update(id: string, patch: { name?: string; defaultModel?: string | null }): Promise<Organization>;
+    update(id: string, patch: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }): Promise<Organization>;
 }
 
 export interface MembershipStore {
