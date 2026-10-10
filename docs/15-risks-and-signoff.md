@@ -13,9 +13,9 @@
 | R7 | Single shared Postgres noisy-neighbor (one hot tenant) | Low | Low–Med | Per-tenant quotas; migration path to schema/DB-per-tenant |
 | R8 | Agent exfiltrates data or abuses the internet | Low–Med | Med | The workspace holds only its own project's files and a 1 h draft-only token; since P2 it can reach only allow-listed hosts through the egress proxy, never a private address (ADR-0012). Residual: the allowed hosts themselves (notably `github.com`) |
 | R9 | Loss of project code (workspace volumes not in the Postgres backup) | Low | High | ADR-0009: volume backup is a VPS go-live gate; P3 remote mirror |
+| R10 | Provisioner compromise (holds the Docker socket = host root) | Low | High | Private network reachable only from the control plane, shared secret, fixed container spec, UUID-only input, refuses unmanaged containers |
 | R11 | A studio's Cloudflare grant leaks (planned E4.5); with DNS access an attacker could redirect its domains | Low | High | ADR-0013: sealed per studio, used only by the deployer, DNS access optional and off unless granted, revoked at Cloudflare on disconnect |
 | R12 | Cloudflare does not approve a public OAuth client, or takes long (E4.5 cannot reach people outside the operator's account) | Med | Med | Start the approval before building; connect-by-token fallback with a pre-filled link works without approval |
-| R10 | Provisioner compromise (holds the Docker socket = host root) | Low | High | Private network reachable only from the control plane, shared secret, fixed container spec, UUID-only input, refuses unmanaged containers |
 
 ## 2. Open questions — resolved at sign-off (2026-10-08)
 
