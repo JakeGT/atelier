@@ -858,7 +858,14 @@ test("retention queries: old messages and old versions of wording go; the newest
     }
     // The latest changes to one website's wording, newest first, each naming its document; another studio sees none.
     const recent = await store.content.recentRevisions(a.tenantId, a.projectId, 3);
-    assert.deepEqual(recent.map((r) => [r.kind, r.slug, r.rev]), [["page", "home", 5], ["page", "home", 4], ["page", "home", 3]]);
+    assert.deepEqual(
+        recent.map((r) => [r.kind, r.slug, r.rev]),
+        [
+            ["page", "home", 5],
+            ["page", "home", 4],
+            ["page", "home", 3],
+        ],
+    );
     assert.equal((await store.content.recentRevisions(b.tenantId, a.projectId, 10)).length, 0);
     const future = new Date(Date.now() + 60_000);
     const past = new Date(Date.now() - 60_000);
