@@ -250,7 +250,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             async () => {
                 const r = await a.rollback(pid, number);
                 setTab("releases");
-                return `Rolled back. Release ${r.number} is live.`;
+                return `The earlier one is back: it is live as release ${r.number}.`;
             },
             { action: "rollback", number },
             resuming,
@@ -298,7 +298,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const saveDocument = async (doc: ContentDocument, draft: Record<string, unknown>) => {
         await a.saveContent(pid, doc.kind, doc.slug, draft);
-        toast("Draft saved.");
+        toast("Saved. It shows in the preview, and goes public when you publish.");
         await refresh();
     };
 
@@ -347,9 +347,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         className={`btn btn-ghost side-toggle ${sideOpen ? "on" : ""}`}
                         onClick={() => setSideOpen((o) => !o)}
                         aria-pressed={sideOpen}
-                        title="Show or hide versions, releases and content"
+                        title="Show or hide the panel with saved versions, what is published, and your wording"
                     >
-                        <PanelRight /> <span className="bar-label">History</span>
+                        <PanelRight /> <span className="bar-label">Versions and wording</span>
                     </button>
                     {canPublish && (
                         <button
@@ -395,7 +395,6 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onRetryWorkspace={() => void openWorkspace()}
                 />
                 <Preview
-                    slug={project.slug}
                     url={previewUrl}
                     reloadKey={reloadKey}
                     device={device}
@@ -424,7 +423,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     [
                         ["chat", "Chat", MessageSquare],
                         ["preview", "Preview", Eye],
-                        ["side", "History", History],
+                        ["side", "Versions", History],
                     ] as const
                 ).map(([id, label, Icon]) => (
                     <button key={id} type="button" className={pane === id ? "on" : ""} onClick={() => setPane(id)}>
@@ -468,25 +467,26 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 <Dialog onClose={() => setConfirmPublish(false)}>
                     <p className="eyebrow">Release {(releases[0]?.number ?? 0) + 1}</p>
                     <h2>Publish this version?</h2>
-                    <p>This makes your current design and content the live website. You can roll back at any time.</p>
+                    <p>
+                        What you see in the preview becomes your public website. You can put an earlier version back at any time, or take
+                        the website offline.
+                    </p>
                     <ul className="manifest">
                         <li>
-                            <span>Design</span>
-                            <span className="mono">
-                                {overview?.head ? overview.head.slice(0, 7) : "none yet"}
-                                {overview?.codeChanged ? " · changed" : ""}
+                            <span>Pages and design</span>
+                            <span>{!overview?.head ? "Nothing built yet" : overview.codeChanged ? "Changed" : "No changes"}</span>
+                        </li>
+                        <li>
+                            <span>Wording</span>
+                            <span>
+                                {overview?.changedDocuments
+                                    ? `${overview.changedDocuments} ${overview.changedDocuments === 1 ? "change" : "changes"}`
+                                    : "No changes"}
                             </span>
                         </li>
                         <li>
-                            <span>Content</span>
-                            <span className="mono">
-                                {overview?.documents ?? 0} {overview?.documents === 1 ? "document" : "documents"}
-                                {overview?.changedDocuments ? ` · ${overview.changedDocuments} changed` : ""}
-                            </span>
-                        </li>
-                        <li>
-                            <span>Replaces</span>
-                            <span className="mono">{live ? `release ${live.number}` : "nothing (first release)"}</span>
+                            <span>Public right now</span>
+                            <span>{live ? `Release ${live.number}` : "Nothing yet"}</span>
                         </li>
                     </ul>
                     <div className="dialog-actions">
@@ -505,16 +505,16 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     <p className="eyebrow">One more step</p>
                     <h2>Confirm it's you.</h2>
                     <p>
-                        {pendingIntent.action === "publish" ? "Publishing changes" : "Rolling back changes"} what the world sees, so we ask
-                        you to confirm your sign-in first. You'll come straight back here and we'll finish{" "}
-                        {pendingIntent.action === "publish" ? "publishing" : "the rollback"} for you.
+                        {pendingIntent.action === "publish" ? "Publishing changes" : "Putting an earlier release back changes"} what the
+                        world sees, so we ask you to confirm your sign-in first. You'll come straight back here and we'll finish{" "}
+                        {pendingIntent.action === "publish" ? "publishing" : "that"} for you.
                     </p>
                     <div className="dialog-actions">
                         <button type="button" className="btn" onClick={() => setPendingIntent(null)}>
                             Cancel
                         </button>
                         <button type="button" className="btn btn-seal" onClick={confirmIdentity}>
-                            Confirm and {pendingIntent.action === "publish" ? "publish" : "roll back"}
+                            Confirm and {pendingIntent.action === "publish" ? "publish" : "put it back"}
                         </button>
                     </div>
                 </Dialog>

@@ -41,12 +41,13 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                         aria-expanded={open}
                         aria-haspopup="menu"
                     >
+                        <span className="org-label">Studio</span>
                         <span className="org-name">{org.name}</span>
                         <ChevronsUpDown />
                     </button>
                     {open && (
                         <div className="menu menu-left" role="menu">
-                            <p className="menu-label eyebrow">Your studios</p>
+                            <p className="menu-label eyebrow">Switch studio</p>
                             {orgs.map((o) => (
                                 <button
                                     key={o.id}
@@ -93,7 +94,7 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                     className={`btn btn-ghost ${section === "settings" ? "on" : ""}`}
                     onClick={() => navigate(`/o/${org.slug}/settings/${can.manage(org.role) ? "general" : "members"}`)}
                 >
-                    <Settings /> Studio
+                    <Settings /> Studio settings
                 </button>
                 <UserMenu session={session} theme={theme} onToggleTheme={onToggleTheme} />
             </nav>

@@ -15,6 +15,10 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | pending |
 | P5 | Direct content editor & hardening | First-party CMS, gVisor, retention, alerting, VPS go-live gates | pending |
 
+**Interface rule for every phase:** anything a person sees follows
+`docs/design/README.md` and passes `docs/design/06-review-checklist.md` before it
+ships. An interface audit is part of finishing a phase.
+
 **Current status (2026-10-09):** P0 and P1 are implemented and deployed to
 `atelier.jaketalling.com`. P1 was then hardened on the `p1-hardening` branch
 (see "P1 hardening" below and ADRs 0006–0011). Work happens on one branch per

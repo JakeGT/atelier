@@ -10,7 +10,6 @@ const DEVICES: { id: Device; label: string; icon: typeof Monitor }[] = [
 ];
 
 interface PreviewProps {
-    slug: string;
     url: string | null;
     reloadKey: number;
     device: Device;
@@ -20,7 +19,7 @@ interface PreviewProps {
     working: boolean;
 }
 
-export function Preview({ slug, url, reloadKey, device, onDevice, onReload, hasPage, working }: PreviewProps) {
+export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, working }: PreviewProps) {
     return (
         <section className="bench">
             <div className={`frame frame-${device}`}>
@@ -31,8 +30,8 @@ export function Preview({ slug, url, reloadKey, device, onDevice, onReload, hasP
                         <i />
                     </div>
                     <div className="frame-address mono">
-                        <span>{slug}</span>
-                        <span className="muted"> · preview</span>
+                        <span>Preview</span>
+                        <span className="muted"> · private</span>
                     </div>
                     <div className="frame-tools">
                         <div className="segmented" role="radiogroup" aria-label="Preview size">

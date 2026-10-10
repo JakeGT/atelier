@@ -11,6 +11,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 (hosting and domains) is next.
 
 **Working rules:**
+- The interface follows `docs/design/README.md`. Every control has words, actions live on the thing they act on, and nothing technical is shown to people. Run `docs/design/06-review-checklist.md` before any interface change ships.
 - Each phase is developed on its own branch and reviewed as a PR. Nothing goes straight to `main`.
 - After every push, check CI (`gh pr checks <n>`). Never commit key-shaped literals, even in tests.
 

@@ -554,3 +554,46 @@
 .card-link .card-meta {
     padding-right: 76px;
 }
+
+.org-label {
+    margin-right: 8px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.starters-label {
+    align-self: center;
+    margin-right: 4px;
+    font-size: 13px;
+    color: var(--ink-3);
+}
+
+.row-note {
+    max-width: 260px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--ink-3);
+    text-align: right;
+}
+
+.roles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px 20px;
+    margin: 20px 0 0;
+}
+
+.roles dt {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.roles dd {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--ink-3);
+}

@@ -98,13 +98,22 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
                         orgSlug={org.slug}
                         value={model}
                         onChange={setModel}
-                        automatic="Studio default"
+                        automatic={
+                            org.defaultModel
+                                ? `Studio default (${org.defaultModel.slice(org.defaultModel.indexOf("/") + 1)})`
+                                : "Studio default (the built-in model)"
+                        }
                         automaticHint="Whatever the studio is set to use"
                         mayManage={can.manage(org.role)}
                         disabled={archived}
                     />
                 </div>
 
+                <p className="field-help settings-note">
+                    {archived
+                        ? "This website is archived: it is hidden and cannot be changed. Restore it to work on it again."
+                        : "Archiving hides this website and stops its assistant. Nothing is deleted, a published website stays public, and you can restore it from the websites page. To delete it for good, use More on its card there."}
+                </p>
                 <div className="dialog-actions dialog-actions-split">
                     {archived ? (
                         <button type="button" className="btn" onClick={() => void setArchived(false)} disabled={busy}>

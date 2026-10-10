@@ -32,14 +32,8 @@ export function Dots() {
 
 export function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
     return (
-        <button
-            type="button"
-            className="btn btn-ghost btn-icon"
-            onClick={onToggle}
-            title={theme === "paper" ? "Night studio" : "Daylight"}
-            aria-label="Switch colour theme"
-        >
-            {theme === "paper" ? <Moon /> : <Sun />}
+        <button type="button" className="btn btn-ghost" onClick={onToggle} title="Switch between light and dark colours">
+            {theme === "paper" ? <Moon /> : <Sun />} {theme === "paper" ? "Night" : "Day"}
         </button>
     );
 }

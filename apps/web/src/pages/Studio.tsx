@@ -187,6 +187,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                             />
                             <div className="brief-foot">
                                 <div className="starters">
+                                    <span className="starters-label">Or start from an idea:</span>
                                     {STARTERS.map((s) => (
                                         <button
                                             key={s.name}

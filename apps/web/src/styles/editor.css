@@ -1017,3 +1017,45 @@
 .live-menu .menu-head .mono {
     font-size: 11.5px;
 }
+
+/* ---- plain-words pass ----------------------------------------------------------- */
+
+.send {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: auto;
+    height: 32px;
+    padding: 0 12px 0 14px;
+    border-radius: 999px;
+    font-size: 13.5px;
+    font-weight: 500;
+}
+
+.send:hover:not(:disabled) {
+    transform: none;
+}
+
+.side-about {
+    margin: 0 0 18px;
+    padding: 0 2px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-3);
+}
+
+.field-note {
+    letter-spacing: 0;
+    text-transform: none;
+    font-family: var(--font-ui);
+    font-size: 11.5px;
+    color: var(--ink-3);
+}
+
+.manifest li > span:last-child {
+    color: var(--ink-2);
+}
+
+.settings-note {
+    margin-top: 22px;
+}
