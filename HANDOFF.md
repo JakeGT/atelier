@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.11` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> Last updated 2026-10-10. Status: **`p5.12` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
 > `main` has everything through PR #12. Two PRs are open, to merge in this order: [#13](https://github.com/JakeGT/atelier/pull/13) `p5-finish`, [#14](https://github.com/JakeGT/atelier/pull/14) `content-clarity` (stacked on #13).
 
 ## TL;DR
@@ -31,9 +31,9 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.11` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.12` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
-| Migrations | `0001`–`0017` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
