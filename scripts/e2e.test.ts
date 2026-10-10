@@ -148,6 +148,8 @@ test("network: the control plane is reachable (and demands credentials); the int
     assert.equal(request(ws.container, "http://atelier-server:8080/healthz", false), "status 200");
     assert.equal(request(ws.container, "http://atelier-server:8080/api/v1/orgs", false), "status 401");
     assert.equal(request(ws.container, "http://atelier-server:8080/api/agent/content", false), "status 401");
+    // The model proxy (BYOK, ADR-0011) is reachable from a workspace, and gives nothing without a run's token.
+    assert.equal(request(ws.container, "http://atelier-server:8080/internal/model/anthropic/messages", false), "status 401");
 
     // No route to the internet of its own.
     assert.match(request(ws.container, "https://example.com/", false), /^failed/);

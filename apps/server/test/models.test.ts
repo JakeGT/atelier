@@ -272,3 +272,21 @@ test("the model proxy refuses: no token, a forged or expired one, an unconnected
     // Nothing above reached a provider.
     assert.equal(providers.seen.length, 0);
 });
+
+test("the model proxy stops forwarding once the studio reaches its daily ceiling, even mid-run", async () => {
+    const providers = fakeProviders();
+    const t = await makeApp({ DEFAULT_DAILY_TOKEN_LIMIT: "1000" }, undefined, { providerFetch: providers.impl });
+    const { api, write, org } = await signIn(t);
+    const project = await createProject(t, api, write);
+    await connect(t, api, write, "anthropic", GOOD_KEY);
+    const token = signAgentToken(
+        { tenantId: org.id, projectId: project.id, sessionId: "s", exp: Math.floor(Date.now() / 1000) + 600 },
+        SECRETS_KEY,
+    );
+    const call = () => t.app.request("/internal/model/anthropic/messages", { method: "POST", headers: { "x-api-key": token }, body: "{}" });
+    assert.equal((await call()).status, 200);
+    await t.store.usage.record({ tenantId: org.id, projectId: project.id, kind: "agent.input_tokens", units: 1000, sourceId: "test" });
+    providers.seen.length = 0;
+    assert.equal((await call()).status, 429);
+    assert.equal(providers.seen.length, 0);
+});

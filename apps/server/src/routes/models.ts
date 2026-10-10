@@ -2,13 +2,13 @@ import type { Context } from "hono";
 import { verifyAgentToken } from "../services/agentToken.ts";
 import { findProvider, keyHeaders, PROVIDERS, type Provider, upstreamFor } from "../services/providers.ts";
 import { providerKeyAddress } from "../services/secrets.ts";
-import { type Api, ORG, param } from "./kit.ts";
+import { type Api, ORG, param, startOfUtcDay } from "./kit.ts";
 
 // Bring-your-own-key (ADR-0011): connecting a studio's provider keys, the model
 // catalog for the picker, and the proxy through which a workspace reaches a
 // provider without ever holding the key.
 export function modelRoutes(api: Api): void {
-    const { route, store, stepUp, audit, box, catalog, providerFetch, config, app, declared, secretsKey } = api;
+    const { route, store, stepUp, audit, box, catalog, providerFetch, config, app, declared, secretsKey, limits } = api;
 
     // ---- providers and their keys ----------------------------------------------------------
 
@@ -127,7 +127,7 @@ export function modelRoutes(api: Api): void {
         if (auth?.startsWith("Bearer ")) return auth.slice(7);
         return c.req.header("x-api-key") ?? c.req.header("x-goog-api-key") ?? null;
     };
-    const refuse = (c: Context, status: 401 | 403 | 404 | 502, message: string) =>
+    const refuse = (c: Context, status: 401 | 403 | 404 | 429 | 502, message: string) =>
         c.json({ error: { type: "atelier_proxy", message } }, status);
 
     declared.push({ method: "ALL", path: "/internal/model/:provider/*", permission: "agent-token" });
@@ -139,6 +139,13 @@ export function modelRoutes(api: Api): void {
         if (!claims) return refuse(c, 401, "missing or expired token");
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return refuse(c, 401, "missing or expired token");
+
+        // The studio's daily ceiling holds here too, on every request: a run that
+        // started under it cannot spend on past it without limit.
+        const org = await store.organizations.findById(claims.tenantId);
+        if (!org) return refuse(c, 401, "missing or expired token");
+        const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
+        if (used >= limits(org).dailyTokenLimit) return refuse(c, 429, "this studio has reached today's usage limit for the assistant");
 
         const sealed = await store.providerKeys.getSealed(claims.tenantId, provider.id);
         const key = sealed ? box.open(sealed, providerKeyAddress(claims.tenantId, provider.id)) : null;

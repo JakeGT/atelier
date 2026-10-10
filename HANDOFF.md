@@ -103,6 +103,13 @@ docker logs atelier-server --tail 20 && curl -fsS https://atelier.jaketalling.co
 
 Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin off`).
 
+## BYOK and models (branch `p4-byok`)
+
+- A studio connects its own provider keys under **Settings → Models**. Twelve providers; the list is `apps/server/src/services/providers.ts`.
+- Keys are sealed in `provider_keys` and never reach a workspace. The assistant calls `/internal/model/<provider>/…` on the server with its run token; the server swaps in the real key (ADR-0011 "As built").
+- The model picker's list and its recommendations come from models.dev, computed in `services/catalog.ts`. Nothing is hard-coded per model.
+- To try it locally without real keys: `PROVIDER_UPSTREAMS` can point a provider at a stand-in server.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).

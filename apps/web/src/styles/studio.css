@@ -429,3 +429,8 @@
         flex-wrap: wrap;
     }
 }
+
+.panel-lede {
+    max-width: 62ch;
+    margin: -4px 0 18px;
+}
