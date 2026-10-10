@@ -184,6 +184,9 @@ export interface Run {
     canExtend: boolean;
 }
 
+// Whatever the server sends, a run always has its list of steps.
+export const wholeRun = <T extends Run | null>(run: T): T => (run && !Array.isArray(run.steps) ? { ...run, steps: [] } : run);
+
 // What an open editor learns every couple of seconds: who else has this website
 // open, the request being worked on (and whose it is), and a stamp that changes
 // whenever anything about the website does.
@@ -494,10 +497,16 @@ export function orgApi(org: string) {
             post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { resume: true }).then((b) => b.run),
         stopRun: (projectId: string, runId: string) => post<{ ok: boolean }>(`${p(projectId)}/runs/${runId}/stop`),
         extendRun: (projectId: string, runId: string) => post<{ run: Run }>(`${p(projectId)}/runs/${runId}/extend`).then((b) => b.run),
-        pulse: (projectId: string, typing: boolean) => post<Pulse>(`${p(projectId)}/pulse`, { typing }),
+        pulse: (projectId: string, typing: boolean) =>
+            post<Pulse>(`${p(projectId)}/pulse`, { typing }).then((b) => ({ ...b, run: wholeRun(b.run) })),
         thread: (projectId: string) =>
-            get<{ messages: ThreadMessage[]; activeRun: Run | null; authors: Record<string, string> }>(`${p(projectId)}/messages`),
-        getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => b.run),
+            get<{ messages: ThreadMessage[]; activeRun: Run | null; authors: Record<string, string> }>(`${p(projectId)}/messages`).then(
+                (b) => ({
+                    ...b,
+                    activeRun: wholeRun(b.activeRun),
+                }),
+            ),
+        getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => wholeRun(b.run)),
 
         listCheckpoints: (projectId: string) =>
             get<{ checkpoints: Checkpoint[] }>(`${p(projectId)}/checkpoints`).then((b) => b.checkpoints),

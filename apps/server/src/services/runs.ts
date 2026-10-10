@@ -20,6 +20,25 @@ export interface RunState {
     canExtend: boolean;
 }
 
+// A run as reported by a workspace, made whole. A workspace started on an earlier
+// version of the runtime keeps running that version until it is next recreated,
+// and reports runs without the fields added since; nothing downstream should have
+// to know that.
+export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status" | "startedAt">): RunState {
+    return {
+        finishedAt: null,
+        result: null,
+        error: null,
+        checkpoint: null,
+        lastActivityAt: raw.startedAt,
+        // The earlier runtime stopped a run after fifteen minutes and could not be given more.
+        deadlineAt: new Date(new Date(raw.startedAt).getTime() + 15 * 60_000).toISOString(),
+        canExtend: false,
+        ...raw,
+        steps: Array.isArray(raw.steps) ? raw.steps : [],
+    };
+}
+
 export interface JobOutcome {
     result: AgentResult;
     checkpoint: string | null;
