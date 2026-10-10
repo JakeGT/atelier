@@ -97,6 +97,24 @@ export class Workspace {
         return this.checkpoint(`Restored version ${sha.slice(0, 7)}`);
     }
 
+    // The files of one saved version, as a tar archive: what publishing ships.
+    // Only what git has recorded, so nothing untracked and never .git itself.
+    async archive(sha: string): Promise<Buffer> {
+        if (!SHA_RE.test(sha)) throw new Error("invalid commit sha");
+        const { stdout } = await execFileAsync("git", [...SAFE_GIT, "archive", "--format=tar", sha], {
+            cwd: this.dir,
+            env: {
+                PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+                HOME: this.dir,
+                GIT_CONFIG_NOSYSTEM: "1",
+                GIT_TERMINAL_PROMPT: "0",
+            },
+            encoding: "buffer",
+            maxBuffer: 512 * 1024 * 1024,
+        });
+        return stdout;
+    }
+
     async head(): Promise<string | null> {
         return git(this.dir, ["rev-parse", "HEAD"]).catch(() => null);
     }

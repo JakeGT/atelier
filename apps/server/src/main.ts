@@ -8,6 +8,7 @@ import { createApp } from "./app.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { connectedAsOwner, migrate } from "./db/migrate.ts";
 import { OpenCodeAgent } from "./services/agent.ts";
+import { DeployerHosting } from "./services/hosting.ts";
 import { OidcService } from "./services/oidc.ts";
 import { ContainerRuntime, LocalRuntime, type WorkspaceRuntime } from "./services/runtime.ts";
 import { SessionStore } from "./services/sessions.ts";
@@ -99,7 +100,14 @@ if (config.runtimeMode === "container") {
     );
 }
 
-const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey });
+const hosting = config.deployerUrl ? new DeployerHosting({ url: config.deployerUrl, secret: config.deployerSecret ?? "" }) : null;
+console.log(
+    hosting
+        ? `Hosting: published websites go to Cloudflare Pages via ${config.deployerUrl}.`
+        : "Hosting: none configured (DEPLOYER_URL); publishing records releases but serves nothing.",
+);
+
+const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting });
 
 // Stop workspaces nobody is using: their files stay, and the next request starts
 // them again in about a second. Keeps a single host from filling up with idle

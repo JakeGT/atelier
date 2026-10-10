@@ -72,6 +72,8 @@ export interface ProjectStore {
     findBySlug(tenantId: string, slug: string): Promise<Project | null>;
     list(tenantId: string): Promise<Project[]>;
     update(tenantId: string, id: string, patch: ProjectPatch): Promise<Project>;
+    // Where the website is hosted: its project there, and its stable public address.
+    setHosting(tenantId: string, id: string, hosting: { hostingRef: string; productionRef?: string }): Promise<Project>;
     // Removes the project and everything that hangs off it (content, releases, conversation).
     delete(tenantId: string, id: string): Promise<void>;
 }
@@ -178,7 +180,30 @@ export interface DeploymentStore {
         url: string | null;
         state: string;
     }): Promise<Deployment>;
+    finish(
+        tenantId: string,
+        id: string,
+        result: { state: "live" | "failed"; providerRef?: string; url?: string; error?: string },
+    ): Promise<void>;
     listByProject(tenantId: string, projectId: string): Promise<Deployment[]>;
+}
+
+export interface ProjectDomain {
+    hostname: string;
+    createdAt: string;
+}
+
+export class DomainTakenError extends Error {
+    constructor() {
+        super("that domain is already connected to a website");
+    }
+}
+
+// Custom domains. A hostname is unique across the platform.
+export interface DomainStore {
+    list(tenantId: string, projectId: string): Promise<ProjectDomain[]>;
+    add(input: { id: string; tenantId: string; projectId: string; hostname: string; createdBy: string }): Promise<void>;
+    remove(tenantId: string, projectId: string, hostname: string): Promise<void>;
 }
 
 // Append-only. Not tenant-scoped: entries outlive what they describe.
@@ -223,6 +248,7 @@ export interface Store {
     messages: MessageStore;
     releases: ReleaseStore;
     deployments: DeploymentStore;
+    domains: DomainStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
     close(): Promise<void>;

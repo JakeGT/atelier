@@ -9,7 +9,7 @@ import { ReleaseService } from "../src/services/release.ts";
 import type { WorkspaceRuntime } from "../src/services/runtime.ts";
 import { SessionStore } from "../src/services/sessions.ts";
 import { PostgresStore } from "../src/store/postgres.ts";
-import { SlugTakenError } from "../src/store/types.ts";
+import { DomainTakenError, SlugTakenError } from "../src/store/types.ts";
 
 // Row-Level Security and the role split against a real Postgres. The in-memory
 // store applies tenancy by hand, so only this suite proves the database itself
@@ -202,6 +202,7 @@ test("with no tenant set, every tenant-scoped table reads as empty (fail closed)
         "agent_messages",
         "invitations",
         "provider_keys",
+        "project_domains",
         "usage_events",
     ]) {
         const [r] = await raw<{ n: number }[]>`SELECT count(*)::int AS n FROM ${raw(table)}`;
@@ -585,4 +586,56 @@ test("provider keys: one per provider per tenant, replaced in place, invisible t
     await store.providerKeys.delete(a.tenantId, "openai");
     assert.equal(await store.providerKeys.getSealed(a.tenantId, "openai"), null);
     assert.equal(await store.providerKeys.getSealed(b.tenantId, "openai"), "sealed-b");
+});
+
+test("hosting: a project's hosting details and deployment results are stored; a domain belongs to one website platform-wide", {
+    skip,
+}, async () => {
+    const a = await seedTenant("tenant-host-a");
+    const b = await seedTenant("tenant-host-b");
+    const hosted = await store.projects.setHosting(a.tenantId, a.project.id, {
+        hostingRef: "atl-site-1",
+        productionRef: "https://atl-site-1.pages.dev",
+    });
+    assert.deepEqual([hosted.hostingRef, hosted.productionRef], ["atl-site-1", "https://atl-site-1.pages.dev"]);
+    // Naming the site again without an address keeps the address.
+    assert.equal(
+        (await store.projects.setHosting(a.tenantId, a.project.id, { hostingRef: "atl-site-1" })).productionRef,
+        "https://atl-site-1.pages.dev",
+    );
+
+    const dep = await store.deployments.create({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.project.id,
+        releaseId: null,
+        kind: "production",
+        provider: "cloudflare-pages",
+        url: null,
+        state: "building",
+    });
+    await store.deployments.finish(a.tenantId, dep.id, { state: "failed", error: "no index.html" });
+    // Another tenant cannot finish it.
+    await store.deployments.finish(b.tenantId, dep.id, { state: "live", url: "https://evil" });
+    const [stored] = await store.deployments.listByProject(a.tenantId, a.project.id);
+    assert.deepEqual([stored?.state, stored?.error, stored?.url], ["failed", "no index.html", null]);
+
+    const email = `domains-${suffix}@example.com`;
+    const who = await store.users.upsertIdentity({ issuer: "https://idp/", subject: email, email, name: "D", admin: false });
+    const hostname = `www.${suffix}.example`;
+    await store.domains.add({ id: randomUUID(), tenantId: a.tenantId, projectId: a.project.id, hostname, createdBy: who.id });
+    await assert.rejects(
+        store.domains.add({ id: randomUUID(), tenantId: b.tenantId, projectId: b.project.id, hostname, createdBy: who.id }),
+        DomainTakenError,
+    );
+    assert.deepEqual(
+        (await store.domains.list(a.tenantId, a.project.id)).map((d) => d.hostname),
+        [hostname],
+    );
+    assert.deepEqual(await store.domains.list(b.tenantId, b.project.id), []);
+    // Another tenant cannot remove it.
+    await store.domains.remove(b.tenantId, a.project.id, hostname);
+    assert.equal((await store.domains.list(a.tenantId, a.project.id)).length, 1);
+    await store.domains.remove(a.tenantId, a.project.id, hostname);
+    assert.equal((await store.domains.list(a.tenantId, a.project.id)).length, 0);
 });

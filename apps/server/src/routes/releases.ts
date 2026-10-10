@@ -1,10 +1,9 @@
-import { ReleaseError, ReleaseService } from "../services/release.ts";
+import { ReleaseError } from "../services/release.ts";
 import { type Api, type Ctx, PROJECT, param } from "./kit.ts";
 
 // Releases: the only path from draft to live (ADR-0007).
 export function releaseRoutes(api: Api): void {
-    const { route, store, runtime, stepUp, audit } = api;
-    const releases = new ReleaseService(store, runtime);
+    const { route, store, stepUp, audit, releases } = api;
 
     route("get", `${PROJECT}/releases`, "release.read", async (c) =>
         c.json({ releases: await store.releases.listByProject(c.get("org").id, c.get("project").id) }),
@@ -24,9 +23,14 @@ export function releaseRoutes(api: Api): void {
     route("post", `${PROJECT}/releases`, "release.publish", stepUp, async (c) => {
         const refused = refuseArchived(c);
         if (refused) return refused;
-        const release = await releases.create(c.get("org").id, c.get("project").id, c.get("user").id);
-        await audit(c, "release.create", `release:${release.id}`, { number: release.number, codeSha: release.codeSha });
-        return c.json({ release }, 201);
+        try {
+            const release = await releases.create(c.get("org").id, c.get("project").id, c.get("user").id);
+            await audit(c, "release.create", `release:${release.id}`, { number: release.number, codeSha: release.codeSha });
+            return c.json({ release }, 201);
+        } catch (err) {
+            if (err instanceof ReleaseError) return c.json({ error: err.message }, err.status);
+            throw err;
+        }
     });
 
     const releaseAction = (action: "publish" | "rollback") => async (c: Ctx) => {
@@ -44,7 +48,11 @@ export function releaseRoutes(api: Api): void {
             await audit(c, `release.${action}`, `release:${release.id}`, { number: release.number, from: number });
             return c.json({ release }, action === "publish" ? 200 : 201);
         } catch (err) {
-            if (err instanceof ReleaseError) return c.json({ error: err.message }, err.status);
+            if (err instanceof ReleaseError) {
+                if (err.status === 422 || err.status === 502)
+                    await audit(c, `release.${action}.failed`, `project:${projectId}`, { number, reason: err.message });
+                return c.json({ error: err.message }, err.status);
+            }
             throw err;
         }
     };

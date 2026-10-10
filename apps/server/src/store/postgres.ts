@@ -21,6 +21,7 @@ import type {
     AuditStore,
     ContentStore,
     DeploymentStore,
+    DomainStore,
     InvitationStore,
     LoginSessionStore,
     MembershipStore,
@@ -33,7 +34,7 @@ import type {
     UsageStore,
     UserStore,
 } from "./types.ts";
-import { SlugTakenError } from "./types.ts";
+import { DomainTakenError, SlugTakenError } from "./types.ts";
 
 type Json = Record<string, unknown>;
 type Ts = Date | string;
@@ -83,6 +84,7 @@ interface ProjectRow {
     agent_config_ref: string | null;
     preview_ref: string | null;
     production_ref: string | null;
+    hosting_ref: string | null;
     agent_instructions: string | null;
     agent_model: string | null;
     archived_at: Ts | null;
@@ -157,6 +159,7 @@ interface DeploymentRow {
     url: string | null;
     state: string;
     created_at: Ts;
+    error: string | null;
 }
 
 interface AuditRow {
@@ -188,11 +191,11 @@ const firstRow = <T>(rows: readonly T[]): T => {
 const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
-    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, agent_instructions, agent_model, archived_at, created_at";
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, agent_instructions, agent_model, archived_at, created_at";
 const CONTENT_COLS = "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
 const RELEASE_COLS = "id, project_id, tenant_id, number, state, code_sha, content_rev, actor_id, rollback_of, deployed_at, created_at";
-const DEPLOYMENT_COLS = "id, project_id, tenant_id, release_id, kind, provider, provider_ref, url, state, created_at";
+const DEPLOYMENT_COLS = "id, project_id, tenant_id, release_id, kind, provider, provider_ref, url, state, error, created_at";
 
 const rowToUser = (r: UserRow): User => ({
     id: r.id,
@@ -233,6 +236,7 @@ const rowToProject = (r: ProjectRow): Project => ({
     agentConfigRef: r.agent_config_ref,
     previewRef: r.preview_ref,
     productionRef: r.production_ref,
+    hostingRef: r.hosting_ref,
     agentInstructions: r.agent_instructions,
     agentModel: r.agent_model,
     archivedAt: iso(r.archived_at),
@@ -305,6 +309,7 @@ const rowToDeployment = (r: DeploymentRow): Deployment => ({
     providerRef: r.provider_ref,
     url: r.url,
     state: r.state,
+    error: r.error,
     createdAt: isoNow(r.created_at),
 });
 
@@ -332,6 +337,7 @@ export class PostgresStore implements Store {
     messages: MessageStore;
     releases: ReleaseStore;
     deployments: DeploymentStore;
+    domains: DomainStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
 
@@ -579,6 +585,16 @@ export class PostgresStore implements Store {
                     const rows = await tx<ProjectRow[]>`SELECT ${tx.unsafe(PROJECT_COLS)} FROM projects ORDER BY created_at`;
                     return rows.map(rowToProject);
                 }),
+            setHosting: async (tenantId, id, hosting) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<ProjectRow[]>`
+                        UPDATE projects SET
+                            hosting_ref = ${hosting.hostingRef},
+                            production_ref = COALESCE(${hosting.productionRef ?? null}, production_ref),
+                            updated_at = now()
+                        WHERE id = ${id} RETURNING ${tx.unsafe(PROJECT_COLS)}`;
+                    return rowToProject(firstRow(rows));
+                }),
             update: async (tenantId, id, patch) =>
                 this.withTenant(tenantId, async (tx) => {
                     const archive = patch.archived === undefined ? null : patch.archived;
@@ -801,12 +817,52 @@ export class PostgresStore implements Store {
                         RETURNING ${tx.unsafe(DEPLOYMENT_COLS)}`;
                     return rowToDeployment(firstRow(rows));
                 }),
+            finish: async (tenantId, id, result) => {
+                await this.withTenant(
+                    tenantId,
+                    (tx) => tx`
+                        UPDATE deployments SET
+                            state = ${result.state},
+                            provider_ref = COALESCE(${result.providerRef ?? null}, provider_ref),
+                            url = COALESCE(${result.url ?? null}, url),
+                            error = ${result.error ?? null}
+                        WHERE id = ${id}`,
+                );
+            },
             listByProject: async (tenantId, projectId) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<DeploymentRow[]>`
                         SELECT ${tx.unsafe(DEPLOYMENT_COLS)} FROM deployments WHERE project_id = ${projectId} ORDER BY created_at`;
                     return rows.map(rowToDeployment);
                 }),
+        };
+
+        this.domains = {
+            list: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ hostname: string; created_at: Ts }[]>`
+                        SELECT hostname, created_at FROM project_domains WHERE project_id = ${projectId} ORDER BY created_at`;
+                    return rows.map((r) => ({ hostname: r.hostname, createdAt: isoNow(r.created_at) }));
+                }),
+            add: async (input) => {
+                try {
+                    await this.withTenant(
+                        input.tenantId,
+                        (tx) => tx`
+                            INSERT INTO project_domains (id, tenant_id, project_id, hostname, created_by)
+                            VALUES (${input.id}, ${input.tenantId}, ${input.projectId}, ${input.hostname}, ${input.createdBy})`,
+                    );
+                } catch (err) {
+                    if ((err as { code?: string }).code === "23505") throw new DomainTakenError();
+                    throw err;
+                }
+            },
+            remove: async (tenantId, projectId, hostname) => {
+                await this.withTenant(
+                    tenantId,
+                    (tx) => tx`DELETE FROM project_domains WHERE project_id = ${projectId} AND hostname = ${hostname}`,
+                );
+            },
         };
 
         this.audit = {

@@ -12,6 +12,8 @@ import {
     requireSession,
 } from "../middleware/auth.ts";
 import { ModelCatalog } from "../services/catalog.ts";
+import type { Hosting } from "../services/hosting.ts";
+import { ReleaseService } from "../services/release.ts";
 import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
 import { SecretBox } from "../services/secrets.ts";
 import type { SessionStore } from "../services/sessions.ts";
@@ -37,6 +39,8 @@ export interface ApiDeps {
     // The model catalog, and how the control plane reaches model providers. Tests replace both.
     catalog?: ModelCatalog;
     providerFetch?: typeof fetch;
+    // Where published websites are served from; null or absent when there is no hosting.
+    hosting?: Hosting | null;
 }
 
 // Everything under an organisation, and under one of its projects.
@@ -85,6 +89,8 @@ export function createApi(deps: ApiDeps) {
         ...deps,
         catalog: deps.catalog ?? new ModelCatalog(),
         providerFetch: deps.providerFetch ?? fetch,
+        hosting: deps.hosting ?? null,
+        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix),
         box: new SecretBox(deps.secretsKey),
         app,
         declared,
