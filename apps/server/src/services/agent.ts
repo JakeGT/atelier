@@ -3,15 +3,67 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseModel } from "./providers.ts";
 
+// One thing the assistant did: the tool it used and, for file tools, which file
+// (relative to the website). Enough to say "Writing the home page" without
+// exposing commands or contents.
 export interface AgentToolEvent {
     name: string;
     state: string;
+    target?: string | null;
 }
 
 export interface AgentResult {
     text: string;
     toolEvents: AgentToolEvent[];
     tokens?: { input: number; output: number };
+}
+
+export const DEFAULT_RUN_MINUTES = 15;
+export const EXTEND_MINUTES = 10;
+export const MAX_RUN_MINUTES = 60;
+
+// Lets a run in progress be stopped, or given more time, from outside.
+export class RunControl {
+    readonly startedAt = Date.now();
+    deadline: number;
+    stopped = false;
+    private kill: (() => void) | null = null;
+
+    constructor(minutes = DEFAULT_RUN_MINUTES) {
+        this.deadline = this.startedAt + minutes * 60_000;
+    }
+
+    // More time, up to the most a single run may have. Returns the new deadline.
+    extend(minutes = EXTEND_MINUTES): number {
+        this.deadline = Math.min(this.deadline + minutes * 60_000, this.startedAt + MAX_RUN_MINUTES * 60_000);
+        return this.deadline;
+    }
+
+    get canExtend(): boolean {
+        return this.deadline < this.startedAt + MAX_RUN_MINUTES * 60_000;
+    }
+
+    stop(): void {
+        this.stopped = true;
+        this.kill?.();
+    }
+
+    attach(kill: () => void): void {
+        this.kill = kill;
+        if (this.stopped) kill();
+    }
+}
+
+// The run ended early: the person stopped it, or it ran out of time. `partial` is
+// what it had said and done by then, so nothing already done is lost.
+export class RunInterrupted extends Error {
+    readonly reason: "stopped" | "timed_out";
+    readonly partial: AgentResult;
+    constructor(reason: "stopped" | "timed_out", partial: AgentResult) {
+        super(reason === "stopped" ? "stopped" : "ran out of time");
+        this.reason = reason;
+        this.partial = partial;
+    }
 }
 
 export interface AgentRunInput {
@@ -24,6 +76,11 @@ export interface AgentRunInput {
     // short-lived token scoping it to one tenant + project + session.
     apiUrl: string;
     agentToken: string;
+    // Pick up the previous request where it left off (it was stopped or ran out of time).
+    resume?: boolean;
+    // Called as each step completes, so progress can be shown while it works.
+    onStep?: (step: AgentToolEvent) => void;
+    control?: RunControl;
 }
 
 export interface AgentRuntime {
@@ -32,7 +89,12 @@ export interface AgentRuntime {
 
 interface RunJsonEvent {
     type: string;
-    part?: { text?: string; tool?: string; state?: { status?: string }; tokens?: { input?: number; output?: number } };
+    part?: {
+        text?: string;
+        tool?: string;
+        state?: { status?: string; input?: { filePath?: unknown; path?: unknown } };
+        tokens?: { input?: number; output?: number };
+    };
     error?: string | { message?: string; data?: { message?: string } };
 }
 
@@ -91,6 +153,8 @@ export class OpenCodeAgent implements AgentRuntime {
         );
 
         const args = ["run", "--format", "json", "--dir", input.workspaceDir, "--auto"];
+        // Continues the last session if there is one; starts afresh if there is not.
+        if (input.resume) args.push("--continue");
         if (input.model) args.push("--model", input.model);
         args.push("--", input.prompt);
 
@@ -117,65 +181,156 @@ export class OpenCodeAgent implements AgentRuntime {
                 : {}),
         };
 
-        const stdout = await runProcess(this.opts.command ?? "opencode", args, env, input.workspaceDir, this.opts.timeoutMs ?? 15 * 60_000);
-        return parseRunOutput(stdout);
+        const control = input.control ?? new RunControl(this.opts.timeoutMs ? this.opts.timeoutMs / 60_000 : DEFAULT_RUN_MINUTES);
+        const parser = new RunParser(input.workspaceDir, input.onStep);
+        const outcome = await runProcess(this.opts.command ?? "opencode", args, env, input.workspaceDir, control, (line) =>
+            parser.line(line),
+        );
+        if (outcome.ended !== "exited") throw new RunInterrupted(outcome.ended, parser.result());
+        if (parser.error) throw new Error(parser.error);
+        if (outcome.code !== 0) throw new Error(`opencode run failed (exit ${outcome.code}): ${outcome.stderr.slice(0, 2000)}`);
+        return parser.result();
     }
 }
 
+interface ProcessOutcome {
+    ended: "exited" | "stopped" | "timed_out";
+    code: number | null;
+    stderr: string;
+}
+
 // stdin must be closed: `opencode run` reads piped stdin until EOF (appending it
-// to the prompt), so an open pipe makes every run hang forever.
-function runProcess(command: string, args: string[], env: NodeJS.ProcessEnv, cwd: string, timeoutMs: number): Promise<string> {
+// to the prompt), so an open pipe makes every run hang forever. Output is handed
+// on a line at a time as it arrives; the process is killed when stopped or when
+// its time (which can be extended while it runs) is up.
+function runProcess(
+    command: string,
+    args: string[],
+    env: NodeJS.ProcessEnv,
+    cwd: string,
+    control: RunControl,
+    onLine: (line: string) => void,
+): Promise<ProcessOutcome> {
     return new Promise((resolve, reject) => {
-        const child = spawn(command, args, { env, cwd, stdio: ["ignore", "pipe", "pipe"] });
-        const out: Buffer[] = [];
+        // Its own process group, so stopping it also stops whatever it started (its
+        // tools, the content server): otherwise they linger and hold the output open.
+        const child = spawn(command, args, { env, cwd, stdio: ["ignore", "pipe", "pipe"], detached: true });
         const err: Buffer[] = [];
-        let size = 0;
-        const timer = setTimeout(() => {
-            child.kill("SIGKILL");
-            reject(new Error(`the assistant took longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped`));
-        }, timeoutMs);
+        let pending = "";
+        let ended: ProcessOutcome["ended"] = "exited";
+        let settled = false;
+        const killAll = () => {
+            try {
+                if (child.pid) process.kill(-child.pid, "SIGKILL");
+            } catch {
+                child.kill("SIGKILL");
+            }
+        };
+        const finish = (code: number | null) => {
+            if (settled) return;
+            settled = true;
+            clearInterval(watch);
+            if (pending.trim()) onLine(pending);
+            child.stdout.destroy();
+            child.stderr.destroy();
+            resolve({ ended, code, stderr: Buffer.concat(err).toString("utf8") });
+        };
+        control.attach(() => {
+            if (ended !== "exited") return;
+            ended = "stopped";
+            killAll();
+        });
+        const watch = setInterval(() => {
+            if (Date.now() >= control.deadline && ended === "exited") {
+                ended = "timed_out";
+                killAll();
+            }
+        }, 1000);
         child.stdout.on("data", (b: Buffer) => {
-            size += b.length;
-            if (size <= 32 * 1024 * 1024) out.push(b);
+            pending += b.toString("utf8");
+            let nl = pending.indexOf("\n");
+            while (nl !== -1) {
+                onLine(pending.slice(0, nl));
+                pending = pending.slice(nl + 1);
+                nl = pending.indexOf("\n");
+            }
+            // A single line this long is not an event we understand.
+            if (pending.length > 8 * 1024 * 1024) pending = "";
         });
         child.stderr.on("data", (b: Buffer) => {
             if (err.length < 256) err.push(b);
         });
         child.on("error", (e) => {
-            clearTimeout(timer);
+            clearInterval(watch);
+            settled = true;
             reject(new Error(`opencode could not start: ${e.message}`));
         });
-        child.on("close", (code) => {
-            clearTimeout(timer);
-            if (code === 0) resolve(Buffer.concat(out).toString("utf8"));
-            else reject(new Error(`opencode run failed (exit ${code}): ${Buffer.concat(err).toString("utf8").slice(0, 2000)}`));
+        // A normal end waits for the last of the output ("close"). One we ended
+        // ourselves does not: a straggler must not keep the run "running".
+        child.on("exit", (code) => {
+            if (ended !== "exited") finish(code);
         });
+        child.on("close", (code) => finish(code));
     });
 }
 
-export function parseRunOutput(stdout: string): AgentResult {
-    let text = "";
-    const toolEvents: AgentToolEvent[] = [];
-    const tokens = { input: 0, output: 0 };
-    for (const line of stdout.split("\n")) {
-        if (!line.trim()) continue;
+const FILE_TOOLS = new Set(["read", "write", "edit", "patch", "multiedit"]);
+
+// Reads the run's events as they arrive.
+class RunParser {
+    private text = "";
+    private readonly toolEvents: AgentToolEvent[] = [];
+    private readonly tokens = { input: 0, output: 0 };
+    error: string | null = null;
+    private readonly root: string;
+    private readonly onStep?: (step: AgentToolEvent) => void;
+
+    constructor(root: string, onStep?: (step: AgentToolEvent) => void) {
+        this.root = root.replace(/\/+$/, "");
+        this.onStep = onStep;
+    }
+
+    line(line: string): void {
+        if (!line.trim()) return;
         let evt: RunJsonEvent;
         try {
             evt = JSON.parse(line) as RunJsonEvent;
         } catch {
-            continue;
+            return;
         }
         // Each text event is a separate passage (before/after tool calls): keep them apart.
-        if (evt.type === "text" && evt.part?.text) text += (text ? "\n\n" : "") + evt.part.text.trim();
+        if (evt.type === "text" && evt.part?.text) this.text += (this.text ? "\n\n" : "") + evt.part.text.trim();
         else if (evt.type === "tool_use") {
-            toolEvents.push({ name: evt.part?.tool ?? "unknown", state: evt.part?.state?.status ?? "unknown" });
+            const name = evt.part?.tool ?? "unknown";
+            const step: AgentToolEvent = { name, state: evt.part?.state?.status ?? "unknown", target: this.target(name, evt) };
+            this.toolEvents.push(step);
+            this.onStep?.(step);
         } else if (evt.type === "step_finish" && evt.part?.tokens) {
-            tokens.input += evt.part.tokens.input ?? 0;
-            tokens.output += evt.part.tokens.output ?? 0;
+            this.tokens.input += evt.part.tokens.input ?? 0;
+            this.tokens.output += evt.part.tokens.output ?? 0;
         } else if (evt.type === "error") {
             const e = evt.error;
-            throw new Error(typeof e === "string" ? e : (e?.data?.message ?? e?.message ?? "agent error"));
+            this.error = typeof e === "string" ? e : (e?.data?.message ?? e?.message ?? "agent error");
         }
     }
-    return { text, toolEvents, tokens };
+
+    // Which file a file tool touched, relative to the website. Nothing else is passed on.
+    private target(name: string, evt: RunJsonEvent): string | null {
+        if (!FILE_TOOLS.has(name)) return null;
+        const raw = evt.part?.state?.input?.filePath ?? evt.part?.state?.input?.path;
+        if (typeof raw !== "string" || !raw) return null;
+        const rel = raw.startsWith(`${this.root}/`) ? raw.slice(this.root.length + 1) : raw.startsWith("/") ? null : raw;
+        return rel && !rel.startsWith("..") ? rel.slice(0, 200) : null;
+    }
+
+    result(): AgentResult {
+        return { text: this.text, toolEvents: [...this.toolEvents], tokens: { ...this.tokens } };
+    }
+}
+
+export function parseRunOutput(stdout: string, workspaceDir = ""): AgentResult {
+    const parser = new RunParser(workspaceDir);
+    for (const line of stdout.split("\n")) parser.line(line);
+    if (parser.error) throw new Error(parser.error);
+    return parser.result();
 }

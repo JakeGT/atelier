@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { OrgRole } from "@atelier/shared";
 import { createApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
-import type { AgentRunInput, AgentRuntime } from "../src/services/agent.ts";
+import { type AgentRunInput, type AgentRuntime, RunInterrupted } from "../src/services/agent.ts";
 import { ensurePersonalStudio } from "../src/services/bootstrap.ts";
 import type { ModelCatalog } from "../src/services/catalog.ts";
 import { cookieName } from "../src/services/cookies.ts";
@@ -20,14 +20,42 @@ import { MemoryStore } from "../src/store/memory.ts";
 export const SECRETS_KEY = randomBytes(32).toString("base64url");
 
 // A fake agent that writes the prompt to a file, and records what it was given.
-export function fakeAgent(): AgentRuntime & { calls: AgentRunInput[] } {
+// `hold()` makes the next run pause after its first step until released, stopped
+// or out of time, so a run can be looked at while it is in progress.
+export function fakeAgent(): AgentRuntime & { calls: AgentRunInput[]; hold: () => () => void } {
     const calls: AgentRunInput[] = [];
+    let gate: Promise<void> | null = null;
     return {
         calls,
+        hold: () => {
+            let release = () => {};
+            gate = new Promise<void>((r) => {
+                release = r;
+            });
+            return release;
+        },
         run: async (input) => {
             calls.push(input);
             await writeFile(join(input.workspaceDir, "index.html"), `<h1>${input.prompt}</h1>`);
-            return { text: `echo:${input.prompt}`, toolEvents: [] };
+            const step = { name: "write", state: "completed", target: "index.html" };
+            input.onStep?.(step);
+            if (gate) {
+                const waiting = gate;
+                gate = null;
+                const control = input.control;
+                const interrupted = await new Promise<"stopped" | "timed_out" | null>((resolve) => {
+                    void waiting.then(() => resolve(null));
+                    const watch = setInterval(() => {
+                        if (control?.stopped) resolve("stopped");
+                        else if (control && Date.now() >= control.deadline) resolve("timed_out");
+                        else return;
+                        clearInterval(watch);
+                    }, 10);
+                    void waiting.then(() => clearInterval(watch));
+                });
+                if (interrupted) throw new RunInterrupted(interrupted, { text: "Half way.", toolEvents: [step] });
+            }
+            return { text: `echo:${input.prompt}`, toolEvents: [step] };
         },
     };
 }

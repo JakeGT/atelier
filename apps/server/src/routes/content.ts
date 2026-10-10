@@ -20,6 +20,20 @@ export function contentRoutes(api: Api): void {
         if (!KEY_RE.test(kind) || !KEY_RE.test(slug)) return c.json({ error: "invalid kind or slug" }, 400);
         const body = await c.req.json().catch(() => null);
         if (!isObject(body)) return c.json({ error: "content draft must be a JSON object" }, 400);
+        // `?rev=`: the revision the person was editing. If it has moved on since
+        // (someone else, or the assistant, saved meanwhile), say so instead of
+        // silently overwriting their change.
+        const based = c.req.query("rev");
+        if (based !== undefined) {
+            const current = await store.content.get(c.get("org").id, c.get("project").id, kind, slug);
+            if (current && String(current.rev) !== based) {
+                const who = current.updatedBy ? ((await store.users.findById(current.updatedBy))?.name ?? "Someone") : "Your assistant";
+                return c.json(
+                    { error: `${who} changed this while you were editing, so your version was not saved`, document: current },
+                    409,
+                );
+            }
+        }
         const document = await store.content.upsertDraft({
             tenantId: c.get("org").id,
             projectId: c.get("project").id,

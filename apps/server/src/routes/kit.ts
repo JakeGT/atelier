@@ -13,6 +13,7 @@ import {
 } from "../middleware/auth.ts";
 import { ModelCatalog } from "../services/catalog.ts";
 import type { Hosting } from "../services/hosting.ts";
+import { Presence } from "../services/presence.ts";
 import { ReleaseService } from "../services/release.ts";
 import { RuntimeBusyError, type WorkspaceRuntime } from "../services/runtime.ts";
 import { SecretBox } from "../services/secrets.ts";
@@ -75,12 +76,19 @@ export function createApi(deps: ApiDeps) {
     const csrf = requireCsrf(sessions, config.publicOrigin, config.cookieSecure);
     app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" ? next() : csrf(c, next)));
 
+    const presence = new Presence();
+    // A successful change to a website tells everyone who has it open to reload what they show.
+    const announce: MiddlewareHandler<Env> = async (c, next) => {
+        await next();
+        if (c.req.method !== "GET" && c.res.status < 400 && !c.req.path.endsWith("/pulse")) presence.touch(c.get("project").id);
+    };
+
     function route(method: Method, path: string, requirement: Requirement, ...rest: [...MiddlewareHandler<Env>[], Handler]) {
         declared.push({ method: method.toUpperCase(), path, permission: requirement });
         const chain: MiddlewareHandler<Env>[] = [];
         if (path.includes(":org")) chain.push(org);
         chain.push(requirePermission(requirement));
-        if (path.includes(":projectId")) chain.push(project);
+        if (path.includes(":projectId")) chain.push(project, announce);
         const on = app.on as unknown as (m: string, p: string, ...h: MiddlewareHandler<Env>[]) => void;
         on(method.toUpperCase(), path, ...chain, ...(rest as MiddlewareHandler<Env>[]));
     }
@@ -90,6 +98,7 @@ export function createApi(deps: ApiDeps) {
         catalog: deps.catalog ?? new ModelCatalog(),
         providerFetch: deps.providerFetch ?? fetch,
         hosting: deps.hosting ?? null,
+        presence,
         releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix),
         box: new SecretBox(deps.secretsKey),
         app,
