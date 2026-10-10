@@ -355,20 +355,54 @@ Goal: production-grade isolation, the first-party content editor, and the VPS
 go-live gates.
 
 **Epics**
-- E5.0 First-party direct content editor: a lightweight CMS UI so users edit
-  content directly (no agent), reusing the embedded content store's
-  draft/publish + release model (ADR-0002 amendment).
+- E5.0 Content studio (ADR-0014, proposed 2026-10-10; expands the original
+  "first-party direct content editor"): content becomes the source of truth
+  for a page's wording, is edited in the preview, in a pop-up from the editor
+  and on a dedicated Content page, and gains a media library. See the breakdown
+  below.
 - E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
 - E5.3 Alerting (build/publish failure, stall, spend over ceiling).
 - E5.4 VPS migration gates: off-host encrypted backups + restore drill, external
   uptime checks, reboot recovery (per platform decisions).
 
+### E5.0 Content studio — breakdown
+
+Planned, not started. The design, and what must be confirmed first, are in
+ADR-0014. Each step is usable on its own and is a branch of its own.
+
+| Step | What it delivers | Depends on |
+| --- | --- | --- |
+| **a. Pop-up editing** | Each item in the editor's Wording panel opens a pop-up with room to edit, instead of expanding in the narrow column. No change to how content works. | Nothing; can be done at once |
+| **b. Typed fields** | Each document describes its fields: a plain label, a type (text, long text, rich text, link, list, number, date, yes/no), one line of help. The assistant writes these. No JSON anywhere. Limits are checked at publish. | a |
+| **c. Bound pages** | `data-content` attributes; the preview fills pages from drafts and the deployer fills them from the release. Saving wording shows at once and ships on publish, with no request to the assistant. House rules and a check for unbound headings. | b; the HTML rewriter question in ADR-0014 |
+| **d. The Content page** | `/o/:studio/p/:website/content`: wording by page with the preview beside it, lists (add, remove, reorder), history with "Go back to this", everything not yet published, search. | b (useful), c (makes it real) |
+| **e. Edit in the preview** | An **Edit text** switch on the preview bar; click text to type in place, click anything else for the pop-up. Saved by the editor, not the frame. | c |
+| **f. Media library** | Upload images, PDFs and short clips; alt text at upload; focal point; sanitised SVG; location data stripped; object storage; shown on the Content page and in an image picker. | Object storage (ADR-0014 "To confirm") |
+| **g. Images prepared on publish** | Sizes and modern formats produced for each image used; pages get responsive images. Publish becomes a background job if this makes it slow. | f |
+| **h. Video and embeds** | Clips under the host's 25 MB limit with a poster; longer video by link (YouTube, Vimeo). Hosted video waits for a studio's own Cloudflare (ADR-0013). | f |
+
+Order: **a** first (small, and an immediate improvement), then **b → c**, then
+**d** and **e** in either order, then **f → g → h**.
+
+**Acceptance criteria (E5.0)**
+- Changing a headline on the Content page, in the pop-up, or by clicking it in
+  the preview changes the preview at once and the live website on the next
+  publish, without asking the assistant.
+- A website's wording is managed on one page: by page, with lists that can be
+  added to and reordered, history, and a list of what is not yet published.
+- A person uploads a photograph, is asked to describe it, places it on a page,
+  and the published page serves it at a sensible size in a modern format.
+- No field is shown as JSON or under a name only a developer would use.
+- Two people editing the same piece cannot silently overwrite each other.
+- Nothing a field contains can add script or markup to a page.
+- A website with no bound elements still publishes exactly as before.
+
 **Acceptance criteria**
 - A documented restore drill restores a tenant from backup within RTO.
 - Workspace volumes are covered by off-host backups (ADR-0009) and a restore
   drill.
-- A non-technical user edits content directly in the CMS without an agent.
+- A non-technical user edits content directly, without the assistant (E5.0 above).
 
 ---
 
