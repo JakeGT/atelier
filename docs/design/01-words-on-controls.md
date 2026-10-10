@@ -46,6 +46,7 @@ Each of these is a decision, not a default. Keep the list short.
 | ✕ inside a search box | Universal, and its position says what it clears |
 | ← back arrow on a phone-width editor bar | Universal; the labelled "All websites" is also in the account menu |
 | The avatar circle | Opens the account menu; the convention is strong and the menu is all words |
+| The two preview sizes not in use (the one in use is named), and Back/Forward arrows when the preview frame is very narrow | Arrows and device shapes are widely understood, and all are labelled whenever there is room |
 | Preview size icons when the preview frame is very narrow | The same three choices are labelled whenever there is room |
 
 Anything else needs words. If there is no room for the words, see

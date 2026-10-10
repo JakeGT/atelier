@@ -183,6 +183,9 @@ test("chat runs the agent with a scoped short-lived token, checkpoints, and rest
     const preview = await t.app.request(`${url}index.html`);
     assert.equal(await preview.text(), "<h1>v2</h1>");
     assert.match(preview.headers.get("content-security-policy") ?? "", /^sandbox /);
+    // Inside the editor's frame a page also carries the Back/Forward bridge; anywhere else it is served as written.
+    const framed = await (await t.app.request(`${url}index.html`, { headers: { "sec-fetch-dest": "iframe" } })).text();
+    assert.ok(framed.startsWith("<h1>v2</h1>") && framed.includes("atelierPreview") && framed.includes("history.back()"));
     assert.equal((await t.app.request(`${url}../../../etc/passwd`)).status, 404);
     assert.equal((await t.app.request(`/preview/${call.agentToken}/index.html`)).status, 403);
 

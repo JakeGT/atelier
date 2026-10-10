@@ -1,4 +1,6 @@
-import { ExternalLink, Monitor, RotateCw, Smartphone, Tablet } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Monitor, RotateCw, Smartphone, Tablet } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { plainFile } from "../lib/activity";
 import { Dots } from "../ui/kit";
 
 export type Device = "desktop" | "tablet" | "phone";
@@ -19,19 +21,100 @@ interface PreviewProps {
     working: boolean;
 }
 
+// Where the person has been inside the preview, so Back and Forward know whether
+// they have anywhere to go. The preview is sandboxed and the editor cannot look
+// inside it; each page says where it is (the server adds a few lines for that),
+// and this keeps the trail.
+interface Trail {
+    pages: string[];
+    at: number;
+}
+
+const HOME = "index.html";
+// What a page says about itself is untrusted: only a plausible relative path is kept.
+const safePath = (v: unknown): string | null =>
+    typeof v === "string" && v.length < 300 && !v.includes("..") && /^[\w\-./%~ ]+$/.test(v) ? v : null;
+
 export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, working }: PreviewProps) {
+    const frame = useRef<HTMLIFrameElement>(null);
+    const [trail, setTrail] = useState<Trail>({ pages: [HOME], at: 0 });
+    // Set when Back or Forward was pressed: the next page to report is a move along the trail, not a new visit.
+    const moving = useRef<"back" | "forward" | null>(null);
+    // The page a reload should come back to (reloading must not send the person home).
+    const [start, setStart] = useState(HOME);
+    const current = trail.pages[trail.at] ?? HOME;
+    const currentRef = useRef(current);
+    currentRef.current = current;
+
+    useEffect(() => {
+        const onMessage = (e: MessageEvent) => {
+            if (e.source !== frame.current?.contentWindow) return;
+            const data = e.data as { atelierPreview?: unknown; path?: unknown } | null;
+            const path = data?.atelierPreview === 1 ? safePath(data.path) : null;
+            if (!path) return;
+            const move = moving.current;
+            moving.current = null;
+            setTrail((t) => {
+                if (move === "back") return { ...t, at: Math.max(0, t.at - 1) };
+                if (move === "forward") return { ...t, at: Math.min(t.pages.length - 1, t.at + 1) };
+                if (t.pages[t.at] === path) return t;
+                return { pages: [...t.pages.slice(0, t.at + 1), path], at: t.at + 1 };
+            });
+        };
+        window.addEventListener("message", onMessage);
+        return () => window.removeEventListener("message", onMessage);
+    }, []);
+
+    // A reload starts the frame again: at the page that was showing, with a fresh trail.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: only when a reload is asked for or the preview address changes
+    useEffect(() => {
+        const page = currentRef.current;
+        setStart(page);
+        setTrail({ pages: [page], at: 0 });
+        moving.current = null;
+    }, [reloadKey, url]);
+
+    const go = (direction: "back" | "forward") => {
+        moving.current = direction;
+        frame.current?.contentWindow?.postMessage({ atelierPreview: 1, go: direction }, "*");
+        // If the page never answers (it has no bridge), forget the request.
+        setTimeout(() => {
+            if (moving.current === direction) moving.current = null;
+        }, 1500);
+    };
+
+    const canBack = trail.at > 0;
+    const canForward = trail.at < trail.pages.length - 1;
+    const name = plainFile(current).replace(/^the /, "");
+    const src = url ? `${url}${start === HOME ? "" : start}` : null;
+
     return (
         <section className="bench">
             <div className={`frame frame-${device}`}>
                 <div className="frame-chrome">
-                    <div className="frame-lights" aria-hidden="true">
-                        <i />
-                        <i />
-                        <i />
+                    <div className="frame-nav">
+                        <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => go("back")}
+                            disabled={!canBack || !hasPage}
+                            title="Go back to the page you were on before"
+                        >
+                            <ArrowLeft /> <span className="tool-label">Back</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => go("forward")}
+                            disabled={!canForward || !hasPage}
+                            title="Go forward again"
+                        >
+                            <span className="tool-label">Forward</span> <ArrowRight />
+                        </button>
                     </div>
                     <div className="frame-address mono">
                         <span>Preview</span>
-                        <span className="muted"> · private</span>
+                        <span className="muted"> · {hasPage ? name.charAt(0).toUpperCase() + name.slice(1) : "private"}</span>
                     </div>
                     <div className="frame-tools">
                         <div className="segmented" role="radiogroup" aria-label="Preview size">
@@ -56,10 +139,10 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
                         {url && hasPage && (
                             <a
                                 className="btn btn-ghost btn-sm"
-                                href={url}
+                                href={`${url}${current === HOME ? "" : current}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                title="Open the preview in a new tab"
+                                title="Open this page of the preview in a new tab"
                             >
                                 <ExternalLink /> <span className="tool-label">Open</span>
                             </a>
@@ -68,11 +151,12 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
                 </div>
 
                 <div className="frame-view">
-                    {hasPage && url ? (
+                    {hasPage && src ? (
                         // Agent-written pages: sandboxed (no same-origin), so they can't act as the signed-in user.
                         <iframe
-                            key={reloadKey}
-                            src={url}
+                            ref={frame}
+                            key={`${reloadKey}:${start}`}
+                            src={src}
                             title="Website preview"
                             sandbox="allow-scripts allow-forms allow-popups allow-modals"
                         />
