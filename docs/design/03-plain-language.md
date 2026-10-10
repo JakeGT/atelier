@@ -19,8 +19,9 @@ website. Nothing shown to them is something only we would understand.
 | JSON | Ordinary fields; a list is edited one per line |
 | Error codes, stack traces | What happened, in a sentence |
 
-If something structured genuinely cannot be shown as fields, say so plainly and
-point to the easier route ("structured: easier to ask your assistant").
+There is no exception for "structured" data: it is always shown as fields (see
+below). An earlier version of this rule allowed a code box with a note to ask
+the assistant instead; people met it on their real websites and could not use it.
 
 ### Never show the format something is stored in
 
