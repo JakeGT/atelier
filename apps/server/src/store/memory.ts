@@ -7,6 +7,7 @@ import type {
     ContentRevision,
     Deployment,
     Invitation,
+    MediaAsset,
     Membership,
     Organization,
     OrgRole,
@@ -24,6 +25,7 @@ import type {
     InvitationStore,
     LoginSession,
     LoginSessionStore,
+    MediaStore,
     MembershipStore,
     MessageStore,
     OrganizationStore,
@@ -623,6 +625,44 @@ export class MemoryStore implements Store {
         remove: async (tenantId, projectId, hostname) => {
             const d = this.domainMap.get(hostname);
             if (d && d.tenantId === tenantId && d.projectId === projectId) this.domainMap.delete(hostname);
+        },
+    };
+
+    private readonly mediaMap = new Map<string, MediaAsset>();
+    media: MediaStore = {
+        create: async (asset) => {
+            const made: MediaAsset = { ...asset, createdAt: now(), deletedAt: null };
+            this.mediaMap.set(made.id, made);
+            return made;
+        },
+        list: async (tenantId, projectId, withRemoved = false) =>
+            [...this.mediaMap.values()]
+                .filter((m) => m.tenantId === tenantId && m.projectId === projectId && (withRemoved || m.deletedAt === null))
+                .reverse(),
+        get: async (tenantId, projectId, id) => {
+            const m = this.mediaMap.get(id);
+            return m && m.tenantId === tenantId && m.projectId === projectId ? m : null;
+        },
+        describe: async (tenantId, projectId, id, patch) => {
+            const m = this.mediaMap.get(id);
+            if (!m || m.tenantId !== tenantId || m.projectId !== projectId) return null;
+            const next = { ...m, ...patch };
+            this.mediaMap.set(id, next);
+            return next;
+        },
+        remove: async (tenantId, projectId, id) => {
+            const m = this.mediaMap.get(id);
+            if (!m || m.tenantId !== tenantId || m.projectId !== projectId) return null;
+            const next = { ...m, deletedAt: m.deletedAt ?? now() };
+            this.mediaMap.set(id, next);
+            return next;
+        },
+        removedBefore: async (tenantId, before) =>
+            [...this.mediaMap.values()].filter(
+                (m) => m.tenantId === tenantId && m.deletedAt !== null && new Date(m.deletedAt).getTime() < before.getTime(),
+            ),
+        purge: async (tenantId, id) => {
+            if (this.mediaMap.get(id)?.tenantId === tenantId) this.mediaMap.delete(id);
         },
     };
 

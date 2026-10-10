@@ -9,6 +9,7 @@ import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parse, parseFragment,
 //   <h1 data-content="page/home#headline">…</h1>        plain text
 //   <div data-content-rich="page/home#story">…</div>    a little formatting
 //   <ul data-content-list="page/home#hours"><li>…</li></ul>   one item per line
+//   <img data-content-image="page/home#photo" src="…">   a file from the media library
 //
 // A real HTML parser does the work. A value is inserted as text (or, for rich
 // text, through an allow-list), so nothing a field contains can add markup or
@@ -40,6 +41,22 @@ export function lookupFrom(documents: { kind: string; slug: string; content: Rec
     const byDoc = new Map(documents.map((d) => [`${d.kind}/${d.slug}`, d.content ?? {}]));
     return (ref) => byDoc.get(`${ref.kind}/${ref.slug}`)?.[ref.field];
 }
+
+// What the library knows about an image, so a page can offer the browser the size it needs.
+export interface MediaInfo {
+    name: string;
+    alt: string;
+    width: number | null;
+    height: number | null;
+    variants: { name: string; width: number }[];
+}
+export interface FillOptions {
+    // Looks a library file up by name; absent means images are placed without sizes or alt text.
+    media?: (name: string) => MediaInfo | undefined;
+    // From this page to the website's top folder: "" for /index.html, "../" for /blog/post.html.
+    base?: string;
+}
+const MEDIA_PATH = /^media\/([a-z0-9][a-z0-9-]{0,60}\.[a-z0-9]{2,5})$/;
 
 const attr = (el: Element, name: string): string | undefined => el.attrs.find((a) => a.name === name)?.value;
 const isElement = (n: Node): n is Element => "tagName" in n;
@@ -112,14 +129,47 @@ export function sanitizeRich(html: string): string {
 
 // ---- filling a page -----------------------------------------------------------------------------
 
-function fillElement(el: Element, lookup: Lookup): void {
+const setAttr = (el: Element, name: string, value: string): void => {
+    const existing = el.attrs.find((a) => a.name === name);
+    if (existing) existing.value = value;
+    else el.attrs.push({ name, value });
+};
+
+// An image from the library: its address, and (when the library knows it) its
+// description, its size, and smaller copies for the browser to choose from.
+function fillImage(el: Element, value: unknown, options: FillOptions): void {
+    const name = typeof value === "string" ? MEDIA_PATH.exec(value)?.[1] : undefined;
+    if (!name || el.tagName !== "img") return;
+    const base = options.base ?? "";
+    setAttr(el, "src", `${base}media/${name}`);
+    el.attrs = el.attrs.filter((a) => a.name !== "srcset");
+    const info = options.media?.(name);
+    if (!info) return;
+    setAttr(el, "alt", info.alt);
+    if (info.width && info.height) {
+        setAttr(el, "width", String(info.width));
+        setAttr(el, "height", String(info.height));
+        if (info.variants.length > 0) {
+            const sizes = [...info.variants.map((v) => `${base}media/${v.name} ${v.width}w`), `${base}media/${name} ${info.width}w`];
+            setAttr(el, "srcset", sizes.join(", "));
+            if (!attr(el, "sizes")) setAttr(el, "sizes", "100vw");
+        }
+    }
+}
+
+function fillElement(el: Element, lookup: Lookup, options: FillOptions): void {
     const plain = attr(el, "data-content");
     const rich = attr(el, "data-content-rich");
     const list = attr(el, "data-content-list");
-    const ref = parseRef(plain ?? rich ?? list ?? "");
+    const image = attr(el, "data-content-image");
+    const ref = parseRef(plain ?? rich ?? list ?? image ?? "");
     if (!ref) return;
     const value = lookup(ref);
     if (value === undefined || value === null) return;
+    if (image !== undefined) {
+        fillImage(el, value, options);
+        return;
+    }
 
     if (plain !== undefined) {
         if (typeof value === "string" || typeof value === "number") setChildren(el, [text(String(value))]);
@@ -145,17 +195,17 @@ function fillElement(el: Element, lookup: Lookup): void {
     }
 }
 
-function walk(node: ParentNode, lookup: Lookup): void {
+const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image"];
+
+function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
     for (const child of node.childNodes) {
         if (!isElement(child)) continue;
         // Never reach into scripts, styles or templates.
         if (child.tagName === "script" || child.tagName === "style" || child.tagName === "template") continue;
-        const bound = child.attrs.some(
-            (a) => a.name === "data-content" || a.name === "data-content-rich" || a.name === "data-content-list",
-        );
-        if (bound) fillElement(child, lookup);
+        const bound = child.attrs.some((a) => BINDINGS.includes(a.name));
+        if (bound) fillElement(child, lookup, options);
         // A filled element's contents are final; anything else may hold bound elements further in.
-        else walk(child, lookup);
+        else walk(child, lookup, options);
     }
 }
 
@@ -163,17 +213,17 @@ function walk(node: ParentNode, lookup: Lookup): void {
 export const isBound = (html: string): boolean => html.includes("data-content");
 
 // The page with its bound elements showing the stored values.
-export function fillHtml(html: string, lookup: Lookup): string {
+export function fillHtml(html: string, lookup: Lookup, options: FillOptions = {}): string {
     if (!isBound(html)) return html;
     const document = parse(html);
-    walk(document, lookup);
+    walk(document, lookup, options);
     return serialize(document);
 }
 
 // The fields a page binds, in order, for the editor ("what on this page can be edited").
-export function boundRefs(html: string): { ref: string; type: "text" | "rich" | "list" }[] {
+export function boundRefs(html: string): { ref: string; type: "text" | "rich" | "list" | "image" }[] {
     if (!isBound(html)) return [];
-    const out: { ref: string; type: "text" | "rich" | "list" }[] = [];
+    const out: { ref: string; type: "text" | "rich" | "list" | "image" }[] = [];
     const visit = (node: ParentNode) => {
         for (const child of node.childNodes) {
             if (!isElement(child)) continue;
@@ -181,6 +231,7 @@ export function boundRefs(html: string): { ref: string; type: "text" | "rich" | 
                 ["data-content", "text"],
                 ["data-content-rich", "rich"],
                 ["data-content-list", "list"],
+                ["data-content-image", "image"],
             ] as const) {
                 const v = attr(child, name);
                 if (v && parseRef(v)) out.push({ ref: v, type });
@@ -191,3 +242,6 @@ export function boundRefs(html: string): { ref: string; type: "text" | "rich" | 
     visit(parse(html));
     return out;
 }
+
+// From a page's path ("blog/post.html") to the top folder ("../").
+export const baseOf = (path: string): string => "../".repeat(Math.max(0, path.split("/").filter(Boolean).length - 1));

@@ -9,6 +9,7 @@ import { ConfigError, loadConfig } from "./config.ts";
 import { connectedAsOwner, migrate } from "./db/migrate.ts";
 import { OpenCodeAgent } from "./services/agent.ts";
 import { DeployerHosting } from "./services/hosting.ts";
+import { DiskStorage, R2Storage } from "./services/mediaStorage.ts";
 import { OidcService } from "./services/oidc.ts";
 import { ContainerRuntime, LocalRuntime, type WorkspaceRuntime } from "./services/runtime.ts";
 import { SessionStore } from "./services/sessions.ts";
@@ -107,7 +108,14 @@ console.log(
         : "Hosting: none configured (DEPLOYER_URL); publishing records releases but serves nothing.",
 );
 
-const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting });
+const storage = config.r2 ? new R2Storage(config.r2) : config.mediaStorage === "disk" ? new DiskStorage(config.mediaDir) : null;
+console.log(
+    storage
+        ? `Media library: files are kept in ${storage.kind === "r2" ? `the R2 bucket ${config.r2?.bucket}` : config.mediaDir}.`
+        : "Media library: off (set R2_BUCKET and its credentials to turn it on).",
+);
+
+const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting, storage });
 
 // Stop workspaces nobody is using: their files stay, and the next request starts
 // them again in about a second. Keeps a single host from filling up with idle

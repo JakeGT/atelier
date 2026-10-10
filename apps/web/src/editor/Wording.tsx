@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ContentDocument, ContentField } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
 import { Dialog, Dots } from "../ui/kit";
+import { PictureField } from "./Media";
 
 // Editing a piece of wording: proper fields with plain labels, in whichever place
 // it is being edited (the pop-up from the editor, or the Content page). ADR-0014.
@@ -38,6 +39,8 @@ export function fieldsOf(doc: Pick<ContentDocument, "draft" | "fields">): Shown[
         .filter(([key]) => !seen.has(key))
         .map(([key, value]) => {
             const label = plainLabel(key);
+            if (typeof value === "string" && /^media\/[a-z0-9][a-z0-9-]*\.(jpg|png|webp|avif|gif|svg)$/.test(value))
+                return { key, label, type: "image" };
             if (typeof value === "string") return { key, label, type: value.length > 90 || value.includes("\n") ? "long" : "text" };
             if (isLines(value)) return { key, label, type: "list" };
             return { key, label, type: "long", structured: true };
@@ -145,7 +148,9 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
                         {f.type === "list" && <span className="field-note"> · one per line</span>}
                         {f.structured && <span className="field-note"> · structured: easier to ask your assistant</span>}
                     </label>
-                    {f.type === "rich" ? (
+                    {f.type === "image" ? (
+                        <PictureField value={values[f.key] ?? ""} onChange={(v) => set(f.key, v)} readOnly={!canEdit} />
+                    ) : f.type === "rich" ? (
                         <RichEditor
                             id={`f-${doc.id}-${f.key}`}
                             value={values[f.key] ?? ""}

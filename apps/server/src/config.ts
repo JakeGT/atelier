@@ -58,6 +58,17 @@ const envSchema = z.object({
         .string()
         .regex(/^[a-z0-9]{2,12}-$/)
         .default("atl-"),
+    // The media library's files (ADR-0014): "r2" (a Cloudflare R2 bucket), "disk"
+    // (a folder; development) or "off". Defaults to r2 when a bucket is named.
+    MEDIA_STORAGE: z.enum(["r2", "disk", "off"]).optional(),
+    MEDIA_DIR: z.string().default("/tmp/atelier-media"),
+    R2_ACCOUNT_ID: z.string().optional(),
+    R2_ACCOUNT_ID_FILE: z.string().optional(),
+    R2_BUCKET: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_ACCESS_KEY_ID_FILE: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_SECRET_ACCESS_KEY_FILE: z.string().optional(),
     // The control-plane address runtime containers use for the agent content API.
     RUNTIME_API_URL: z.string().default("http://atelier-server:8080"),
     WORKSPACE_ROOT: z.string().default("/tmp/atelier-workspaces"),
@@ -89,6 +100,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         e.MIGRATION_DATABASE_URL ?? (e.MIGRATION_DATABASE_URL_FILE ? readSecret(e.MIGRATION_DATABASE_URL_FILE) : undefined);
     const provisionerSecret = e.PROVISIONER_SECRET ?? (e.PROVISIONER_SECRET_FILE ? readSecret(e.PROVISIONER_SECRET_FILE) : undefined);
     const deployerSecret = e.DEPLOYER_SECRET ?? (e.DEPLOYER_SECRET_FILE ? readSecret(e.DEPLOYER_SECRET_FILE) : undefined);
+    const fromFile = (value: string | undefined, file: string | undefined) => value ?? (file ? readSecret(file) : undefined);
+    const r2 = {
+        accountId: fromFile(e.R2_ACCOUNT_ID, e.R2_ACCOUNT_ID_FILE),
+        bucket: e.R2_BUCKET,
+        accessKeyId: fromFile(e.R2_ACCESS_KEY_ID, e.R2_ACCESS_KEY_ID_FILE),
+        secretAccessKey: fromFile(e.R2_SECRET_ACCESS_KEY, e.R2_SECRET_ACCESS_KEY_FILE),
+    };
+    const mediaStorage = e.MEDIA_STORAGE ?? (r2.bucket ? "r2" : "off");
+    if (mediaStorage === "r2" && !(r2.accountId && r2.bucket && r2.accessKeyId && r2.secretAccessKey))
+        throw new ConfigError(
+            "MEDIA_STORAGE=r2 requires R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY (or their _FILE forms)",
+        );
     if (e.DEPLOYER_URL && !deployerSecret) throw new ConfigError("DEPLOYER_URL requires DEPLOYER_SECRET(_FILE)");
     if (e.RUNTIME_MODE === "container") {
         if (!secretsKey) throw new ConfigError("RUNTIME_MODE=container requires ATELIER_SECRETS_KEY(_FILE)");
@@ -147,6 +170,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         deployerUrl: e.DEPLOYER_URL ?? null,
         deployerSecret,
         pagesProjectPrefix: e.PAGES_PROJECT_PREFIX,
+        mediaStorage,
+        mediaDir: e.MEDIA_DIR,
+        r2: mediaStorage === "r2" ? (r2 as { accountId: string; bucket: string; accessKeyId: string; secretAccessKey: string }) : null,
         runtimeApiUrl: e.RUNTIME_API_URL,
         authMode: e.AUTH_MODE,
         oidc,

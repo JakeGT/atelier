@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
-import { fillHtml, isBound, lookupFrom } from "../services/fill.ts";
+import { baseOf, fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { agentInstructions } from "../services/instructions.ts";
+import { filesOf, MEDIA_NAME, mimeOfName, storageKey } from "../services/media.ts";
 import { PREVIEW_BRIDGE } from "../services/previewBridge.ts";
 import { findProvider, parseModel, validModelRef } from "../services/providers.ts";
 import type { RunState } from "../services/runtime.ts";
@@ -24,7 +25,7 @@ const PREVIEW_HEADERS = {
 
 // The assistant and its workspace: sessions, runs, the conversation, versions, preview.
 export function workspaceRoutes(api: Api): void {
-    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates } = api;
+    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates, storage } = api;
     const previewKey = `${secretsKey}:preview`;
     const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
 
@@ -315,7 +316,21 @@ export function workspaceRoutes(api: Api): void {
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
         const file = await runtime.readFile(claims.projectId, rel).catch(() => null);
-        if (!file) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        if (!file) {
+            // Not one of the website's own files: a file from its media library, perhaps.
+            const name = /^media\/([^/]+)$/.exec(rel)?.[1] ?? "";
+            if (storage && MEDIA_NAME.test(name)) {
+                const known = (await store.media.list(project.tenantId, project.id)).some((a) => filesOf(a).includes(name));
+                const body = known
+                    ? await storage.get(storageKey({ tenantId: project.tenantId, projectId: project.id }, name)).catch(() => null)
+                    : null;
+                if (body)
+                    return new Response(body as Uint8Array<ArrayBuffer>, {
+                        headers: { "content-type": mimeOfName(name), ...PREVIEW_HEADERS },
+                    });
+            }
+            return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        }
         // Inside the editor's preview frame (and only there), a page is given a few
         // lines that tell the editor which page is showing and obey its Back and
         // Forward buttons. The sandbox stops the editor reaching into the frame, so
@@ -328,7 +343,12 @@ export function workspaceRoutes(api: Api): void {
             // publishing will fill it from a release (ADR-0014).
             if (isBound(html)) {
                 const drafts = await store.content.list(claims.tenantId, claims.projectId);
-                html = fillHtml(html, lookupFrom(drafts.map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }))));
+                const library = html.includes("data-content-image") ? await store.media.list(claims.tenantId, claims.projectId) : [];
+                const byName = new Map(library.map((a) => [a.name, { ...a, alt: a.decorative ? "" : a.alt }]));
+                html = fillHtml(html, lookupFrom(drafts.map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }))), {
+                    media: (n) => byName.get(n),
+                    base: baseOf(rel),
+                });
             }
             if (c.req.header("sec-fetch-dest") === "iframe") html = `${html}\n${PREVIEW_BRIDGE}`;
             if (html !== written) return new Response(html, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });

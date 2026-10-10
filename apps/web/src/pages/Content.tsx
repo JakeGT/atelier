@@ -1,5 +1,6 @@
-import { ArrowLeft, History, Search, Undo2 } from "lucide-react";
+import { ArrowLeft, History, Images, Search, Type, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MediaLibrary, MediaProvider } from "../editor/Media";
 import { documentName, fieldsOf, WordingForm } from "../editor/Wording";
 import type { ContentDocument, ContentRevision, Org, Project, Session } from "../lib/api";
 import { can, orgApi } from "../lib/api";
@@ -36,6 +37,7 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
     const [query, setQuery] = useState("");
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [previewKey, setPreviewKey] = useState(0);
+    const [tab, setTab] = useState<"wording" | "files">("wording");
 
     const load = useCallback(async () => {
         try {
@@ -84,114 +86,141 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
     const waiting = (documents ?? []).filter(unpublished);
 
     return (
-        <div className="content-page">
-            <header className="studio-nav">
-                <div className="studio-nav-left">
-                    <Wordmark />
-                    <span className="nav-slash" aria-hidden="true">
-                        /
-                    </span>
-                    <span className="org-name">{project.name}</span>
-                </div>
-                <nav className="studio-nav-right">
-                    <button type="button" className="btn btn-ghost" onClick={() => navigate(editor)}>
-                        <ArrowLeft /> Back to the editor
-                    </button>
-                    <UserMenu session={session} theme={theme} onToggleTheme={onToggleTheme} />
-                </nav>
-            </header>
-
-            <div className="content-head">
-                <p className="eyebrow">{project.name}</p>
-                <h1 className="display">
-                    Its <em>content.</em>
-                </h1>
-                <p className="muted">
-                    The words on your website, page by page. Change them here and the preview shows it at once; they go public the next time
-                    you publish.
-                </p>
-                {waiting.length > 0 && (
-                    <p className="content-waiting">
-                        <span className="chip chip-draft">Not published yet</span>
-                        {waiting.map((d) => documentName(d)).join(", ")}.{" "}
-                        <button type="button" className="link" onClick={() => navigate(editor)}>
-                            Go to the editor to publish
+        <MediaProvider a={a} projectId={pid} canEdit={canEdit}>
+            <div className="content-page">
+                <header className="studio-nav">
+                    <div className="studio-nav-left">
+                        <Wordmark />
+                        <span className="nav-slash" aria-hidden="true">
+                            /
+                        </span>
+                        <span className="org-name">{project.name}</span>
+                    </div>
+                    <nav className="studio-nav-right">
+                        <button type="button" className="btn btn-ghost" onClick={() => navigate(editor)}>
+                            <ArrowLeft /> Back to the editor
                         </button>
+                        <UserMenu session={session} theme={theme} onToggleTheme={onToggleTheme} />
+                    </nav>
+                </header>
+
+                <div className="content-head">
+                    <p className="eyebrow">{project.name}</p>
+                    <h1 className="display">
+                        Its <em>content.</em>
+                    </h1>
+                    <p className="muted">
+                        The words and pictures on your website. Change them here and the preview shows it at once; they go public the next
+                        time you publish.
                     </p>
+                    {waiting.length > 0 && (
+                        <p className="content-waiting">
+                            <span className="chip chip-draft">Not published yet</span>
+                            {waiting.map((d) => documentName(d)).join(", ")}.{" "}
+                            <button type="button" className="link" onClick={() => navigate(editor)}>
+                                Go to the editor to publish
+                            </button>
+                        </p>
+                    )}
+                </div>
+
+                <div className="tabs content-tabs" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === "wording"}
+                        className={tab === "wording" ? "on" : ""}
+                        onClick={() => setTab("wording")}
+                    >
+                        <Type /> Wording
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === "files"}
+                        className={tab === "files" ? "on" : ""}
+                        onClick={() => setTab("files")}
+                    >
+                        <Images /> Pictures and files
+                    </button>
+                </div>
+
+                {tab === "files" ? (
+                    <div className="content-files">
+                        <MediaLibrary />
+                    </div>
+                ) : documents === null ? (
+                    <div className="panel-loading">
+                        <Dots />
+                    </div>
+                ) : documents.length === 0 ? (
+                    <div className="content-empty">
+                        <h2 className="display">No wording to manage yet.</h2>
+                        <p className="muted">
+                            Wording appears here once your assistant has made it editable. In the editor, ask: "Make the wording on this
+                            website editable."
+                        </p>
+                        <button type="button" className="btn btn-primary" onClick={() => navigate(editor)}>
+                            <ArrowLeft /> Back to the editor
+                        </button>
+                    </div>
+                ) : (
+                    <div className="content-body">
+                        <nav className="content-list" aria-label="Pages">
+                            <label className="content-search">
+                                <Search />
+                                <input
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder="Search all wording"
+                                    aria-label="Search all wording"
+                                />
+                            </label>
+                            <ul>
+                                {shown.map((d) => (
+                                    <li key={d.id}>
+                                        <button type="button" className={d.id === selected ? "on" : ""} onClick={() => setSelected(d.id)}>
+                                            <strong>{documentName(d)}</strong>
+                                            <span className="muted">
+                                                {fieldsOf(d).length} {fieldsOf(d).length === 1 ? "piece" : "pieces"}
+                                                {unpublished(d) ? " · not published yet" : ""}
+                                            </span>
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                            {shown.length === 0 && <p className="muted content-none">Nothing matches “{query.trim()}”.</p>}
+                        </nav>
+
+                        <section className="content-edit">
+                            {doc ? (
+                                <>
+                                    <h2 className="display">{documentName(doc)}</h2>
+                                    <WordingForm key={doc.id} doc={doc} canEdit={canEdit} onSave={save} />
+                                    <Past a={a} pid={pid} doc={doc} canEdit={canEdit} onRestored={load} />
+                                </>
+                            ) : (
+                                <p className="muted">Choose a page on the left.</p>
+                            )}
+                        </section>
+
+                        <aside className="content-preview" aria-label="Preview">
+                            <p className="eyebrow">Preview · private</p>
+                            {previewUrl && doc ? (
+                                <iframe
+                                    key={`${previewKey}:${doc.id}`}
+                                    src={`${previewUrl}${pageFile(doc)}`}
+                                    title="Preview of this page"
+                                    sandbox="allow-scripts allow-forms allow-popups allow-modals"
+                                />
+                            ) : (
+                                <div className="content-preview-empty muted">The preview appears here.</div>
+                            )}
+                        </aside>
+                    </div>
                 )}
             </div>
-
-            {documents === null ? (
-                <div className="panel-loading">
-                    <Dots />
-                </div>
-            ) : documents.length === 0 ? (
-                <div className="content-empty">
-                    <h2 className="display">Nothing to manage yet.</h2>
-                    <p className="muted">
-                        Wording appears here once your assistant has made it editable. In the editor, ask: "Make the wording on this website
-                        editable."
-                    </p>
-                    <button type="button" className="btn btn-primary" onClick={() => navigate(editor)}>
-                        <ArrowLeft /> Back to the editor
-                    </button>
-                </div>
-            ) : (
-                <div className="content-body">
-                    <nav className="content-list" aria-label="Pages">
-                        <label className="content-search">
-                            <Search />
-                            <input
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                placeholder="Search all wording"
-                                aria-label="Search all wording"
-                            />
-                        </label>
-                        <ul>
-                            {shown.map((d) => (
-                                <li key={d.id}>
-                                    <button type="button" className={d.id === selected ? "on" : ""} onClick={() => setSelected(d.id)}>
-                                        <strong>{documentName(d)}</strong>
-                                        <span className="muted">
-                                            {fieldsOf(d).length} {fieldsOf(d).length === 1 ? "piece" : "pieces"}
-                                            {unpublished(d) ? " · not published yet" : ""}
-                                        </span>
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                        {shown.length === 0 && <p className="muted content-none">Nothing matches “{query.trim()}”.</p>}
-                    </nav>
-
-                    <section className="content-edit">
-                        {doc ? (
-                            <>
-                                <h2 className="display">{documentName(doc)}</h2>
-                                <WordingForm key={doc.id} doc={doc} canEdit={canEdit} onSave={save} />
-                                <Past a={a} pid={pid} doc={doc} canEdit={canEdit} onRestored={load} />
-                            </>
-                        ) : (
-                            <p className="muted">Choose a page on the left.</p>
-                        )}
-                    </section>
-
-                    <aside className="content-preview" aria-label="Preview">
-                        <p className="eyebrow">Preview · private</p>
-                        {previewUrl && doc ? (
-                            <iframe
-                                key={`${previewKey}:${doc.id}`}
-                                src={`${previewUrl}${pageFile(doc)}`}
-                                title="Preview of this page"
-                                sandbox="allow-scripts allow-forms allow-popups allow-modals"
-                            />
-                        ) : (
-                            <div className="content-preview-empty muted">The preview appears here.</div>
-                        )}
-                    </aside>
-                </div>
-            )}
-        </div>
+        </MediaProvider>
     );
 }
 

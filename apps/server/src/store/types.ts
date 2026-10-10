@@ -7,6 +7,7 @@ import type {
     ContentRevision,
     Deployment,
     Invitation,
+    MediaAsset,
     Member,
     Membership,
     Organization,
@@ -226,6 +227,20 @@ export class DomainTakenError extends Error {
     }
 }
 
+// The media library's records. Files themselves are in object storage.
+export interface MediaStore {
+    create(asset: Omit<MediaAsset, "createdAt" | "deletedAt">): Promise<MediaAsset>;
+    // What the library shows; `withRemoved` adds files taken out of it but not yet purged.
+    list(tenantId: string, projectId: string, withRemoved?: boolean): Promise<MediaAsset[]>;
+    get(tenantId: string, projectId: string, id: string): Promise<MediaAsset | null>;
+    describe(tenantId: string, projectId: string, id: string, patch: { alt: string; decorative: boolean }): Promise<MediaAsset | null>;
+    // Takes it out of the library; the file is purged later.
+    remove(tenantId: string, projectId: string, id: string): Promise<MediaAsset | null>;
+    // Removed before `before`, across the tenant's websites: ready to purge.
+    removedBefore(tenantId: string, before: Date): Promise<MediaAsset[]>;
+    purge(tenantId: string, id: string): Promise<void>;
+}
+
 // Custom domains. A hostname is unique across the platform.
 export interface DomainStore {
     list(tenantId: string, projectId: string): Promise<ProjectDomain[]>;
@@ -276,6 +291,7 @@ export interface Store {
     releases: ReleaseStore;
     deployments: DeploymentStore;
     domains: DomainStore;
+    media: MediaStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
     close(): Promise<void>;

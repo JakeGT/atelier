@@ -7,6 +7,7 @@ import type {
     ContentRevision,
     Deployment,
     Invitation,
+    MediaAsset,
     Membership,
     Organization,
     OrgRole,
@@ -25,6 +26,7 @@ import type {
     DomainStore,
     InvitationStore,
     LoginSessionStore,
+    MediaStore,
     MembershipStore,
     MessageStore,
     OrganizationStore,
@@ -350,6 +352,7 @@ export class PostgresStore implements Store {
     releases: ReleaseStore;
     deployments: DeploymentStore;
     domains: DomainStore;
+    media: MediaStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
 
@@ -953,6 +956,94 @@ export class PostgresStore implements Store {
                     tenantId,
                     (tx) => tx`DELETE FROM project_domains WHERE project_id = ${projectId} AND hostname = ${hostname}`,
                 );
+            },
+        };
+
+        const MEDIA_COLS =
+            "id, project_id, tenant_id, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by, created_at, deleted_at";
+        interface MediaRow {
+            id: string;
+            project_id: string;
+            tenant_id: string;
+            name: string;
+            kind: MediaAsset["kind"];
+            mime: string | null;
+            width: number | null;
+            height: number | null;
+            alt: string | null;
+            decorative: boolean;
+            bytes: string | number | null;
+            variants: MediaAsset["variants"];
+            uploaded_by: string | null;
+            created_at: Ts;
+            deleted_at: Ts | null;
+        }
+        const rowToMedia = (r: MediaRow): MediaAsset => ({
+            id: r.id,
+            projectId: r.project_id,
+            tenantId: r.tenant_id,
+            name: r.name,
+            kind: r.kind,
+            mime: r.mime ?? "application/octet-stream",
+            width: r.width,
+            height: r.height,
+            alt: r.alt ?? "",
+            decorative: r.decorative,
+            bytes: Number(r.bytes ?? 0),
+            variants: r.variants ?? [],
+            uploadedBy: r.uploaded_by,
+            createdAt: isoNow(r.created_at),
+            deletedAt: r.deleted_at ? isoNow(r.deleted_at) : null,
+        });
+        this.media = {
+            create: async (a) =>
+                this.withTenant(a.tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        INSERT INTO media_assets (id, project_id, tenant_id, key, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by)
+                        VALUES (${a.id}, ${a.projectId}, ${a.tenantId}, ${`${a.tenantId}/${a.projectId}/${a.name}`}, ${a.name}, ${a.kind}, ${a.mime},
+                                ${a.width}, ${a.height}, ${a.alt}, ${a.decorative}, ${a.bytes}, ${json(a.variants as unknown as Json)}, ${a.uploadedBy})
+                        RETURNING ${tx.unsafe(MEDIA_COLS)}`;
+                    return rowToMedia(firstRow(rows));
+                }),
+            list: async (tenantId, projectId, withRemoved = false) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        SELECT ${tx.unsafe(MEDIA_COLS)} FROM media_assets
+                        WHERE project_id = ${projectId} AND name IS NOT NULL AND (${withRemoved} OR deleted_at IS NULL)
+                        ORDER BY created_at DESC`;
+                    return rows.map(rowToMedia);
+                }),
+            get: async (tenantId, projectId, id) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        SELECT ${tx.unsafe(MEDIA_COLS)} FROM media_assets WHERE id = ${id} AND project_id = ${projectId} AND name IS NOT NULL`;
+                    const r = rows[0];
+                    return r ? rowToMedia(r) : null;
+                }),
+            describe: async (tenantId, projectId, id, patch) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        UPDATE media_assets SET alt = ${patch.alt}, decorative = ${patch.decorative}
+                        WHERE id = ${id} AND project_id = ${projectId} RETURNING ${tx.unsafe(MEDIA_COLS)}`;
+                    const r = rows[0];
+                    return r ? rowToMedia(r) : null;
+                }),
+            remove: async (tenantId, projectId, id) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        UPDATE media_assets SET deleted_at = COALESCE(deleted_at, now())
+                        WHERE id = ${id} AND project_id = ${projectId} RETURNING ${tx.unsafe(MEDIA_COLS)}`;
+                    const r = rows[0];
+                    return r ? rowToMedia(r) : null;
+                }),
+            removedBefore: async (tenantId, before) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<MediaRow[]>`
+                        SELECT ${tx.unsafe(MEDIA_COLS)} FROM media_assets WHERE deleted_at < ${before} AND name IS NOT NULL`;
+                    return rows.map(rowToMedia);
+                }),
+            purge: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM media_assets WHERE id = ${id} AND deleted_at IS NOT NULL`);
             },
         };
 

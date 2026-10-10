@@ -98,12 +98,13 @@ export type Project = z.infer<typeof projectSchema>;
 // ---- P1 entities (content store + release workflow) ----
 
 // How one field of a content document is shown and edited (ADR-0014).
-export const FIELD_TYPES = ["text", "long", "rich", "list"] as const;
+export const FIELD_TYPES = ["text", "long", "rich", "list", "image"] as const;
 export const contentFieldSchema = z.object({
     key: z.string().regex(/^[A-Za-z][\w-]{0,63}$/),
     // In the person's words: "Headline", not "heroTitle".
     label: z.string().min(1).max(80),
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
+    // image: a file from the media library ("media/<name>").
     type: z.enum(FIELD_TYPES),
     help: z.string().max(200).optional(),
 });
@@ -126,18 +127,27 @@ export const contentDocumentSchema = z.object({
     updatedAt: z.string().datetime(),
 });
 
+// A file in a website's media library (ADR-0014 §5). `name` is what pages refer
+// to it by ("media/<name>"); `variants` are smaller copies of an image.
+export const MEDIA_KINDS = ["image", "video", "audio", "document"] as const;
 export const mediaAssetSchema = z.object({
     id: z.string().uuid(),
     projectId: z.string().uuid(),
     tenantId: z.string().uuid(),
-    key: z.string().min(1),
-    mime: z.string().nullable(),
+    name: z.string().min(1),
+    kind: z.enum(MEDIA_KINDS),
+    mime: z.string(),
     width: z.number().int().nullable(),
     height: z.number().int().nullable(),
-    alt: z.string().nullable(),
-    bytes: z.number().int().nullable(),
-    draftRef: z.string().nullable(),
-    publishedRef: z.string().nullable(),
+    // What the image shows, for people who cannot see it. Empty when `decorative`.
+    alt: z.string(),
+    decorative: z.boolean(),
+    // Everything stored for it, variants included.
+    bytes: z.number().int(),
+    variants: z.array(z.object({ name: z.string(), width: z.number().int(), bytes: z.number().int() })),
+    uploadedBy: z.string().uuid().nullable(),
+    createdAt: z.string().datetime(),
+    deletedAt: z.string().datetime().nullable(),
 });
 
 // planned -> live (or failed). A live release that another release replaces

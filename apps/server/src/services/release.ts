@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Project, Release } from "@atelier/shared";
 import type { Store } from "../store/types.ts";
-import { type Hosting, HostingError, siteName } from "./hosting.ts";
+import { type DeployInput, type Hosting, HostingError, siteName } from "./hosting.ts";
+import { filesOf, mimeOfName, storageKey } from "./media.ts";
+import type { MediaStorage } from "./mediaStorage.ts";
 import type { WorkspaceRuntime } from "./runtime.ts";
 
 export class ReleaseError extends Error {
@@ -30,10 +32,18 @@ export class ReleaseService {
     private readonly runtime: WorkspaceRuntime;
     private readonly hosting: Hosting | null;
     private readonly prefix: string;
+    private readonly storage: MediaStorage | null;
     // One deployment per website at a time.
     private readonly deploying = new Set<string>();
 
-    constructor(store: Store, runtime: WorkspaceRuntime, hosting: Hosting | null = null, prefix = "atl-") {
+    constructor(
+        store: Store,
+        runtime: WorkspaceRuntime,
+        hosting: Hosting | null = null,
+        prefix = "atl-",
+        storage: MediaStorage | null = null,
+    ) {
+        this.storage = storage;
         this.store = store;
         this.runtime = runtime;
         this.hosting = hosting;
@@ -75,6 +85,45 @@ export class ReleaseService {
             documents,
         });
         return this.deploy(tenantId, projectId, release);
+    }
+
+    // The media library files a release uses: every `media/<name>` its pages or its
+    // wording mention. A file nothing mentions is not published, and one taken out
+    // of the library since is still found (until it is purged), so an earlier
+    // release can be put back whole.
+    private async mediaFor(
+        tenantId: string,
+        projectId: string,
+        archive: Uint8Array,
+        content: { content: Record<string, unknown> | null }[],
+    ): Promise<Pick<DeployInput, "media" | "mediaInfo">> {
+        if (!this.storage) return {};
+        const assets = await this.store.media.list(tenantId, projectId, true);
+        if (assets.length === 0) return {};
+        const mentioned = new Set<string>();
+        const haystack = `${Buffer.from(archive).toString("latin1")}\n${JSON.stringify(content)}`;
+        for (const m of haystack.matchAll(/media\/([a-z0-9][a-z0-9-]{0,70}\.[a-z0-9]{2,5})/g)) mentioned.add(m[1] ?? "");
+        const media: NonNullable<DeployInput["media"]> = [];
+        const mediaInfo: NonNullable<DeployInput["mediaInfo"]> = [];
+        for (const asset of assets) {
+            const names = filesOf(asset);
+            // The file itself brings its smaller copies; a smaller copy can also be named on its own.
+            const wanted = mentioned.has(asset.name) ? names : names.filter((n) => mentioned.has(n));
+            if (wanted.length === 0) continue;
+            for (const name of wanted) {
+                const body = await this.storage.get(storageKey(asset, name));
+                if (!body) throw new HostingError(`the file ${name} is missing from the media library; upload it again`, "site", 422);
+                media.push({ name, body, mime: mimeOfName(name) });
+            }
+            mediaInfo.push({
+                name: asset.name,
+                alt: asset.decorative ? "" : asset.alt,
+                width: asset.width,
+                height: asset.height,
+                variants: asset.variants.map((v) => ({ name: v.name, width: v.width })),
+            });
+        }
+        return { media, mediaInfo };
     }
 
     // The website's project at the host, named once and kept.
@@ -177,18 +226,20 @@ export class ReleaseService {
             if (!project || !release.codeSha) throw new HostingError("there is nothing to publish yet", "site", 422);
             const archive = await this.runtime.exportTree(projectId, release.codeSha);
             const site = await this.site(tenantId, project);
+            // The wording pinned in this release fills the pages (ADR-0014).
+            const content = (await this.store.releases.manifest(tenantId, release.id)).map((d) => ({
+                kind: d.kind,
+                slug: d.slug,
+                content: d.content,
+            }));
             const result = await hosting.deploy({
                 site,
                 archive,
                 branch: "main",
                 canonicalHost: await this.canonicalHost(tenantId, projectId, site),
                 commit: release.codeSha,
-                // The wording pinned in this release fills the pages (ADR-0014).
-                content: (await this.store.releases.manifest(tenantId, release.id)).map((d) => ({
-                    kind: d.kind,
-                    slug: d.slug,
-                    content: d.content,
-                })),
+                content,
+                ...(await this.mediaFor(tenantId, projectId, archive, content)),
             });
             await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
             await this.attachDomains(tenantId, projectId, site);

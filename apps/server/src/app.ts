@@ -10,6 +10,7 @@ import { configRoutes } from "./routes/config.ts";
 import { health } from "./routes/health.ts";
 import type { ModelCatalog } from "./services/catalog.ts";
 import type { Hosting } from "./services/hosting.ts";
+import type { MediaStorage } from "./services/mediaStorage.ts";
 import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
@@ -30,6 +31,8 @@ export interface Deps {
     // Where published websites are served from; null when no deployer is configured.
     hosting?: Hosting | null;
     templates?: Template[];
+    // Where uploaded files are kept; null or absent: no media library.
+    storage?: MediaStorage | null;
 }
 
 // Baseline headers for everything the app serves (the preview route adds a
