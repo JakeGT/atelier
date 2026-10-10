@@ -133,7 +133,7 @@ reachable only on the private `atelier-runtime` network.
 | `atelier_provisioner_secret` | server + provisioner | The server's credential for the provisioner |
 | `atelier_deployer_secret` | server + deployer | The server's credential for the deployer (P3) |
 | `atelier_cloudflare_account_id` | deployer only | The Cloudflare account that holds the websites' Pages projects |
-| `atelier_cloudflare_api_token` | deployer only | A token with *Account → Cloudflare Pages → Edit* on that account, and nothing else |
+| `atelier_cloudflare_api_token` | deployer only | An account API token (Manage account → Account API tokens) with the single permission **Pages Write** on the entire account. Older screens call it *Cloudflare Pages: Edit* |
 
 The deployer only touches Pages projects named `atl-…` (`PAGES_PROJECT_PREFIX`),
 so the account's other Pages projects are out of its reach.

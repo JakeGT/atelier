@@ -227,8 +227,10 @@ Goal: one real deploy target + custom domain per project.
 - **E3.4** Rollback redeploys the earlier release's files with no re-upload.
 - Deleting a website takes its site and domains down first.
 - **Verified** by unit tests against a stand-in for Cloudflare's API, and end to
-  end on the real containers against the same stand-in. **Not yet run against
-  Cloudflare itself**: that needs an API token (docs/14 §6).
+  end on the real containers against the same stand-in. Also run against
+  Cloudflare itself through the production deployer (2026-10-10): deploy,
+  redeploy, redeploy an earlier version, delete. Custom domains have not been
+  exercised against Cloudflare (that needs a real domain).
 - **Deferred:** preview deployments as a feature; a sandboxed build (needed
   only once frameworks are allowed); the content snapshot in the published
   site (P5); the remote git mirror of project code (ADR-0009), so workspace

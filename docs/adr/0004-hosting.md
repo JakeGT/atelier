@@ -68,6 +68,13 @@ possible without re-platforming.
   Preview addresses are always `noindex`; the `*.pages.dev` address becomes
   `noindex` once a custom domain is verified (it takes effect at the next
   publish). The website's own `_headers` and `_redirects` are kept.
+- **Unknown addresses get a real "not found".** With no `404.html`, Pages
+  answers every unknown path with the home page and a 200. The deployer adds a
+  plain `404.html` unless the website has its own.
+- **Run against Cloudflare itself on 2026-10-10** (production deployer, a
+  throwaway `atl-smoke-…` site): create, deploy, redeploy with one changed file
+  (one upload), redeploy the first version (no uploads), delete. An account API
+  token with **Pages Write** is sufficient.
 - **The seam for another host** is `services/hosting.ts` (`Hosting`).
 - **Not built:** preview deployments as a feature (the deployer accepts a
   branch, nothing offers it yet); the published content snapshot (websites

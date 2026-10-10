@@ -205,10 +205,14 @@ test("a website's archive becomes plain files: private, server-side and oversize
     );
     assert.deepEqual(
         site.files.map((f) => f.path).sort(),
-        ["/.well-known/security.txt", "/about/index.html", "/index.html", `/${long}`, "/styles/site.css"].sort(),
+        ["/.well-known/security.txt", "/404.html", "/about/index.html", "/index.html", `/${long}`, "/styles/site.css"].sort(),
     );
     assert.equal(site.files.find((f) => f.path === "/styles/site.css")?.contentType, "text/css; charset=utf-8");
     assert.equal(site.files.find((f) => f.path === `/${long}`)?.body.toString(), "p{}");
+    // A "not found" page is added so unknown addresses are not answered with the home page; a website's own is kept.
+    assert.match(site.files.find((f) => f.path === "/404.html")?.body.toString() ?? "", /Page not found/);
+    const own = siteFromArchive(repo({ "index.html": "x", "404.html": "mine" }));
+    assert.equal(own.files.find((f) => f.path === "/404.html")?.body.toString(), "mine");
     assert.equal(site.headers, "/*\n  X-Site: mine");
     assert.equal(site.redirects, "/old /new 301");
 
@@ -258,8 +262,9 @@ test("the deployer: needs its secret, touches only its own Pages projects, uploa
     const first = await json<{ id: string; url: string; siteUrl: string; files: number; uploaded: number }>(
         await deploy("atl-site-1", archive),
     );
-    assert.deepEqual([first.files, first.uploaded, first.siteUrl], [2, 2, "https://atl-site-1.pages.dev"]);
-    assert.deepEqual(cf.served("atl-site-1"), { "/index.html": "<h1>one</h1>", "/site.css": "body{}" });
+    assert.deepEqual([first.files, first.uploaded, first.siteUrl], [3, 3, "https://atl-site-1.pages.dev"]);
+    assert.deepEqual(Object.keys(cf.served("atl-site-1")).sort(), ["/404.html", "/index.html", "/site.css"]);
+    assert.equal(cf.served("atl-site-1")["/index.html"], "<h1>one</h1>");
     assert.equal(cf.assets.get(assetHash(Buffer.from("body{}"), "/site.css"))?.contentType, "text/css; charset=utf-8");
 
     // One file changed: one upload.
@@ -297,7 +302,8 @@ test("publishing puts the website live at a stable address; a rollback serves th
     const site = (await getProject(t, owner, project)).hostingRef ?? "";
     assert.match(site, /^atl-okoro-ceramics-[0-9a-f]{10}$/);
     assert.equal((await getProject(t, owner, project)).productionRef, `https://${site}.pages.dev`);
-    assert.deepEqual(cf.served(site), { "/index.html": "<h1>first version</h1>" });
+    assert.equal(cf.served(site)["/index.html"], "<h1>first version</h1>");
+    assert.match(cf.served(site)["/404.html"] ?? "", /Page not found/);
     const dep = cf.projects.get(site)?.deployments.at(-1);
     assert.match(dep?.commit ?? "", /^[0-9a-f]{40}$/);
     assert.match(dep?.headers ?? "", /X-Robots-Tag: noindex/);

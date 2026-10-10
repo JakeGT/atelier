@@ -46,6 +46,32 @@ const DROPPED_FILES = new Set(["_worker.js", "_routes.json", "_headers", "_redir
 const DROPPED_DIRS = new Set(["functions", "node_modules", "_worker.js"]);
 const SAFE_PATH = /^[^\0\\]+$/;
 
+// Served for addresses that do not exist, unless the website brings its own 404.html.
+const NOT_FOUND_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Page not found</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Georgia,"Times New Roman",serif;background:#f5f1e8;color:#17150f}
+main{padding:2rem;text-align:center}
+h1{margin:0 0 .5rem;font-size:clamp(2rem,6vw,3.5rem);font-weight:400}
+p{margin:0 0 1.5rem;color:#4b473d}
+a{color:inherit}
+</style>
+</head>
+<body>
+<main>
+<h1>Page not found</h1>
+<p>There is nothing at this address.</p>
+<a href="/">Go to the home page</a>
+</main>
+</body>
+</html>
+`;
+
 export interface Site {
     files: SiteFile[];
     headers: string | null;
@@ -92,6 +118,12 @@ export function siteFromArchive(archive: Buffer, limits: SiteLimits = DEFAULT_LI
     }
     if (!files.some((f) => f.path === "/index.html"))
         throw new SiteError("the website has no index.html, so there is nothing to show at its address");
+    // Without a 404.html the host answers every unknown address with the home page
+    // (and a 200), which is right for a single-page app and wrong for a website.
+    if (!files.some((f) => f.path === "/404.html")) {
+        const body = Buffer.from(NOT_FOUND_PAGE);
+        files.push({ path: "/404.html", body, contentType: mimeFor("/404.html"), hash: assetHash(body, "/404.html") });
+    }
     return { files, headers, redirects };
 }
 
