@@ -535,3 +535,22 @@
     border-color: var(--ink);
     box-shadow: 0 0 0 3px var(--line);
 }
+
+.card-live {
+    color: var(--live);
+}
+
+.card-live::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    vertical-align: 1px;
+}
+
+.card-link .card-meta {
+    padding-right: 76px;
+}

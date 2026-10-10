@@ -2,6 +2,8 @@ import {
     ArrowLeft,
     ArrowUpRight,
     Check,
+    ChevronDown,
+    CloudOff,
     Copy,
     Eye,
     Globe,
@@ -19,8 +21,8 @@ import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
 import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Release, Run, Session } from "../lib/api";
 import { ApiError, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
-import { navigate, type Theme, useStored } from "../lib/hooks";
-import { Dialog, Dots, ThemeToggle, UserMenu, useToast } from "../ui/kit";
+import { navigate, type Theme, useClickOutside, useStored } from "../lib/hooks";
+import { Dialog, Dots, UserMenu, useToast } from "../ui/kit";
 import { FIRST_PROMPT_KEY } from "./Studio";
 
 type Pane = "chat" | "preview" | "side";
@@ -75,6 +77,12 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [acting, setActing] = useState(false);
     const [confirmPublish, setConfirmPublish] = useState(false);
     const [addressOpen, setAddressOpen] = useState(false);
+    // Opened from "Unpublish": the address dialog goes straight to its confirmation.
+    const [addressUnpublish, setAddressUnpublish] = useState(false);
+    const openAddress = (unpublish: boolean) => {
+        setAddressUnpublish(unpublish);
+        setAddressOpen(true);
+    };
     const [published, setPublished] = useState<{ number: number; url: string } | null>(null);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
@@ -306,59 +314,42 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         <div className={`editor pane-${pane} ${sideOpen ? "side-open" : ""}`}>
             <header className="editor-bar">
                 <div className="editor-bar-left">
-                    <button
-                        type="button"
-                        className="btn btn-ghost btn-icon"
-                        onClick={() => navigate(`/o/${org.slug}`)}
-                        title={`${org.name}'s websites`}
-                    >
-                        <ArrowLeft />
+                    <button type="button" className="btn btn-ghost bar-back" onClick={() => navigate(`/o/${org.slug}`)}>
+                        <ArrowLeft /> <span className="bar-label">Websites</span>
                     </button>
                     <h1 className="display">{project.name}</h1>
                     {archived ? (
                         <span className="chip chip-plain">Archived</span>
                     ) : live ? (
-                        hasChanges ? (
-                            <span className="chip chip-draft">Unpublished changes</span>
-                        ) : (
-                            <span className="chip chip-live">Live · release {live.number}</span>
-                        )
+                        <LiveMenu
+                            number={live.number}
+                            hasChanges={hasChanges}
+                            url={liveUrl}
+                            canPublish={canPublish}
+                            onAddress={() => openAddress(false)}
+                            onUnpublish={() => openAddress(true)}
+                        />
                     ) : (
                         <span className="chip chip-plain">Not published</span>
                     )}
-                    {liveUrl && (
-                        <a className="live-link mono" href={liveUrl} target="_blank" rel="noreferrer" title="Open the live website">
-                            {new URL(liveUrl).host} <ArrowUpRight />
-                        </a>
-                    )}
                 </div>
                 <div className="editor-bar-right">
-                    <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-                    <button
-                        type="button"
-                        className="btn btn-ghost btn-icon"
-                        onClick={() => setAddressOpen(true)}
-                        title="Address and domains"
-                    >
-                        <Globe />
+                    <button type="button" className="btn btn-ghost bar-wide" onClick={() => openAddress(false)}>
+                        <Globe /> <span className="bar-label">Address</span>
                     </button>
                     {mayManage && (
-                        <button
-                            type="button"
-                            className="btn btn-ghost btn-icon"
-                            onClick={() => setSettingsOpen(true)}
-                            title="Website settings"
-                        >
-                            <SlidersHorizontal />
+                        <button type="button" className="btn btn-ghost bar-wide" onClick={() => setSettingsOpen(true)}>
+                            <SlidersHorizontal /> <span className="bar-label">Settings</span>
                         </button>
                     )}
                     <button
                         type="button"
-                        className={`btn btn-ghost btn-icon side-toggle ${sideOpen ? "on" : ""}`}
+                        className={`btn btn-ghost side-toggle ${sideOpen ? "on" : ""}`}
                         onClick={() => setSideOpen((o) => !o)}
-                        title="Versions, releases and content"
+                        aria-pressed={sideOpen}
+                        title="Show or hide versions, releases and content"
                     >
-                        <PanelRight />
+                        <PanelRight /> <span className="bar-label">History</span>
                     </button>
                     {canPublish && (
                         <button
@@ -371,7 +362,18 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                             {acting ? <Dots /> : <Rocket />} Publish
                         </button>
                     )}
-                    <UserMenu session={session} />
+                    <UserMenu
+                        session={session}
+                        theme={theme}
+                        onToggleTheme={onToggleTheme}
+                        items={[
+                            { label: "Address and domains", icon: <Globe />, onClick: () => openAddress(false) },
+                            ...(mayManage
+                                ? [{ label: "Website settings", icon: <SlidersHorizontal />, onClick: () => setSettingsOpen(true) }]
+                                : []),
+                            { label: `All of ${org.name}'s websites`, icon: <ArrowLeft />, onClick: () => navigate(`/o/${org.slug}`) },
+                        ]}
+                    />
                 </div>
             </header>
 
@@ -438,6 +440,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     api={a}
                     mayManage={mayManage}
                     canPublish={canPublish}
+                    startUnpublish={addressUnpublish}
                     onUnpublished={() => {
                         setAddressOpen(false);
                         void refresh();
@@ -557,5 +560,89 @@ function Published({ project, published, onClose }: { project: Project; publishe
                 </a>
             </div>
         </Dialog>
+    );
+}
+
+// The website's published state, and what can be done about it: said in words,
+// next to the thing it describes.
+function LiveMenu({
+    number,
+    hasChanges,
+    url,
+    canPublish,
+    onAddress,
+    onUnpublish,
+}: {
+    number: number;
+    hasChanges: boolean;
+    url: string | null;
+    canPublish: boolean;
+    onAddress: () => void;
+    onUnpublish: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const ref = useClickOutside(useCallback(() => setOpen(false), []));
+    const run = (action: () => void) => () => {
+        setOpen(false);
+        action();
+    };
+    return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: Escape closes the menu from anywhere inside it
+        <div
+            className="menu-wrap live-menu"
+            ref={ref}
+            onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+            }}
+        >
+            <button
+                type="button"
+                className={`chip chip-button ${hasChanges ? "chip-draft" : "chip-live"}`}
+                onClick={() => setOpen((o) => !o)}
+                aria-haspopup="menu"
+                aria-expanded={open}
+            >
+                {hasChanges ? `Live · unpublished changes` : `Live · release ${number}`} <ChevronDown />
+            </button>
+            {open && (
+                <div className="menu menu-left" role="menu">
+                    <div className="menu-head">
+                        <strong>Release {number} is live</strong>
+                        <span className="mono muted">{url ? new URL(url).host : "Not served anywhere: hosting is not set up"}</span>
+                    </div>
+                    {url && (
+                        <>
+                            <a role="menuitem" href={url} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
+                                <ArrowUpRight /> Open the live website
+                            </a>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() =>
+                                    void navigator.clipboard.writeText(url).then(() => {
+                                        setCopied(true);
+                                        setTimeout(() => setCopied(false), 1600);
+                                    })
+                                }
+                            >
+                                {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy its address"}
+                            </button>
+                            <button type="button" role="menuitem" onClick={run(onAddress)}>
+                                <Globe /> Address and domains
+                            </button>
+                        </>
+                    )}
+                    {canPublish && url && (
+                        <>
+                            <div className="menu-rule" />
+                            <button type="button" role="menuitem" className="menu-danger" onClick={run(onUnpublish)}>
+                                <CloudOff /> Unpublish…
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }

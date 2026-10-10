@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, Ellipsis, PencilLine, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, CloudOff, Ellipsis, Globe, PencilLine, Plus, Trash2 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Org, Project, Session } from "../lib/api";
@@ -48,6 +48,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     const [brief, setBrief] = useState("");
     const [busy, setBusy] = useState(false);
     const [deleting, setDeleting] = useState<Project | null>(null);
+    const [unpublishing, setUnpublishing] = useState<Project | null>(null);
     const nameRef = useRef<HTMLInputElement>(null);
     const firstName = session.name.split(/[\s@]/)[0] || "there";
     const mayManage = can.manage(org.role);
@@ -96,6 +97,20 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             await load();
         } catch (err) {
             toast((err as Error).message, "error");
+        }
+    }
+
+    async function unpublish(p: Project) {
+        try {
+            await a.unpublish(p.id);
+            setUnpublishing(null);
+            toast(`${p.name} is offline. Publish it again from the editor to bring it back.`);
+            await load();
+        } catch (err) {
+            if (err instanceof ReauthRequired) {
+                toast("Please confirm your sign-in, then unpublish again.", "error");
+                setTimeout(reauthenticate, 1200);
+            } else toast((err as Error).message, "error");
         }
     }
 
@@ -244,7 +259,8 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                         <div className="card-meta">
                                             <strong>{p.name}</strong>
                                             <span className="mono muted">
-                                                {p.slug} · {timeAgo(p.createdAt)}
+                                                {p.productionRef ? <span className="card-live">Live</span> : "Not published"} ·{" "}
+                                                {timeAgo(p.createdAt)}
                                             </span>
                                         </div>
                                     </a>
@@ -252,6 +268,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                         project={p}
                                         href={`/o/${org.slug}/p/${p.slug}`}
                                         mayManage={mayManage}
+                                        onUnpublish={() => setUnpublishing(p)}
                                         onArchive={() => void archive(p)}
                                         onDelete={() => setDeleting(p)}
                                     />
@@ -307,6 +324,24 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                 )}
             </main>
 
+            {unpublishing && (
+                <Dialog onClose={() => setUnpublishing(null)}>
+                    <p className="eyebrow">Unpublish</p>
+                    <h2>Take {unpublishing.name} offline?</h2>
+                    <p>
+                        Its address and any domains will stop working straight away. Your pages, versions and releases stay, and publishing
+                        from the editor brings it back at the same address.
+                    </p>
+                    <div className="dialog-actions">
+                        <button type="button" className="btn" onClick={() => setUnpublishing(null)}>
+                            Keep it live
+                        </button>
+                        <button type="button" className="btn btn-danger-solid" onClick={() => void unpublish(unpublishing)}>
+                            <CloudOff /> Take offline
+                        </button>
+                    </div>
+                </Dialog>
+            )}
             {deleting && <ConfirmDelete project={deleting} onCancel={() => setDeleting(null)} onConfirm={() => void remove(deleting)} />}
         </div>
     );
@@ -317,12 +352,14 @@ function CardMenu({
     project,
     href,
     mayManage,
+    onUnpublish,
     onArchive,
     onDelete,
 }: {
     project: Project;
     href: string;
     mayManage: boolean;
+    onUnpublish: () => void;
     onArchive: () => void;
     onDelete: () => void;
 }) {
@@ -345,7 +382,7 @@ function CardMenu({
         >
             <button
                 type="button"
-                className="btn btn-ghost btn-icon"
+                className="btn btn-ghost btn-sm"
                 onClick={(e) => {
                     setUp(window.innerHeight - e.currentTarget.getBoundingClientRect().bottom < 220);
                     setOpen((o) => !o);
@@ -354,7 +391,7 @@ function CardMenu({
                 aria-haspopup="menu"
                 aria-expanded={open}
             >
-                <Ellipsis />
+                <Ellipsis /> <span>More</span>
             </button>
             {open && (
                 <div className={`menu ${up ? "menu-up" : ""}`} role="menu">
@@ -362,11 +399,21 @@ function CardMenu({
                         <PencilLine /> Open in the editor
                     </button>
                     <button type="button" role="menuitem" onClick={run(() => window.open(href, "_blank", "noopener"))}>
-                        <ArrowUpRight /> Open in a new tab
+                        <ArrowUpRight /> Open the editor in a new tab
                     </button>
+                    {project.productionRef && (
+                        <a role="menuitem" href={project.productionRef} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
+                            <Globe /> Visit the live website
+                        </a>
+                    )}
                     {mayManage && (
                         <>
                             <div className="menu-rule" />
+                            {project.productionRef && (
+                                <button type="button" role="menuitem" onClick={run(onUnpublish)}>
+                                    <CloudOff /> Unpublish…
+                                </button>
+                            )}
                             <button type="button" role="menuitem" onClick={run(onArchive)}>
                                 <Archive /> Archive
                             </button>

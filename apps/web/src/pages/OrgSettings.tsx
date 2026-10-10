@@ -232,12 +232,11 @@ function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise
                                 {p.connected && (
                                     <button
                                         type="button"
-                                        className="btn btn-sm btn-ghost btn-icon"
+                                        className="btn btn-sm btn-danger"
                                         title={`Disconnect ${p.name} and delete its key`}
-                                        aria-label={`Disconnect ${p.name}`}
                                         onClick={() => void disconnect(p)}
                                     >
-                                        <Trash2 />
+                                        <Trash2 /> Disconnect
                                     </button>
                                 )}
                             </span>
@@ -458,11 +457,11 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                                         editable && (
                                             <button
                                                 type="button"
-                                                className="btn btn-sm btn-icon"
+                                                className="btn btn-sm btn-danger"
                                                 title="Remove from the studio"
                                                 onClick={() => void remove(m)}
                                             >
-                                                <X />
+                                                <X /> Remove
                                             </button>
                                         )
                                     )}

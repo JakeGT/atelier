@@ -47,16 +47,22 @@ export function Preview({ slug, url, reloadKey, device, onDevice, onReload, hasP
                                     className={device === d.id ? "on" : ""}
                                     onClick={() => onDevice(d.id)}
                                 >
-                                    <d.icon />
+                                    <d.icon /> <span className="tool-label">{d.label}</span>
                                 </button>
                             ))}
                         </div>
-                        <button type="button" className="btn btn-ghost btn-icon" onClick={onReload} title="Reload preview">
-                            <RotateCw />
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} title="Reload the preview">
+                            <RotateCw /> <span className="tool-label">Reload</span>
                         </button>
                         {url && hasPage && (
-                            <a className="btn btn-ghost btn-icon" href={url} target="_blank" rel="noreferrer" title="Open in a new tab">
-                                <ExternalLink />
+                            <a
+                                className="btn btn-ghost btn-sm"
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open the preview in a new tab"
+                            >
+                                <ExternalLink /> <span className="tool-label">Open</span>
                             </a>
                         )}
                     </div>

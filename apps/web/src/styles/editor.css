@@ -405,10 +405,14 @@
 }
 
 .segmented button {
-    display: grid;
-    place-items: center;
-    width: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 30px;
     height: 26px;
+    padding: 0 9px;
+    font-size: 12px;
     border: 0;
     border-radius: 999px;
     background: none;
@@ -783,7 +787,7 @@
         min-width: 0;
     }
     .side-toggle,
-    .editor-bar .chip,
+    .editor-bar .chip:not(.chip-button),
     .frame-lights,
     .segmented {
         display: none;
@@ -959,4 +963,57 @@
 
 .offline-confirm .dialog-actions {
     margin-top: 14px;
+}
+
+/* ---- words on the controls ------------------------------------------------------ */
+
+.editor-bar .btn-ghost {
+    padding: 0 10px;
+    white-space: nowrap;
+}
+
+.frame-tools .btn-sm {
+    white-space: nowrap;
+}
+
+/* The preview's tools keep their words while there is room for them: the address
+   gives way first. */
+.frame {
+    container-type: inline-size;
+}
+
+.frame-chrome {
+    grid-template-columns: auto 1fr auto;
+}
+
+@container (max-width: 660px) {
+    .frame-address {
+        display: none;
+    }
+}
+
+@container (max-width: 470px) {
+    .segmented .tool-label {
+        display: none;
+    }
+    .segmented button {
+        padding: 0;
+    }
+}
+
+/* On a phone the bar keeps the way back, the name and Publish. Address and Settings
+   are in the account menu, in words; History is a tab at the bottom. */
+@media (max-width: 900px) {
+    .editor-bar .bar-wide,
+    .editor-bar .bar-back .bar-label {
+        display: none;
+    }
+}
+
+.live-menu .menu {
+    min-width: 280px;
+}
+
+.live-menu .menu-head .mono {
+    font-size: 11.5px;
 }

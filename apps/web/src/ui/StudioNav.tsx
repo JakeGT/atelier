@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import type { Org, Session } from "../lib/api";
 import { api, can } from "../lib/api";
 import { navigate, type Theme, useClickOutside } from "../lib/hooks";
-import { Dialog, Dots, ThemeToggle, UserMenu, useToast, Wordmark } from "./kit";
+import { Dialog, Dots, UserMenu, useToast, Wordmark } from "./kit";
 
 interface StudioNavProps {
     session: Session;
@@ -95,8 +95,7 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                 >
                     <Settings /> Studio
                 </button>
-                <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-                <UserMenu session={session} />
+                <UserMenu session={session} theme={theme} onToggleTheme={onToggleTheme} />
             </nav>
 
             {creating && <NewStudio onClose={() => setCreating(false)} onOrgsChanged={onOrgsChanged} />}

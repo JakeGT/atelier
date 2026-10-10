@@ -12,6 +12,8 @@ interface Props {
     mayManage: boolean;
     // Shown the option to take the website offline.
     canPublish: boolean;
+    // Open on the "take offline?" confirmation (the person chose Unpublish elsewhere).
+    startUnpublish?: boolean;
     // The website was taken offline.
     onUnpublished: () => void;
     onClose: () => void;
@@ -25,13 +27,13 @@ const STATUS: Record<string, { label: string; chip: string }> = {
 };
 
 // Where the website lives: its address, and the owner's own domains.
-export function Address({ project, api, mayManage, canPublish, onUnpublished, onClose }: Props) {
+export function Address({ project, api, mayManage, canPublish, startUnpublish = false, onUnpublished, onClose }: Props) {
     const toast = useToast();
     const [hosting, setHosting] = useState<Hosting | null>(null);
     const [hostname, setHostname] = useState("");
     const [busy, setBusy] = useState(false);
     const [copied, setCopied] = useState(false);
-    const [confirmOffline, setConfirmOffline] = useState(false);
+    const [confirmOffline, setConfirmOffline] = useState(startUnpublish);
 
     const load = useCallback(async () => {
         try {
@@ -153,24 +155,13 @@ export function Address({ project, api, mayManage, canPublish, onUnpublished, on
                                         <span className="row-actions">
                                             <span className={`chip ${s.chip}`}>{s.label}</span>
                                             {mayManage && d.status !== "active" && (
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-sm btn-ghost btn-icon"
-                                                    title="Check again"
-                                                    disabled={busy}
-                                                    onClick={() => void check(d)}
-                                                >
-                                                    <RefreshCw />
+                                                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void check(d)}>
+                                                    <RefreshCw /> Check again
                                                 </button>
                                             )}
                                             {mayManage && (
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-sm btn-ghost btn-icon"
-                                                    title={`Disconnect ${d.hostname}`}
-                                                    onClick={() => void remove(d)}
-                                                >
-                                                    <Trash2 />
+                                                <button type="button" className="btn btn-sm btn-danger" onClick={() => void remove(d)}>
+                                                    <Trash2 /> Remove
                                                 </button>
                                             )}
                                         </span>
