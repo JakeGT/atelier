@@ -53,7 +53,7 @@ export function Gallery({
             <Dialog onClose={onClose} wide>
                 <div className="gallery-look-head">
                     <button type="button" className="btn btn-sm" onClick={() => setLooking(null)}>
-                        <ArrowLeft /> All starting points
+                        <ArrowLeft /> All designs and templates
                     </button>
                     <div className="segmented" role="radiogroup" aria-label="Preview size">
                         {/* biome-ignore lint/a11y/useSemanticElements: a button group styled as a segmented control */}
@@ -140,7 +140,7 @@ export function Gallery({
 
     return (
         <Dialog onClose={onClose} wide>
-            <h2 className="display">Choose a starting point</h2>
+            <h2 className="display">Designs and templates</h2>
             <p className="muted">
                 A new website can begin empty, or as one of these: a small finished website that is there the moment you open it, for your
                 assistant to make yours.
