@@ -249,6 +249,19 @@ the identity provider's groups; Atelier admits whoever signs in. Everyone gets
 one personal studio from the start and a three-step introduction the first
 time. Adding people to shared studios stays in Atelier. Details in docs/07 §3.
 
+### Live activity and shared editing (branch `live-activity`, 2026-10-10)
+
+Asked for by the owner. While the assistant works the editor shows what it has
+just done in plain words, the preview fills in as pages are written, and the
+request can be stopped, given more time, or carried on after a pause. Several
+people on one website see each other, who is typing and whose request is being
+worked on, and stay in step without reloading. Details in docs/08 (last two
+sections) and `docs/design/07-working-and-sharing.md`.
+
+Not done: a plain-language *intent* for each step ("adding an opening-hours
+section"), which needs the assistant to state its plan; live cursors or
+simultaneous editing of the same wording (the second save is refused instead).
+
 ---
 
 ## P4 — BYOK providers, templates & operator console

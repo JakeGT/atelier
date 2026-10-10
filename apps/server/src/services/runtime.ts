@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentRuntime } from "./agent.ts";
+import { type AgentRuntime, RunInterrupted } from "./agent.ts";
 import { type RunState, RunTracker } from "./runs.ts";
 import { type Checkpoint, Workspace } from "./workspace.ts";
 
@@ -13,6 +13,8 @@ export interface RunRequest {
     instructions: string;
     apiUrl: string;
     agentToken: string;
+    // Pick up the previous request where it left off.
+    resume?: boolean;
 }
 
 export interface PreviewFile {
@@ -39,6 +41,10 @@ export interface WorkspaceRuntime {
     ensure(projectId: string): Promise<{ workspaceId: string }>;
     startRun(projectId: string, req: RunRequest): Promise<RunState>;
     getRun(projectId: string, runId: string): Promise<RunState | null>;
+    // Stops a run in progress; what it has done is kept. False if it is not running.
+    stopRun(projectId: string, runId: string): Promise<boolean>;
+    // Gives a run in progress more time. Null if it is not running.
+    extendRun(projectId: string, runId: string): Promise<RunState | null>;
     listCheckpoints(projectId: string): Promise<Checkpoint[]>;
     restore(projectId: string, sha: string): Promise<string | null>;
     head(projectId: string): Promise<string | null>;
@@ -71,11 +77,19 @@ export function runtimeSecret(secretsKey: string, projectId: string): string {
 // Runs the agent in a workspace and saves the result as a version. Shared by the
 // in-container daemon and LocalRuntime so both behave identically.
 export function startAgentRun(tracker: RunTracker, ws: Workspace, agent: AgentRuntime, req: RunRequest): RunState | "busy" {
-    return tracker.start(async () => {
+    const title = req.prompt.replace(/\s+/g, " ").slice(0, 80);
+    return tracker.start(async ({ control, step }) => {
         await ws.init();
-        const result = await agent.run({ workspaceDir: ws.dir, ...req });
-        const checkpoint = await ws.checkpoint(req.prompt.replace(/\s+/g, " ").slice(0, 80));
-        return { result, checkpoint };
+        try {
+            const result = await agent.run({ workspaceDir: ws.dir, ...req, control, onStep: step });
+            return { result, checkpoint: await ws.checkpoint(title) };
+        } catch (err) {
+            if (!(err instanceof RunInterrupted)) throw err;
+            // Stopped, or out of time: keep what it had done, as a version of its own,
+            // so it can be looked at, carried on from, or gone back from.
+            const checkpoint = await ws.checkpoint(`${title} (unfinished)`);
+            return { result: err.partial, checkpoint, status: err.reason };
+        }
     });
 }
 
@@ -120,6 +134,14 @@ export class LocalRuntime implements WorkspaceRuntime {
 
     async getRun(projectId: string, runId: string) {
         return this.tracker(projectId).get(runId);
+    }
+
+    async stopRun(projectId: string, runId: string) {
+        return this.tracker(projectId).stop(runId);
+    }
+
+    async extendRun(projectId: string, runId: string) {
+        return this.tracker(projectId).extend(runId);
     }
 
     listCheckpoints(projectId: string) {
@@ -315,6 +337,16 @@ export class ContainerRuntime implements WorkspaceRuntime {
             if (err.message === "not found") return null;
             throw err;
         });
+    }
+    async stopRun(projectId: string, runId: string) {
+        if (!isUuid(runId)) return false;
+        const res = await this.call(projectId, "POST", `/runs/${runId}/stop`, {});
+        return res.ok;
+    }
+    async extendRun(projectId: string, runId: string) {
+        if (!isUuid(runId)) return null;
+        const res = await this.call(projectId, "POST", `/runs/${runId}/extend`, {});
+        return res.ok ? ((await res.json()) as RunState) : null;
     }
     async listCheckpoints(projectId: string) {
         return (await this.json<{ checkpoints: Checkpoint[] }>(projectId, "GET", "/checkpoints")).checkpoints;

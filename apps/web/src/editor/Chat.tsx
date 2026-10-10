@@ -1,12 +1,12 @@
-import { ArrowUp, RotateCcw } from "lucide-react";
+import { ArrowUp, Clock, Play, RotateCcw, Square } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { AgentToolEvent, ThreadMessage } from "../lib/api";
-import { useElapsed } from "../lib/hooks";
+import { clock, stepDone, stepList, summary } from "../lib/activity";
+import type { Pulse, Run, ThreadMessage } from "../lib/api";
 import { Dots } from "../ui/kit";
 import { Prose } from "./Prose";
 
-export type Message = Pick<ThreadMessage, "id" | "role" | "text" | "tools">;
+export type Message = Pick<ThreadMessage, "id" | "role" | "text" | "tools"> & { authorId?: string | null };
 
 const SUGGESTIONS = [
     "Build a home page with a hero, three features and a contact section",
@@ -15,48 +15,48 @@ const SUGGESTIONS = [
     "Make it work beautifully on a phone",
 ];
 
-// "write" ×2, "atelier-content_content_upsert_draft" ×1  →  "Wrote 2 files · saved content"
-function summarize(tools: AgentToolEvent[]): string {
-    const done = tools.filter((t) => t.state === "completed");
-    const count = (pred: (n: string) => boolean) => done.filter((t) => pred(t.name)).length;
-    const parts: string[] = [];
-    const wrote = count((n) => n === "write");
-    const edited = count((n) => n === "edit" || n === "patch" || n === "multiedit");
-    const content = count((n) => n.includes("content_upsert"));
-    const ran = count((n) => n === "bash");
-    const read = count((n) => ["read", "glob", "grep", "list"].includes(n) || n.includes("content_get") || n.includes("content_list"));
-    if (wrote) parts.push(`wrote ${wrote} ${wrote === 1 ? "file" : "files"}`);
-    if (edited) parts.push(`made ${edited} ${edited === 1 ? "edit" : "edits"}`);
-    if (content) parts.push(`saved ${content === 1 ? "content" : `${content} content drafts`}`);
-    if (ran) parts.push(`ran ${ran} ${ran === 1 ? "command" : "commands"}`);
-    if (!parts.length && read) parts.push("looked through the project");
-    const text = parts.join(" · ");
-    return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
 interface ChatProps {
     messages: Message[];
     loading: boolean;
-    runningSince: string | null;
+    // The request being worked on, if any, and whose it is.
+    run: Run | null;
+    runBy: Pulse["runBy"];
+    // Other people who have this website open.
+    people: Pulse["people"];
+    // Names of the people in the conversation, and which of them is you.
+    authors: Record<string, string>;
+    me: string;
     ready: boolean;
     starting: boolean;
     // Why the conversation cannot be continued here (a viewer, an archived website), if so.
     locked?: string | null;
     onSend: (prompt: string) => void;
+    onTyping: (typing: boolean) => void;
+    onStop: () => void;
+    onMoreTime: () => void;
+    onCarryOn: () => void;
     onRetryWorkspace?: () => void;
 }
 
-export function Chat({ messages, loading, runningSince, ready, starting, locked, onSend, onRetryWorkspace }: ChatProps) {
+// "Maren", "Maren and Sol", "Maren, Sol and 2 others"
+function names(list: string[]): string {
+    const first = list.map((n) => n.split(/[\s@]/)[0] || n);
+    if (first.length <= 2) return first.join(" and ");
+    return `${first.slice(0, 2).join(", ")} and ${first.length - 2} ${first.length - 2 === 1 ? "other" : "others"}`;
+}
+
+export function Chat(props: ChatProps) {
+    const { messages, loading, run, runBy, people, authors, me, ready, starting, locked, onSend, onTyping, onRetryWorkspace } = props;
     const [input, setInput] = useState("");
     const scroller = useRef<HTMLDivElement>(null);
     const textarea = useRef<HTMLTextAreaElement>(null);
-    const elapsed = useElapsed(runningSince);
-    const busy = runningSince !== null;
+    const busy = run !== null;
+    const steps = run?.steps.length ?? 0;
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the conversation grows
+    // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the conversation grows or the work moves on
     useEffect(() => {
         scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-    }, [messages.length, busy]);
+    }, [messages.length, busy, steps]);
 
     // Grow the composer with its content, up to a limit.
     // biome-ignore lint/correctness/useExhaustiveDependencies: resize when the text changes
@@ -67,11 +67,17 @@ export function Chat({ messages, loading, runningSince, ready, starting, locked,
         el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
     }, [input]);
 
+    function change(value: string) {
+        setInput(value);
+        onTyping(value.trim().length > 0);
+    }
+
     function submit(e?: FormEvent) {
         e?.preventDefault();
         const prompt = input.trim();
         if (!prompt || busy || !ready) return;
         setInput("");
+        onTyping(false);
         onSend(prompt);
     }
 
@@ -81,6 +87,10 @@ export function Chat({ messages, loading, runningSince, ready, starting, locked,
             submit();
         }
     };
+
+    const typing = people.filter((p) => p.typing).map((p) => p.name);
+    const theirs = busy && runBy && !runBy.you ? (runBy.name.split(/[\s@]/)[0] ?? runBy.name) : null;
+    const last = messages.at(-1);
 
     return (
         <section className="chat">
@@ -109,26 +119,34 @@ export function Chat({ messages, loading, runningSince, ready, starting, locked,
                         {messages.map((m) => (
                             <article key={m.id} className={`msg msg-${m.role}`}>
                                 {m.role === "user" ? (
-                                    <p>{m.text}</p>
+                                    <>
+                                        {/* With several people on one website, each request says who asked. */}
+                                        {m.authorId && m.authorId !== me && authors[m.authorId] && (
+                                            <span className="msg-author">{authors[m.authorId]}</span>
+                                        )}
+                                        <p>{m.text}</p>
+                                    </>
                                 ) : m.role === "error" ? (
                                     <p>{m.text}</p>
+                                ) : m.role === "note" ? (
+                                    <>
+                                        <p>{m.text}</p>
+                                        <Steps tools={m.tools} label="What it had done" />
+                                        {m === last && !busy && ready && (
+                                            <button type="button" className="btn btn-sm btn-primary" onClick={props.onCarryOn}>
+                                                <Play /> Carry on from here
+                                            </button>
+                                        )}
+                                    </>
                                 ) : (
                                     <>
                                         <Prose text={m.text || "Done."} />
-                                        {m.tools && m.tools.length > 0 && summarize(m.tools) && (
-                                            <p className="msg-tools mono">{summarize(m.tools)}</p>
-                                        )}
+                                        <Steps tools={m.tools} label="What I did" />
                                     </>
                                 )}
                             </article>
                         ))}
-                        {busy && (
-                            <article className="msg msg-assistant msg-working">
-                                <Dots />
-                                <span>Working</span>
-                                <span className="mono muted">{elapsed}</span>
-                            </article>
-                        )}
+                        {run && <Working run={run} whose={theirs} canAct={ready} onStop={props.onStop} onMoreTime={props.onMoreTime} />}
                     </div>
                 )}
             </div>
@@ -154,14 +172,37 @@ export function Chat({ messages, loading, runningSince, ready, starting, locked,
                         )}
                     </div>
                 )}
+                {people.length > 0 && (
+                    <p className={`composer-people ${typing.length ? "typing" : ""}`} aria-live="polite">
+                        {typing.length > 0 ? (
+                            <>
+                                <Dots /> {names(typing)} {typing.length === 1 ? "is" : "are"} typing a request. Only one request can be
+                                worked on at a time.
+                            </>
+                        ) : (
+                            <>
+                                <i className="here-dot" /> {names(people.map((p) => p.name))} {people.length === 1 ? "is" : "are"} here too.
+                                You share this conversation and this assistant.
+                            </>
+                        )}
+                    </p>
+                )}
                 <div className="composer-box">
                     <textarea
                         ref={textarea}
                         rows={1}
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={(e) => change(e.target.value)}
                         onKeyDown={onKey}
-                        placeholder={locked ? "Read-only" : busy ? "The assistant is working…" : "Describe a change…"}
+                        placeholder={
+                            locked
+                                ? "Read-only"
+                                : theirs
+                                  ? `Your assistant is working on ${theirs}'s request…`
+                                  : busy
+                                    ? "Your assistant is working…"
+                                    : "Describe a change…"
+                        }
                         disabled={!ready}
                         aria-label="Message the assistant"
                     />
@@ -169,8 +210,142 @@ export function Chat({ messages, loading, runningSince, ready, starting, locked,
                         Send <ArrowUp />
                     </button>
                 </div>
-                <p className="composer-hint mono muted">Enter to send · Shift + Enter for a new line</p>
+                <p className="composer-hint mono muted">
+                    {busy
+                        ? "You can write your next request now and send it when this one finishes."
+                        : "Enter to send · Shift + Enter for a new line"}
+                </p>
             </form>
         </section>
+    );
+}
+
+// What the assistant did, one line that opens into the steps.
+function Steps({ tools, label }: { tools: Message["tools"]; label: string }) {
+    const list = stepList(tools ?? []);
+    if (list.length === 0) return null;
+    const line = summary(tools ?? []);
+    return (
+        <details className="msg-steps">
+            <summary>
+                <span className="mono">{line || label}</span>
+                <span className="steps-toggle">
+                    {label}: {list.length} {list.length === 1 ? "step" : "steps"}
+                </span>
+            </summary>
+            <ol>
+                {list.map((s, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: a fixed list of what happened, in order
+                    <li key={i}>{s}</li>
+                ))}
+            </ol>
+        </details>
+    );
+}
+
+// How long without a new step before we say so (writing a long page takes a while).
+const QUIET_MS = 75_000;
+// How long before it would be paused that we offer more time.
+const WARN_MS = 3 * 60_000;
+
+// The request being worked on: what the assistant has just done, how long it has
+// been going, and the ways to act on it. It never claims to know how far along
+// it is, because it does not.
+function Working({
+    run,
+    whose,
+    canAct,
+    onStop,
+    onMoreTime,
+}: {
+    run: Run;
+    whose: string | null;
+    canAct: boolean;
+    onStop: () => void;
+    onMoreTime: () => void;
+}) {
+    const [now, setNow] = useState(Date.now());
+    const [open, setOpen] = useState(false);
+    const [stopping, setStopping] = useState(false);
+    useEffect(() => {
+        const t = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(t);
+    }, []);
+
+    const list = stepList(run.steps);
+    const lastStep = run.steps.at(-1);
+    const quiet = now - new Date(run.lastActivityAt).getTime();
+    const left = new Date(run.deadlineAt).getTime() - now;
+    const headline = stopping
+        ? "Stopping…"
+        : !lastStep
+          ? "Reading your request and looking at the website"
+          : quiet > QUIET_MS
+            ? "Still working. This step is taking longer than usual"
+            : "Working on the next step";
+
+    return (
+        <article className="msg msg-assistant working" aria-live="polite">
+            <div className="working-head">
+                <Dots />
+                <span className="working-now">
+                    {whose && <span className="working-whose">{whose}'s request · </span>}
+                    {headline}
+                </span>
+                <span className="mono muted">{clock(now - new Date(run.startedAt).getTime())}</span>
+            </div>
+            {lastStep && (
+                <p className="working-last">Just finished: {stepDone(lastStep).charAt(0).toLowerCase() + stepDone(lastStep).slice(1)}.</p>
+            )}
+
+            {list.length > 1 && (
+                <>
+                    <button type="button" className="link working-toggle" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+                        {open ? "Hide" : "Show"} the {list.length} steps so far
+                    </button>
+                    {open && (
+                        <ol className="working-steps">
+                            {list.map((s, i) => (
+                                // biome-ignore lint/suspicious/noArrayIndexKey: a growing list of what happened, in order
+                                <li key={i}>{s}</li>
+                            ))}
+                        </ol>
+                    )}
+                </>
+            )}
+
+            {left < WARN_MS && !stopping && (
+                <p className="working-time">
+                    <Clock />
+                    <span>
+                        This is a long one. It will be paused in {clock(left)} so it can't run on unnoticed; what it has done will be kept
+                        and you can carry on from there.
+                    </span>
+                    {canAct && run.canExtend && (
+                        <button type="button" className="btn btn-sm" onClick={onMoreTime}>
+                            Give it 10 more minutes
+                        </button>
+                    )}
+                </p>
+            )}
+
+            {canAct && (
+                <div className="working-actions">
+                    <button
+                        type="button"
+                        className="btn btn-sm"
+                        disabled={stopping}
+                        onClick={() => {
+                            setStopping(true);
+                            onStop();
+                        }}
+                        title="Stop now. What it has done so far is kept as a version."
+                    >
+                        <Square /> Stop
+                    </button>
+                    <span className="muted">Stopping keeps what it has done so far.</span>
+                </div>
+            )}
+        </article>
     );
 }

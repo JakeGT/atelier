@@ -128,6 +128,8 @@ export interface Checkpoint {
 export interface AgentToolEvent {
     name: string;
     state: string;
+    // For file tools: which file, relative to the website.
+    target?: string | null;
 }
 
 export interface AgentResult {
@@ -138,19 +140,37 @@ export interface AgentResult {
 
 export interface Run {
     id: string;
-    status: "running" | "done" | "failed";
+    status: "running" | "done" | "failed" | "stopped" | "timed_out";
     startedAt: string;
     result: AgentResult | null;
     error: string | null;
     checkpoint: string | null;
+    // While it runs: what it has done so far, when it last did something, when
+    // it will be paused for taking too long, and whether it can be given more time.
+    steps: AgentToolEvent[];
+    lastActivityAt: string;
+    deadlineAt: string;
+    canExtend: boolean;
+}
+
+// What an open editor learns every couple of seconds: who else has this website
+// open, the request being worked on (and whose it is), and a stamp that changes
+// whenever anything about the website does.
+export interface Pulse {
+    people: { id: string; name: string; typing: boolean }[];
+    run: Run | null;
+    runBy: { id: string; name: string; you: boolean } | null;
+    stamp: number;
 }
 
 export interface ThreadMessage {
     id: string;
-    role: "user" | "assistant" | "error";
+    // "note": the request was stopped or ran out of time, and can be carried on.
+    role: "user" | "assistant" | "error" | "note";
     text: string;
     tools: AgentToolEvent[] | null;
     runId: string | null;
+    authorId?: string | null;
     createdAt: string;
 }
 
@@ -352,7 +372,14 @@ export function orgApi(org: string) {
         createSession: (projectId: string) => post<{ session: AgentSession }>(`${p(projectId)}/sessions`, {}).then((b) => b.session),
         startRun: (projectId: string, sessionId: string, prompt: string) =>
             post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { prompt }).then((b) => b.run),
-        thread: (projectId: string) => get<{ messages: ThreadMessage[]; activeRun: Run | null }>(`${p(projectId)}/messages`),
+        // Pick up the request that was stopped or ran out of time.
+        carryOn: (projectId: string, sessionId: string) =>
+            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { resume: true }).then((b) => b.run),
+        stopRun: (projectId: string, runId: string) => post<{ ok: boolean }>(`${p(projectId)}/runs/${runId}/stop`),
+        extendRun: (projectId: string, runId: string) => post<{ run: Run }>(`${p(projectId)}/runs/${runId}/extend`).then((b) => b.run),
+        pulse: (projectId: string, typing: boolean) => post<Pulse>(`${p(projectId)}/pulse`, { typing }),
+        thread: (projectId: string) =>
+            get<{ messages: ThreadMessage[]; activeRun: Run | null; authors: Record<string, string> }>(`${p(projectId)}/messages`),
         getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => b.run),
 
         listCheckpoints: (projectId: string) =>
@@ -361,8 +388,12 @@ export function orgApi(org: string) {
         previewUrl: (projectId: string) => get<{ url: string }>(`${p(projectId)}/preview-url`).then((b) => b.url),
 
         listContent: (projectId: string) => get<{ documents: ContentDocument[] }>(`${p(projectId)}/content`).then((b) => b.documents),
-        saveContent: (projectId: string, kind: string, slug: string, draft: Record<string, unknown>) =>
-            put<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}`, draft).then((b) => b.document),
+        // `rev`: the revision being edited. The save is refused if someone else changed it meanwhile.
+        saveContent: (projectId: string, kind: string, slug: string, draft: Record<string, unknown>, rev?: number) =>
+            put<{ document: ContentDocument }>(
+                `${p(projectId)}/content/${kind}/${slug}${rev === undefined ? "" : `?rev=${rev}`}`,
+                draft,
+            ).then((b) => b.document),
 
         hosting: (projectId: string) => get<Hosting>(`${p(projectId)}/hosting`),
         addDomain: (projectId: string, hostname: string) =>

@@ -738,10 +738,11 @@ export class PostgresStore implements Store {
                             body: string;
                             tools: AgentMessage["tools"];
                             run_id: string | null;
+                            author_id: string | null;
                             created_at: Ts;
                         }[]
                     >`
-                        SELECT id, project_id, role, body, tools, run_id, created_at FROM (
+                        SELECT id, project_id, role, body, tools, run_id, author_id, created_at FROM (
                             SELECT * FROM agent_messages WHERE project_id = ${projectId} ORDER BY seq DESC LIMIT ${limit}
                         ) recent ORDER BY seq`;
                     return rows.map((r) => ({
@@ -751,6 +752,7 @@ export class PostgresStore implements Store {
                         text: r.body,
                         tools: r.tools,
                         runId: r.run_id,
+                        authorId: r.author_id,
                         createdAt: isoNow(r.created_at),
                     }));
                 }),

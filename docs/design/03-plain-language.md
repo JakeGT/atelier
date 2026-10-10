@@ -50,6 +50,8 @@ list. Before inventing a term, look for it here; when you add one, add it here.
 | **Your own domain** | An address the person owns, such as `www.example.com` | Custom domain, canonical origin |
 | **Provider** | A company whose AI the assistant can use | Vendor, upstream |
 | **API key** | The password-like code a provider gives you | Secret, credential, token |
+| **Paused** | A request that ran out of time; its work is kept | Timed out, killed |
+| **Carry on from here** | Continue a request that was stopped or paused | Resume, retry |
 | **Archive** | Hide a website and stop its assistant; nothing is deleted | Disable, deactivate |
 | **Member** | Someone who can open a studio | User, principal |
 

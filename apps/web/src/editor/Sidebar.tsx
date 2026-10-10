@@ -1,5 +1,5 @@
 import { ChevronRight, Undo2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Checkpoint, ContentDocument, Release } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
 
@@ -185,15 +185,35 @@ function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boo
     const [fields, setFields] = useState<Field[]>(() => toFields(doc.draft));
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
-    // When the document changes underneath (the assistant saved a new draft), show that.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the revision changes
+    // When the document changes underneath (someone else or the assistant saved it):
+    // show the new wording, unless this person has unsaved edits. Those are kept,
+    // and they are told, instead of having their typing replaced.
+    const [based, setBased] = useState(doc.rev);
+    const fieldsRef = useRef(fields);
+    fieldsRef.current = fields;
+    const basedDraft = useRef(doc.draft);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: react only when the revision changes
     useEffect(() => {
+        if (doc.rev === based) return;
+        // What is on screen already matches the new version (this person just saved it): nothing to resolve.
+        const same = JSON.stringify(fieldsRef.current) === JSON.stringify(toFields(doc.draft));
+        const unsaved = JSON.stringify(fieldsRef.current) !== JSON.stringify(toFields(basedDraft.current));
+        if (unsaved && !same) return;
         setFields(toFields(doc.draft));
+        setBased(doc.rev);
+        basedDraft.current = doc.draft;
         setError(null);
     }, [doc.rev]);
+    const outdated = doc.rev !== based;
+    const useTheirs = () => {
+        setFields(toFields(doc.draft));
+        setBased(doc.rev);
+        basedDraft.current = doc.draft;
+        setError(null);
+    };
 
     const changed = JSON.stringify(doc.draft) !== JSON.stringify(doc.published);
-    const dirty = JSON.stringify(fields) !== JSON.stringify(toFields(doc.draft));
+    const dirty = JSON.stringify(fields) !== JSON.stringify(toFields(outdated ? basedDraft.current : doc.draft));
 
     async function save() {
         const draft: Record<string, unknown> = {};
@@ -264,14 +284,23 @@ function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boo
                             />
                         </label>
                     ))}
-                    {error && <p className="doc-error">{error}</p>}
+                    {outdated && (
+                        <p className="doc-error">
+                            This was changed by someone else while you were editing. Your edits are still here but can't be saved over
+                            theirs.{" "}
+                            <button type="button" className="link" onClick={useTheirs}>
+                                Show their version instead
+                            </button>
+                        </p>
+                    )}
+                    {error && !outdated && <p className="doc-error">{error}</p>}
                     <div className="doc-foot">
                         <span className="mono muted">Last changed {timeAgo(doc.updatedAt)}</span>
                         {canEdit && (
                             <button
                                 type="button"
                                 className="btn btn-sm btn-primary"
-                                disabled={saving || !dirty}
+                                disabled={saving || !dirty || outdated}
                                 onClick={save}
                                 title="Saved changes show in the preview. They go public when you publish."
                             >

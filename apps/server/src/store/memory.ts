@@ -442,6 +442,7 @@ export class MemoryStore implements Store {
                 text: input.text,
                 tools: input.tools ?? null,
                 runId: input.runId,
+                authorId: input.authorId,
                 createdAt: now(),
             });
         },

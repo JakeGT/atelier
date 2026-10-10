@@ -22,7 +22,7 @@ const PREVIEW_HEADERS = {
 
 // The assistant and its workspace: sessions, runs, the conversation, versions, preview.
 export function workspaceRoutes(api: Api): void {
-    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey } = api;
+    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence } = api;
     const previewKey = `${secretsKey}:preview`;
     const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
 
@@ -58,8 +58,14 @@ export function workspaceRoutes(api: Api): void {
         const session = await store.agentSessions.get(org.id, param(c, "sessionId"));
         if (!session || session.projectId !== project.id) return c.json({ error: "not found" }, 404);
         const body = await c.req.json().catch(() => null);
-        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-        if (!prompt || prompt.length > 20_000) return c.json({ error: "prompt required (max 20000 characters)" }, 400);
+        // "Carry on": pick up the request that was stopped or ran out of time.
+        const resume = body?.resume === true;
+        let prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+        if (resume && !prompt) {
+            const last = (await store.messages.list(org.id, project.id)).filter((m) => m.role === "user").at(-1);
+            prompt = last ? `Carry on with this request from where you left off, and finish it:\n\n${last.text}` : "";
+        }
+        if (!prompt || prompt.length > 21_000) return c.json({ error: "prompt required (max 20000 characters)" }, 400);
 
         // The daily ceiling is a safety net against a runaway bill on the owner's
         // own key: refuse clearly rather than overrun quietly (docs/12 §3).
@@ -97,13 +103,15 @@ export function workspaceRoutes(api: Api): void {
                 instructions: agentInstructions(project),
                 apiUrl,
                 agentToken,
+                resume,
             });
+            presence.setRun(project.id, { runId: run.id, userId: c.get("user").id, name: c.get("user").name });
             await store.messages.add({
                 tenantId: org.id,
                 projectId: project.id,
                 sessionId: session.id,
                 role: "user",
-                text: prompt,
+                text: resume && !body?.prompt ? "Carry on." : prompt,
                 runId: run.id,
                 authorId: c.get("user").id,
             });
@@ -118,8 +126,22 @@ export function workspaceRoutes(api: Api): void {
     const settle = async (tenantId: string, projectId: string, run: RunState): Promise<void> => {
         if (run.status === "running") return;
         const base = { tenantId, projectId, sessionId: null, runId: run.id, authorId: null };
+        presence.clearRun(projectId, run.id);
+        presence.touch(projectId);
         if (run.status === "done" && run.result) {
             await store.messages.add({ ...base, role: "assistant", text: run.result.text, tools: run.result.toolEvents });
+        } else if (run.status === "stopped" || run.status === "timed_out") {
+            // Not an error: what was done is kept as a version, and it can be carried on.
+            const minutes = Math.max(
+                1,
+                Math.round((new Date(run.finishedAt ?? run.startedAt).getTime() - new Date(run.startedAt).getTime()) / 60_000),
+            );
+            const kept = run.checkpoint ? " What it had done is saved as a version." : " It had not changed anything yet.";
+            const text =
+                run.status === "stopped"
+                    ? `You stopped this request.${kept}`
+                    : `This request ran for ${minutes} minutes and was paused before it finished.${kept}`;
+            await store.messages.add({ ...base, role: "note", text, tools: run.result?.toolEvents ?? [] });
         } else {
             await store.messages.add({ ...base, role: "error", text: run.error ?? "The assistant stopped unexpectedly." });
         }
@@ -145,6 +167,57 @@ export function workspaceRoutes(api: Api): void {
         }
     });
 
+    // Stop the request being worked on. Anyone who can edit may: it is the website's
+    // one assistant, whoever asked.
+    route("post", `${PROJECT}/runs/:runId/stop`, "project.edit", async (c) => {
+        try {
+            const ok = await runtime.stopRun(c.get("project").id, param(c, "runId"));
+            return ok ? c.json({ ok: true }) : c.json({ error: "that request has already finished" }, 409);
+        } catch (err) {
+            return runtimeError(c, err);
+        }
+    });
+
+    // Give the request being worked on more time before it is paused.
+    route("post", `${PROJECT}/runs/:runId/extend`, "project.edit", async (c) => {
+        try {
+            const run = await runtime.extendRun(c.get("project").id, param(c, "runId"));
+            return run ? c.json({ run }) : c.json({ error: "that request has already finished" }, 409);
+        } catch (err) {
+            return runtimeError(c, err);
+        }
+    });
+
+    // The heartbeat of an open editor. It says "I am here" (and whether I am
+    // typing), and answers with what several people sharing a website need to
+    // know: who else is here, the request being worked on and how far it has got,
+    // and whether anything has changed since they last looked.
+    route("post", `${PROJECT}/pulse`, "project.read", async (c) => {
+        const org = c.get("org");
+        const project = c.get("project");
+        const user = c.get("user");
+        const body = await c.req.json().catch(() => null);
+        presence.seen(project.id, user, body?.typing === true);
+
+        let run: RunState | null = null;
+        const active = presence.run(project.id);
+        if (active && !project.archivedAt) {
+            const state = await runtime.getRun(project.id, active.runId).catch(() => undefined);
+            if (state?.status === "running") run = state;
+            else if (state) await settle(org.id, project.id, state);
+            else if (state === null) {
+                presence.clearRun(project.id, active.runId);
+                presence.touch(project.id);
+            }
+        }
+        return c.json({
+            people: presence.others(project.id, user.id),
+            run,
+            runBy: run && active ? { id: active.userId, name: active.name, you: active.userId === user.id } : null,
+            stamp: presence.stamp(project.id),
+        });
+    });
+
     // The project's conversation, plus the run still in progress (if any). A
     // request whose reply was never collected (the tab was closed) is settled
     // here, so the thread is complete whichever browser opens it next.
@@ -157,8 +230,14 @@ export function workspaceRoutes(api: Api): void {
         let activeRun: RunState | null = null;
         if (pending?.runId && !project.archivedAt) {
             const run = await runtime.getRun(project.id, pending.runId).catch(() => undefined);
-            if (run?.status === "running") activeRun = run;
-            else if (run) await settle(tenantId, project.id, run);
+            if (run?.status === "running") {
+                activeRun = run;
+                // After a restart the server has forgotten who is being worked for: pick it up again.
+                if (!presence.run(project.id)) {
+                    const who = pending.authorId ? await store.users.findById(pending.authorId) : null;
+                    presence.setRun(project.id, { runId: run.id, userId: who?.id ?? "", name: who?.name ?? "Someone" });
+                }
+            } else if (run) await settle(tenantId, project.id, run);
             else if (run === null) {
                 // The workspace restarted mid-run and no longer knows it.
                 await store.messages.add({
@@ -173,7 +252,12 @@ export function workspaceRoutes(api: Api): void {
             }
             if (!activeRun && run !== undefined) messages = await store.messages.list(tenantId, project.id);
         }
-        return c.json({ messages, activeRun });
+        // Names for the people in the conversation, so each request says who asked.
+        const authors: Record<string, string> = {};
+        for (const id of new Set(messages.map((m) => m.authorId).filter((x): x is string => x !== null))) {
+            authors[id] = (await store.users.findById(id))?.name ?? "Someone";
+        }
+        return c.json({ messages, activeRun, authors });
     });
 
     route("get", `${PROJECT}/checkpoints`, "project.read", async (c) => {

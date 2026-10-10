@@ -55,6 +55,7 @@ app.post("/runs", async (c) => {
         instructions?: unknown;
         apiUrl?: unknown;
         agentToken?: unknown;
+        resume?: unknown;
     } | null;
     if (
         !body ||
@@ -73,6 +74,7 @@ app.post("/runs", async (c) => {
         instructions,
         apiUrl: body.apiUrl,
         agentToken: body.agentToken,
+        resume: body.resume === true,
     });
     if (run === "busy") return c.json({ error: "busy" }, 409);
     return c.json(run, 202);
@@ -84,6 +86,13 @@ app.get("/status", (c) => c.json({ busy: runs.busy }));
 app.get("/runs/:id", (c) => {
     const run = runs.get(c.req.param("id"));
     return run ? c.json(run) : c.json({ error: "not found" }, 404);
+});
+
+// Stop a run in progress (what it has done is kept), or give it more time.
+app.post("/runs/:id/stop", (c) => (runs.stop(c.req.param("id")) ? c.json({ ok: true }) : c.json({ error: "not running" }, 409)));
+app.post("/runs/:id/extend", (c) => {
+    const run = runs.extend(c.req.param("id"));
+    return run ? c.json(run) : c.json({ error: "not running" }, 409);
 });
 
 app.get("/checkpoints", async (c) => {

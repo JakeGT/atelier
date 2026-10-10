@@ -28,13 +28,22 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
     app.get("/auth/login", async (c) => {
         // Local development only (config refuses AUTH_MODE=dev off localhost).
         if (config.authMode === "dev") {
-            const user = await store.users.upsertIdentity({
-                issuer: "dev",
-                subject: "local",
-                email: "you@localhost",
-                name: "Local Developer",
-                admin: true,
-            });
+            // `?as=sol` signs in as a second local person, for trying things that need two.
+            const as = (c.req.query("as") ?? "")
+                .toLowerCase()
+                .replace(/[^a-z]/g, "")
+                .slice(0, 20);
+            const user = await store.users.upsertIdentity(
+                as
+                    ? {
+                          issuer: "dev",
+                          subject: `local-${as}`,
+                          email: `${as}@atelier.test`,
+                          name: as.charAt(0).toUpperCase() + as.slice(1),
+                          admin: false,
+                      }
+                    : { issuer: "dev", subject: "local", email: "you@localhost", name: "Local Developer", admin: true },
+            );
             await ensurePersonalStudio(store, user);
             const { id } = await sessions.createSession(user.id);
             writeCookie(c, "session", secure, id);

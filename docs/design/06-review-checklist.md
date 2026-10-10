@@ -44,6 +44,13 @@ to the interface ships, and as a full audit of every screen when a phase ends.
 - [ ] Waiting is shown in words.
 - [ ] Errors say what happened, whether anything changed, and what to do.
 
+**Working and sharing** ([07](07-working-and-sharing.md))
+
+- [ ] Any wait over ten seconds says what is happening, in words, and can be stopped.
+- [ ] Nothing claims progress or time remaining that we do not actually know.
+- [ ] Interrupted work is kept and can be carried on.
+- [ ] With two people on the same screen: each sees the other's changes without reloading, and neither can silently overwrite the other.
+
 **Look** ([05](05-visual-language.md))
 
 - [ ] Tokens only; both themes checked.
