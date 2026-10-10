@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type AgentRuntime, RunInterrupted } from "./agent.ts";
-import { type RunState, RunTracker } from "./runs.ts";
+import { type RunState, RunTracker, wholeRun } from "./runs.ts";
 import { type Checkpoint, Workspace } from "./workspace.ts";
 
 export type { RunState } from "./runs.ts";
@@ -337,12 +337,25 @@ export class ContainerRuntime implements WorkspaceRuntime {
         return (await res.json()) as T;
     }
 
-    startRun(projectId: string, req: RunRequest) {
-        return this.json<RunState>(projectId, "POST", "/runs", req);
+    // A workspace keeps the runtime it was created with until it is recreated. Before
+    // a new request, one that is idle is moved to the current runtime (the
+    // provisioner replaces a container whose definition has changed; its files are on
+    // a volume and stay). One that is busy is left alone.
+    private async bringUpToDate(projectId: string): Promise<void> {
+        const status = await this.call(projectId, "GET", "/status", undefined, 5_000, false)
+            .then((r) => (r.ok ? (r.json() as Promise<{ busy?: boolean }>) : null))
+            .catch(() => null);
+        if (status?.busy) return;
+        await this.ensure(projectId);
+    }
+
+    async startRun(projectId: string, req: RunRequest) {
+        await this.bringUpToDate(projectId).catch((err: Error) => console.warn(`could not refresh workspace ${projectId}: ${err.message}`));
+        return wholeRun(await this.json<RunState>(projectId, "POST", "/runs", req));
     }
     async getRun(projectId: string, runId: string) {
         if (!isUuid(runId)) return null;
-        return this.json<RunState>(projectId, "GET", `/runs/${runId}`).catch((err: Error) => {
+        return this.json<RunState>(projectId, "GET", `/runs/${runId}`).then(wholeRun, (err: Error) => {
             if (err.message === "not found") return null;
             throw err;
         });
@@ -355,7 +368,7 @@ export class ContainerRuntime implements WorkspaceRuntime {
     async extendRun(projectId: string, runId: string) {
         if (!isUuid(runId)) return null;
         const res = await this.call(projectId, "POST", `/runs/${runId}/extend`, {});
-        return res.ok ? ((await res.json()) as RunState) : null;
+        return res.ok ? wholeRun((await res.json()) as RunState) : null;
     }
     async listCheckpoints(projectId: string) {
         return (await this.json<{ checkpoints: Checkpoint[] }>(projectId, "GET", "/checkpoints")).checkpoints;

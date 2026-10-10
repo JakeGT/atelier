@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Bold, Italic, Link2, List, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ContentDocument, ContentField } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
 import { Dialog, Dots } from "../ui/kit";
@@ -7,6 +7,11 @@ import { PictureField } from "./Media";
 
 // Editing a piece of wording: proper fields with plain labels, in whichever place
 // it is being edited (the pop-up from the editor, or the Content page). ADR-0014.
+//
+// Whatever shape the saved content has, a person sees fields: a line of text, a
+// paragraph, a list, a group of related fields, a set of entries with parts.
+// Content is stored as JSON because that suits the assistant; a person is never
+// shown it or asked to write it.
 
 // "heroTitle" / "hero_title" -> "Hero title"
 export function plainLabel(key: string): string {
@@ -18,60 +23,341 @@ export function plainLabel(key: string): string {
     return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-// What a document is called: the page it belongs to.
+// What a document is called: the page (or part of the website) it belongs to.
 export function documentName(doc: Pick<ContentDocument, "kind" | "slug">): string {
     if (doc.slug === "shared") return "On every page";
-    const name = plainLabel(doc.slug);
-    return doc.kind === "page" ? `${name} page` : name;
+    const name = plainLabel(doc.slug === "index" && doc.kind !== "page" ? doc.kind : doc.slug);
+    if (doc.kind === "page") return `${name} page`;
+    return doc.slug === "index" ? name : `${name} ${plainLabel(doc.kind).toLowerCase()}`;
 }
 
-type Shown = ContentField & { structured?: boolean };
+// ---- what kind of field a value is ---------------------------------------------------------
 
-const isLines = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+type Kind = ContentField["type"] | "link" | "group" | "number" | "yesno";
+export interface Shape {
+    key: string;
+    label: string;
+    type: Kind;
+    help?: string;
+    required?: boolean;
+    max?: number;
+    // items: the parts of each entry. group: the fields inside it.
+    parts?: Shape[];
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
+const MEDIA = /^media\/[a-z0-9][a-z0-9-]*\.(jpe?g|png|webp|avif|gif|svg)$/;
+const LINK = /^(https?:\/\/|mailto:|tel:)\S+$|^[\w./-]+\.html?([#?]\S*)?$/;
+
+// Worked out from a value, for content saved without a description of its fields.
+export function shapeOf(key: string, value: unknown): Shape {
+    const label = plainLabel(key);
+    if (typeof value === "number") return { key, label, type: "number" };
+    if (typeof value === "boolean") return { key, label, type: "yesno" };
+    if (typeof value === "string") {
+        if (MEDIA.test(value)) return { key, label, type: "image" };
+        if (LINK.test(value.trim())) return { key, label, type: "link" };
+        if (/<(p|br|strong|em|b|i|ul|ol|li|a|h[2-4]|blockquote)[\s>/]/i.test(value)) return { key, label, type: "rich" };
+        return { key, label, type: value.length > 90 || value.includes("\n") ? "long" : "text" };
+    }
+    if (Array.isArray(value)) {
+        const entries = value.filter(isObject);
+        if (entries.length === 0 || entries.length < value.length) return { key, label, type: "list" };
+        // The parts are everything any entry has, in the order they first appear.
+        const parts = new Map<string, Shape>();
+        for (const entry of entries)
+            for (const [k, v] of Object.entries(entry)) if (!parts.has(k) && v !== null && v !== undefined) parts.set(k, shapeOf(k, v));
+        return { key, label, type: "items", parts: [...parts.values()] };
+    }
+    if (isObject(value)) return { key, label, type: "group", parts: Object.entries(value).map(([k, v]) => shapeOf(k, v)) };
+    return { key, label, type: "text" };
+}
+
+const described = (f: ContentField): Shape => ({
+    key: f.key,
+    label: f.label,
+    type: f.type,
+    help: f.help,
+    required: f.required,
+    max: f.max,
+    parts: f.itemFields?.map((p) => ({ key: p.key, label: p.label, type: p.type, help: p.help, required: p.required, max: p.max })),
+});
 
 // The fields to show: as the document describes them, then any value it does not
 // describe (worked out from the value), so nothing saved is ever hidden.
-export function fieldsOf(doc: Pick<ContentDocument, "draft" | "fields">): Shown[] {
+export function fieldsOf(doc: Pick<ContentDocument, "draft" | "fields">): Shape[] {
     const draft = doc.draft ?? {};
-    const described = doc.fields ?? [];
-    const seen = new Set(described.map((f) => f.key));
-    const guessed: Shown[] = Object.entries(draft)
-        .filter(([key]) => !seen.has(key))
-        .map(([key, value]) => {
-            const label = plainLabel(key);
-            if (typeof value === "string" && /^media\/[a-z0-9][a-z0-9-]*\.(jpg|png|webp|avif|gif|svg)$/.test(value))
-                return { key, label, type: "image" };
-            if (typeof value === "string") return { key, label, type: value.length > 90 || value.includes("\n") ? "long" : "text" };
-            if (isLines(value)) return { key, label, type: "list" };
-            return { key, label, type: "long", structured: true };
-        });
-    return [...described, ...guessed];
+    const known = (doc.fields ?? []).map((f) =>
+        f.type === "items" && !f.itemFields ? { ...shapeOf(f.key, draft[f.key] ?? []), label: f.label, help: f.help } : described(f),
+    );
+    const seen = new Set(known.map((f) => f.key));
+    return [
+        ...known,
+        ...Object.entries(draft)
+            .filter(([key]) => !seen.has(key))
+            .map(([key, value]) => shapeOf(key, value)),
+    ];
 }
 
-// A field's value as the text its control edits.
-function toText(field: Shown, value: unknown): string {
-    if (field.structured) return JSON.stringify(value ?? null, null, 2);
-    if (field.type === "list") return isLines(value) ? value.join("\n") : "";
-    // A list of items is carried as text here and edited as proper fields by ItemsField.
-    if (field.type === "items") return JSON.stringify(Array.isArray(value) ? value.filter((v) => v && typeof v === "object") : []);
-    return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
+// How many separate things a person can change in a document (for "12 pieces of wording").
+export function countPieces(doc: Pick<ContentDocument, "draft" | "fields">): number {
+    const count = (shapes: Shape[]): number => shapes.reduce((n, s) => n + (s.type === "group" ? count(s.parts ?? []) : 1), 0);
+    return count(fieldsOf(doc));
 }
 
-type Values = Record<string, string>;
-const valuesOf = (doc: Pick<ContentDocument, "draft" | "fields">): Values =>
-    Object.fromEntries(fieldsOf(doc).map((f) => [f.key, toText(f, doc.draft?.[f.key])]));
+const text = (v: unknown): string =>
+    typeof v === "string" ? v : v === undefined || v === null ? "" : typeof v === "object" ? "" : String(v);
+const lines = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => !isObject(x)).map((x) => text(x)) : []);
+const entries = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isObject) : []);
+
+// What is stored: lists without blank lines, everything else as typed.
+function tidy(shape: Shape, value: unknown): unknown {
+    if (shape.type === "list")
+        return lines(value)
+            .map((l) => l.trim())
+            .filter(Boolean);
+    if (shape.type === "items") return entries(value).map((e) => tidyAll(shape.parts ?? [], e));
+    if (shape.type === "group") return tidyAll(shape.parts ?? [], isObject(value) ? value : {});
+    return value;
+}
+function tidyAll(shapes: Shape[], values: Record<string, unknown>): Record<string, unknown> {
+    const out = { ...values };
+    for (const s of shapes) if (s.key in out) out[s.key] = tidy(s, out[s.key]);
+    return out;
+}
+
+// ---- one field, of any kind ---------------------------------------------------------------------
+
+// How much room is left, said only when it matters: nearly full, or over.
+function Room({ shape, value }: { shape: Shape; value: unknown }) {
+    if (!shape.max) return null;
+    const countable = shape.type === "text" || shape.type === "long" || shape.type === "list" || shape.type === "items";
+    if (!countable) return null;
+    const count =
+        shape.type === "items"
+            ? entries(value).length
+            : shape.type === "list"
+              ? lines(value).filter((l) => l.trim()).length
+              : text(value).length;
+    if (count < shape.max * 0.8) return null;
+    const unit = shape.type === "text" || shape.type === "long" ? "characters" : "entries";
+    return (
+        <span className={`field-help ${count > shape.max ? "field-over" : ""}`}>
+            {count > shape.max
+                ? `${count - shape.max} ${unit} too many: the most is ${shape.max}. It can be saved, but not published, like this.`
+                : `${count} of ${shape.max} ${unit}`}
+        </span>
+    );
+}
+
+interface FieldProps {
+    shape: Shape;
+    value: unknown;
+    onChange: (value: unknown) => void;
+    readOnly: boolean;
+    id: string;
+    focus?: boolean;
+    // Shown beside the label: where on the website this appears.
+    where?: ReactNode;
+}
+
+function Field({ shape, value, onChange, readOnly, id, focus, where }: FieldProps) {
+    const label = (
+        <span className="field-label">
+            <label htmlFor={id} className="eyebrow">
+                {shape.label}
+                {shape.type === "list" && <span className="field-note"> · one per line</span>}
+                {shape.required && <span className="field-note"> · needed before publishing</span>}
+            </label>
+            {where}
+        </span>
+    );
+    const help = shape.help && <span className="field-help">{shape.help}</span>;
+
+    if (shape.type === "group") {
+        const group = isObject(value) ? value : {};
+        return (
+            <fieldset className="group">
+                <legend>{label}</legend>
+                {help}
+                {(shape.parts ?? []).map((part) => (
+                    <Field
+                        key={part.key}
+                        shape={part}
+                        value={group[part.key]}
+                        onChange={(v) => onChange({ ...group, [part.key]: v })}
+                        readOnly={readOnly}
+                        id={`${id}-${part.key}`}
+                    />
+                ))}
+            </fieldset>
+        );
+    }
+    if (shape.type === "items") {
+        return (
+            <div className="field">
+                {label}
+                {help && <span className="field-help field-help-first">{shape.help}</span>}
+                <Items shape={shape} value={entries(value)} onChange={onChange} readOnly={readOnly} id={id} />
+                <Room shape={shape} value={value} />
+            </div>
+        );
+    }
+    if (shape.type === "yesno") {
+        return (
+            <div className="field">
+                <label className="check">
+                    <input
+                        id={id}
+                        type="checkbox"
+                        checked={value === true}
+                        disabled={readOnly}
+                        onChange={(e) => onChange(e.target.checked)}
+                    />
+                    <span>{shape.label}</span>
+                </label>
+                {where}
+                {help}
+            </div>
+        );
+    }
+    const str = text(value);
+    return (
+        <div className="field">
+            {label}
+            {shape.type === "image" ? (
+                <PictureField value={str} onChange={onChange} readOnly={readOnly} />
+            ) : shape.type === "rich" ? (
+                <RichEditor id={id} value={str} onChange={onChange} readOnly={readOnly} focus={focus === true} />
+            ) : shape.type === "long" || shape.type === "list" ? (
+                <textarea
+                    id={id}
+                    value={shape.type === "list" ? lines(value).join("\n") : str}
+                    readOnly={readOnly}
+                    rows={Math.min(
+                        14,
+                        Math.max(3, Math.ceil(str.length / 60), (shape.type === "list" ? lines(value).length : str.split("\n").length) + 1),
+                    )}
+                    onChange={(e) => onChange(shape.type === "list" ? e.target.value.split("\n") : e.target.value)}
+                    // biome-ignore lint/a11y/noAutofocus: the field the person asked to edit
+                    autoFocus={focus}
+                />
+            ) : (
+                <input
+                    id={id}
+                    type={shape.type === "number" ? "number" : "text"}
+                    value={str}
+                    readOnly={readOnly}
+                    placeholder={shape.type === "link" ? "A web address, or a page such as about.html" : undefined}
+                    onChange={(e) =>
+                        onChange(shape.type === "number" ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)
+                    }
+                    // biome-ignore lint/a11y/noAutofocus: the field the person asked to edit
+                    autoFocus={focus}
+                />
+            )}
+            {help}
+            <Room shape={shape} value={value} />
+        </div>
+    );
+}
+
+// A list whose entries each have several parts (a service: its name, its summary,
+// its photograph). Each entry is a card of proper fields; entries can be added,
+// removed and moved.
+function Items({
+    shape,
+    value,
+    onChange,
+    readOnly,
+    id,
+}: {
+    shape: Shape;
+    value: Record<string, unknown>[];
+    onChange: (value: unknown) => void;
+    readOnly: boolean;
+    id: string;
+}) {
+    const parts = shape.parts ?? [];
+    const move = (i: number, by: number) => {
+        const next = [...value];
+        const [it] = next.splice(i, 1);
+        if (it) next.splice(i + by, 0, it);
+        onChange(next);
+    };
+    const one = shape.label.replace(/ies$/i, "y").replace(/s$/i, "").toLowerCase();
+    const full = shape.max !== undefined && value.length >= shape.max;
+    // An entry is known by its first line of text, when it has one.
+    const titleOf = (entry: Record<string, unknown>): string => {
+        const first = parts.find((p) => p.type === "text" && typeof entry[p.key] === "string" && entry[p.key]);
+        return first ? ` · ${String(entry[first.key]).slice(0, 50)}` : "";
+    };
+
+    return (
+        <div className="items">
+            {value.length === 0 && <p className="muted">Nothing here yet.</p>}
+            {value.map((entry, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: entries have no identity of their own; position is what they are
+                <fieldset key={i} className="item">
+                    <legend className="mono muted">
+                        {i + 1} of {value.length}
+                        {titleOf(entry)}
+                    </legend>
+                    {parts.map((part) => (
+                        <Field
+                            key={part.key}
+                            shape={part}
+                            value={entry[part.key]}
+                            onChange={(v) => onChange(value.map((e, n) => (n === i ? { ...e, [part.key]: v } : e)))}
+                            readOnly={readOnly}
+                            id={`${id}-${i}-${part.key}`}
+                        />
+                    ))}
+                    {!readOnly && (
+                        <div className="item-actions">
+                            <button type="button" className="btn btn-sm" onClick={() => move(i, -1)} disabled={i === 0}>
+                                <ArrowUp /> Move up
+                            </button>
+                            <button type="button" className="btn btn-sm" onClick={() => move(i, 1)} disabled={i === value.length - 1}>
+                                <ArrowDown /> Move down
+                            </button>
+                            <button type="button" className="btn btn-sm" onClick={() => onChange(value.filter((_, n) => n !== i))}>
+                                <Trash2 /> Remove this {one}
+                            </button>
+                        </div>
+                    )}
+                </fieldset>
+            ))}
+            {!readOnly && (
+                <button type="button" className="btn btn-sm" onClick={() => onChange([...value, {}])} disabled={full}>
+                    <Plus /> {full ? `No more than ${shape.max}` : `Add ${/^[aeiou]/.test(one) ? "an" : "a"} ${one}`}
+                </button>
+            )}
+        </div>
+    );
+}
+
+// ---- the form ----------------------------------------------------------------------------------
+
+type Values = Record<string, unknown>;
+const valuesOf = (doc: Pick<ContentDocument, "draft">): Values => ({ ...(doc.draft ?? {}) });
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 interface FormProps {
     doc: ContentDocument;
     canEdit: boolean;
     // Saves the whole document. Rejects with a message if it could not (someone else changed it, say).
     onSave: (doc: ContentDocument, draft: Record<string, unknown>) => Promise<void>;
-    // The field to put the cursor in first.
+    // The field to bring into view and put the cursor in.
     focus?: string | null;
     onClose?: () => void;
+    // For each field, where on the website it appears (the Content page supplies this).
+    where?: (key: string) => ReactNode;
+    // The person has started working on a field.
+    onField?: (key: string) => void;
 }
 
-export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps) {
+export function WordingForm({ doc, canEdit, onSave, focus, onClose, where, onField }: FormProps) {
     const fields = fieldsOf(doc);
     const [values, setValues] = useState<Values>(() => valuesOf(doc));
     const [error, setError] = useState<string | null>(null);
@@ -84,20 +370,20 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
     const basedValues = useRef<Values>(valuesOf(doc));
     const valuesRef = useRef(values);
     valuesRef.current = values;
+    const clean = (v: Values) => tidyAll(fields, v);
     // biome-ignore lint/correctness/useExhaustiveDependencies: react only when the revision changes
     useEffect(() => {
         if (doc.rev === based) return;
         const latest = valuesOf(doc);
-        const same = JSON.stringify(valuesRef.current) === JSON.stringify(latest);
-        const unsaved = JSON.stringify(valuesRef.current) !== JSON.stringify(basedValues.current);
-        if (unsaved && !same) return;
+        const unsaved = !same(clean(valuesRef.current), clean(basedValues.current));
+        if (unsaved && !same(clean(valuesRef.current), clean(latest))) return;
         setValues(latest);
         setBased(doc.rev);
         basedValues.current = latest;
         setError(null);
     }, [doc.rev]);
     const outdated = doc.rev !== based;
-    const dirty = JSON.stringify(values) !== JSON.stringify(basedValues.current);
+    const dirty = !same(clean(values), clean(basedValues.current));
     const useTheirs = () => {
         const latest = valuesOf(doc);
         setValues(latest);
@@ -106,32 +392,18 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
         setError(null);
     };
 
+    // The field asked for is brought into view.
+    const form = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!focus) return;
+        form.current?.querySelector(`[data-field="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, [focus]);
+
     async function save() {
-        const draft: Record<string, unknown> = { ...(doc.draft ?? {}) };
-        for (const f of fields) {
-            const text = values[f.key] ?? "";
-            if (f.structured) {
-                try {
-                    draft[f.key] = JSON.parse(text);
-                } catch {
-                    setError(
-                        `"${f.label}" has a mistake in its brackets or quotes. If that is unclear, ask your assistant to change it instead.`,
-                    );
-                    return;
-                }
-            } else if (f.type === "items") {
-                draft[f.key] = parseItems(text);
-            } else if (f.type === "list") {
-                draft[f.key] = text
-                    .split("\n")
-                    .map((line) => line.trim())
-                    .filter(Boolean);
-            } else draft[f.key] = text;
-        }
         setSaving(true);
         setError(null);
         try {
-            await onSave(doc, draft);
+            await onSave(doc, clean(values));
         } catch (err) {
             setError((err as Error).message);
         } finally {
@@ -139,66 +411,27 @@ export function WordingForm({ doc, canEdit, onSave, focus, onClose }: FormProps)
         }
     }
 
-    const set = (key: string, value: string) => setValues((v) => ({ ...v, [key]: value }));
-    const changed = JSON.stringify(doc.draft) !== JSON.stringify(doc.published);
+    const changed = !same(doc.draft, doc.published);
 
     return (
-        <div className="wording-form">
+        <div className="wording-form" ref={form}>
             {fields.length === 0 && <p className="muted">There is no wording here yet.</p>}
             {fields.map((f) => (
-                <div key={f.key} className="field">
-                    <label htmlFor={`f-${doc.id}-${f.key}`} className="eyebrow">
-                        {f.label}
-                        {f.type === "list" && <span className="field-note"> · one per line</span>}
-                        {f.required && <span className="field-note"> · needed before publishing</span>}
-                        {f.structured && <span className="field-note"> · structured: easier to ask your assistant</span>}
-                    </label>
-                    {f.type === "items" && f.help && <span className="field-help field-help-first">{f.help}</span>}
-                    {f.type === "items" ? (
-                        <ItemsField
-                            field={f}
-                            value={values[f.key] ?? "[]"}
-                            onChange={(v) => set(f.key, v)}
-                            readOnly={!canEdit}
-                            id={`f-${doc.id}-${f.key}`}
-                        />
-                    ) : f.type === "image" ? (
-                        <PictureField value={values[f.key] ?? ""} onChange={(v) => set(f.key, v)} readOnly={!canEdit} />
-                    ) : f.type === "rich" ? (
-                        <RichEditor
-                            id={`f-${doc.id}-${f.key}`}
-                            value={values[f.key] ?? ""}
-                            onChange={(v) => set(f.key, v)}
-                            readOnly={!canEdit}
-                            focus={focus === f.key}
-                        />
-                    ) : f.type === "text" ? (
-                        <input
-                            id={`f-${doc.id}-${f.key}`}
-                            value={values[f.key] ?? ""}
-                            onChange={(e) => set(f.key, e.target.value)}
-                            readOnly={!canEdit}
-                            // biome-ignore lint/a11y/noAutofocus: the field the person asked to edit
-                            autoFocus={focus === f.key}
-                        />
-                    ) : (
-                        <textarea
-                            id={`f-${doc.id}-${f.key}`}
-                            className={f.structured ? "mono" : ""}
-                            value={values[f.key] ?? ""}
-                            spellCheck={!f.structured}
-                            readOnly={!canEdit}
-                            rows={Math.min(
-                                14,
-                                Math.max(3, Math.ceil((values[f.key] ?? "").length / 60), (values[f.key] ?? "").split("\n").length + 1),
-                            )}
-                            onChange={(e) => set(f.key, e.target.value)}
-                            // biome-ignore lint/a11y/noAutofocus: the field the person asked to edit
-                            autoFocus={focus === f.key}
-                        />
-                    )}
-                    {f.help && f.type !== "items" && <span className="field-help">{f.help}</span>}
-                    <Room field={f} text={values[f.key] ?? ""} />
+                <div
+                    key={f.key}
+                    data-field={f.key}
+                    className={`field-row ${focus === f.key ? "field-row-on" : ""}`}
+                    onFocusCapture={() => onField?.(f.key)}
+                >
+                    <Field
+                        shape={f}
+                        value={values[f.key]}
+                        onChange={(v) => setValues((all) => ({ ...all, [f.key]: v }))}
+                        readOnly={!canEdit}
+                        id={`f-${doc.id}-${f.key}`}
+                        focus={focus === f.key}
+                        where={where?.(f.key)}
+                    />
                 </div>
             ))}
             {outdated && (
@@ -249,141 +482,6 @@ export function WordingDialog(props: FormProps & { onClose: () => void }) {
 
 // A small editor for text with a little formatting: bold, italic, links, lists.
 // What it produces is cleaned by the server before it is stored or shown.
-type Item = Record<string, unknown>;
-const parseItems = (text: string): Item[] => {
-    try {
-        const v = JSON.parse(text) as unknown;
-        return Array.isArray(v) ? (v.filter((x) => x && typeof x === "object") as Item[]) : [];
-    } catch {
-        return [];
-    }
-};
-
-// How much room is left, said only when it matters: nearly full, or over.
-function Room({ field, text }: { field: { type: string; max?: number }; text: string }) {
-    if (!field.max) return null;
-    const count =
-        field.type === "items"
-            ? parseItems(text).length
-            : field.type === "list"
-              ? text.split("\n").filter((l) => l.trim()).length
-              : text.length;
-    if (field.type !== "text" && field.type !== "long" && field.type !== "list" && field.type !== "items") return null;
-    if (count < field.max * 0.8) return null;
-    const unit = field.type === "text" || field.type === "long" ? "characters" : "entries";
-    return (
-        <span className={`field-help ${count > field.max ? "field-over" : ""}`}>
-            {count > field.max
-                ? `${count - field.max} ${unit} too many: the most is ${field.max}. It can be saved, but not published, like this.`
-                : `${count} of ${field.max} ${unit}`}
-        </span>
-    );
-}
-
-// A list whose entries each have several parts (a service: its name, its summary,
-// its photograph). Each entry is a card of proper fields; entries can be added,
-// removed and moved.
-function ItemsField({
-    field,
-    value,
-    onChange,
-    readOnly,
-    id,
-}: {
-    field: ContentField;
-    value: string;
-    onChange: (text: string) => void;
-    readOnly: boolean;
-    id: string;
-}) {
-    const items = parseItems(value);
-    const parts = field.itemFields ?? [];
-    const write = (next: Item[]) => onChange(JSON.stringify(next));
-    const setPart = (i: number, key: string, v: string) => write(items.map((it, n) => (n === i ? { ...it, [key]: v } : it)));
-    const move = (i: number, by: number) => {
-        const next = [...items];
-        const [it] = next.splice(i, 1);
-        if (it) next.splice(i + by, 0, it);
-        write(next);
-    };
-    const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : String(v));
-    const one = field.label.replace(/s$/i, "").toLowerCase();
-    const full = field.max !== undefined && items.length >= field.max;
-
-    return (
-        <div className="items">
-            {items.length === 0 && <p className="muted">Nothing here yet.</p>}
-            {items.map((item, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: entries have no identity of their own; position is what they are
-                <fieldset key={i} className="item">
-                    <legend className="mono muted">
-                        {i + 1} of {items.length}
-                    </legend>
-                    {parts.map((p) => {
-                        const pid = `${id}-${i}-${p.key}`;
-                        const v = str(item[p.key]);
-                        return (
-                            <div key={p.key} className="field">
-                                <label htmlFor={pid} className="eyebrow">
-                                    {p.label}
-                                    {p.required && <span className="field-note"> · needed before publishing</span>}
-                                </label>
-                                {p.type === "image" ? (
-                                    <PictureField value={v} onChange={(nv) => setPart(i, p.key, nv)} readOnly={readOnly} />
-                                ) : p.type === "rich" ? (
-                                    <RichEditor
-                                        id={pid}
-                                        value={v}
-                                        onChange={(nv) => setPart(i, p.key, nv)}
-                                        readOnly={readOnly}
-                                        focus={false}
-                                    />
-                                ) : p.type === "long" ? (
-                                    <textarea
-                                        id={pid}
-                                        rows={3}
-                                        value={v}
-                                        readOnly={readOnly}
-                                        onChange={(e) => setPart(i, p.key, e.target.value)}
-                                    />
-                                ) : (
-                                    <input
-                                        id={pid}
-                                        value={v}
-                                        readOnly={readOnly}
-                                        placeholder={p.type === "link" ? "A web address, or a page such as about.html" : undefined}
-                                        onChange={(e) => setPart(i, p.key, e.target.value)}
-                                    />
-                                )}
-                                {p.help && <span className="field-help">{p.help}</span>}
-                                <Room field={p} text={v} />
-                            </div>
-                        );
-                    })}
-                    {!readOnly && (
-                        <div className="item-actions">
-                            <button type="button" className="btn btn-sm" onClick={() => move(i, -1)} disabled={i === 0}>
-                                <ArrowUp /> Move up
-                            </button>
-                            <button type="button" className="btn btn-sm" onClick={() => move(i, 1)} disabled={i === items.length - 1}>
-                                <ArrowDown /> Move down
-                            </button>
-                            <button type="button" className="btn btn-sm" onClick={() => write(items.filter((_, n) => n !== i))}>
-                                <Trash2 /> Remove this {one}
-                            </button>
-                        </div>
-                    )}
-                </fieldset>
-            ))}
-            {!readOnly && (
-                <button type="button" className="btn btn-sm" onClick={() => write([...items, {}])} disabled={full}>
-                    <Plus /> {full ? `No more than ${field.max}` : `Add ${/^[aeiou]/.test(one) ? "an" : "a"} ${one}`}
-                </button>
-            )}
-        </div>
-    );
-}
-
 function RichEditor({
     id,
     value,

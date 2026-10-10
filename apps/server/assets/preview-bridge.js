@@ -54,6 +54,19 @@
             style = null;
         }
     };
+    var mark = (el) => {
+        var was = el.style.cssText;
+        el.style.setProperty("outline", "3px solid rgb(220,67,38)", "important");
+        el.style.setProperty("outline-offset", "4px", "important");
+        el.style.setProperty("box-shadow", "0 0 0 9999px rgba(20,18,14,.28)", "important");
+        el.style.setProperty("position", getComputedStyle(el).position === "static" ? "relative" : getComputedStyle(el).position, "important");
+        el.style.setProperty("z-index", "2147483000", "important");
+        el.style.setProperty("transition", "box-shadow .4s", "important");
+        clearTimeout(el.__atelierMark);
+        el.__atelierMark = setTimeout(() => {
+            el.style.cssText = was;
+        }, 2200);
+    };
     var bound = (target) => (target && target.closest ? target.closest(BOUND) : null);
     addEventListener("pageshow", () => {
         say({ path: path() });
@@ -65,6 +78,18 @@
         if (typeof e.data.edit === "boolean") {
             editing = e.data.edit;
             apply();
+        }
+        // "Show me where": bring the element that shows a piece of wording into view and mark it.
+        if (typeof e.data.highlight === "string") {
+            var all = document.querySelectorAll(BOUND);
+            var first = null;
+            for (var i = 0; i < all.length; i++) {
+                if (refOf(all[i]) !== e.data.highlight) continue;
+                if (!first) first = all[i];
+                mark(all[i]);
+            }
+            if (first) first.scrollIntoView({ block: "center", behavior: "smooth" });
+            say({ shown: e.data.highlight, found: Boolean(first) });
         }
     });
     // Typed text is reported when the person leaves the element, not on every key.
@@ -111,6 +136,8 @@
             e.preventDefault();
             e.stopPropagation();
             if (!el.hasAttribute("data-content")) say({ open: refOf(el) });
+            // Which piece was chosen, so a list of fields beside the preview can go to it.
+            else say({ picked: refOf(el) });
         },
         true,
     );

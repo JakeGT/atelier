@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.5` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #8. Four PRs are open, to merge in this order: [#9](https://github.com/JakeGT/atelier/pull/9) `plan-content` (docs), [#10](https://github.com/JakeGT/atelier/pull/10) `p4-operator-templates`, [#11](https://github.com/JakeGT/atelier/pull/11) `p5-content-studio`, [#12](https://github.com/JakeGT/atelier/pull/12) `p5-media`, [#13](https://github.com/JakeGT/atelier/pull/13) `p5-finish` (each stacked on the one before; #9 and #10 are merged).
+> Last updated 2026-10-10. Status: **`p5.8` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #12. Two PRs are open, to merge in this order: [#13](https://github.com/JakeGT/atelier/pull/13) `p5-finish`, [#14](https://github.com/JakeGT/atelier/pull/14) `content-clarity` (stacked on #13).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.5` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.8` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0015` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -153,6 +153,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Retention:** `services/retention.ts`, daily; periods in docs/12 §5.
 - **On in production since p5.3 (2026-10-10):** the R2 bucket `atelier` (private, standard address: it is located in the EU but not in the EU jurisdiction, so `R2_JURISDICTION` is unset) and Resend (`MAIL_FROM` `noreply@notify.jaketalling.com`, operator alerts to the owner's address). Checked from inside the server: put, get and delete against the bucket, and one test e-mail accepted by Resend. Not checked: an upload through the signed-in interface.
 
+## Content a person can read and place (branch `content-clarity`)
+
+- The Content page never shows JSON: `editor/Wording.tsx` turns any stored value into fields (groups for nested objects, entries for arrays of objects).
+- `GET …/content/map` says which page shows which field. Each field has **Show me where**; the preview highlights it. Clicking the preview finds the field.
+- Wording no page shows is marked **Not on the website yet**, with **Ask my assistant to connect it** (opens the editor with the request written out). Websites made before p5.0 are all in this state until that is done.
+- The editor has a **Content** button, a **Pictures** tab and **Add pictures or files** by the message box.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
@@ -161,7 +168,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
 - **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
-- **One old workspace container** (from before p2.0) keeps its old network until it is next used or reaped; it is then recreated in proxy mode.
+- **Workspaces keep the runtime they were created with** until their next request, when an idle one is recreated on the current runtime (`ContainerRuntime.bringUpToDate`, since p5.8). Until p5.8 they were never recreated, and one on p3.5 blanked the editor by reporting runs without `steps`; runs are now made whole (`wholeRun`) and the app has an error screen (`ui/Safety.tsx`).
 
 ## Next steps
 

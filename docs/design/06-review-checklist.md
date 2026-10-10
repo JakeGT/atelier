@@ -57,6 +57,10 @@ to the interface ships, and as a full audit of every screen when a phase ends.
 - [ ] One primary action per screen.
 - [ ] Colour meanings are respected and backed by words.
 - [ ] **A control is never inside the thing it changes the size of.** (The preview's size chooser once lived inside the preview frame: choosing Phone shrank the bar and hid the way back.) Tools that do not fit take a second row; they are never clipped and never lose their words.
+- [ ] **No stored format is ever shown.** No JSON, brackets or code boxes for a person to edit.
+- [ ] **Every thing a person can change says what it is and where it appears,** and can show it there. A thing that appears nowhere says so.
+- [ ] **Try it with old data,** not only with data made the new way: open the screen on a website from before the feature existed.
+- [ ] **Every screen can be reached from where the work happens** by a labelled control. If the only way in is a link at the bottom of a panel, it cannot be found.
 
 ## Recording an audit
 
