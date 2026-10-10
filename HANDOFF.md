@@ -141,9 +141,9 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 ## Known gaps
 
-- **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
+- **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
 - **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
-- **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). This is a VPS go-live gate; the P3 remote mirror fixes it properly.
+- **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). Off-host backups are part of the VPS move, the last phase (P6); accepted until then.
 - **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
 - **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
@@ -151,9 +151,11 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 ## Next steps
 
-1. **Jake: publish a real website from the editor** and open its `*.pages.dev` address. The deployer has been run against Cloudflare directly (deploy, redeploy, redeploy an earlier version, delete), but not yet through a signed-in Publish, and custom domains have not been tried against Cloudflare.
-2. **Review and merge PR #5.**
-3. **Then P4's remaining epics** (templates and skills library, operator console, usage dashboards) on a new branch, or P5. Carried forward: the remote git mirror of project code (workspace volumes are not backed up), preview deployments, a sandboxed build if frameworks are ever allowed, gVisor.
+The order from here (docs/13):
+
+1. **P5, in progress:** the content studio (ADR-0014, steps b–h), then data retention and alerting.
+2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
+3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
 
 Planned, not started: **the content studio** (ADR-0014, docs/13 E5.0 steps a–h). Content becomes what the page shows, edited in the preview, in a pop-up and on a dedicated Content page, with a media library. Step a (pop-up editing from the side panel) needs nothing else.
 

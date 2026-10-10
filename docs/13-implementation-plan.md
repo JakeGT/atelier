@@ -13,7 +13,8 @@ assumption. "Code" begins only after this document and the ADRs are approved.
 | P2 | Multi-tenant + multi-project | Many tenants, many projects, hard isolation, RBAC, quotas | ✅ done (gVisor spike and two items deferred, see P2) |
 | P3 | Hosting & domains | Per-project Cloudflare Pages + custom domains + rollback | ✅ built on `p3-hosting` (needs a Cloudflare token to switch on; see P3) |
 | P4 | BYOK providers, templates & operator console | User-supplied provider keys, templates/skills library, admin console | ✅ built (E4.1–E4.4); E4.5 "connect your own Cloudflare" is planned, not started |
-| P5 | Direct content editor & hardening | First-party CMS, gVisor, retention, alerting, VPS go-live gates | pending |
+| P5 | Content studio, retention & alerting | Content bound to the page and edited directly, media, retention, alerting | in progress (see P5) |
+| P6 | **The VPS move (last)** | Everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery | not started; **by decision the final piece of work** |
 
 **Interface rule for every phase:** anything a person sees follows
 `docs/design/README.md` and passes `docs/design/06-review-checklist.md` before it
@@ -375,10 +376,11 @@ E4.1's sealed-secret storage.
 
 ---
 
-## P5 — Direct content editor & hardening
+## P5 — Content studio, retention & alerting
 
-Goal: production-grade isolation, the first-party content editor, and the VPS
-go-live gates.
+Goal: people manage their own content, and the platform looks after its data
+and tells someone when something goes wrong. Everything here runs on the
+current host. What needs the VPS is P6, which is last.
 
 **Epics**
 - E5.0 Content studio (ADR-0014, proposed 2026-10-10; expands the original
@@ -389,8 +391,7 @@ go-live gates.
 - E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
 - E5.3 Alerting (build/publish failure, stall, spend over ceiling).
-- E5.4 VPS migration gates: off-host encrypted backups + restore drill, external
-  uptime checks, reboot recovery (per platform decisions).
+- E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown
 
@@ -425,17 +426,50 @@ Order: **a** first (small, and an immediate improvement), then **b → c**, then
 - A website with no bound elements still publishes exactly as before.
 
 **Acceptance criteria**
-- A documented restore drill restores a tenant from backup within RTO.
-- Workspace volumes are covered by off-host backups (ADR-0009) and a restore
-  drill.
 - A non-technical user edits content directly, without the assistant (E5.0 above).
+
+---
+
+## P6 — The VPS move (last)
+
+**Decided by the owner on 2026-10-10: this is the last thing done.** Nothing
+else in the plan waits for it, and nothing in it is started early. Everything
+that can only be done, or only matters, on the VPS is collected here so that it
+is one piece of work.
+
+**Epics**
+- E6.1 Move the stack to the VPS: images, compose, secrets, Postgres data,
+  workspace volumes, Caddy and tunnel routes; a rehearsed cut-over and a way
+  back.
+- E6.2 Backups that leave the machine: Postgres, **workspace volumes**
+  (project code, ADR-0009) and media storage (ADR-0014), encrypted, off-host,
+  on a schedule; a documented restore drill that restores one studio.
+- E6.3 gVisor for workspaces (`RUNTIME_OCI_RUNTIME=runsc`): the spike deferred
+  from P2 because this host (Docker Desktop) has no `runsc` (ADR-0003,
+  ADR-0012), then escape tests in the end-to-end suite.
+- E6.4 Operations: external uptime checks, reboot recovery (everything comes
+  back unattended), log retention, alerts delivered off the machine.
+- E6.5 Decide the remote git mirror for project code (ADR-0009), or confirm
+  that off-host volume backups are enough.
+
+**Acceptance criteria**
+- The service runs on the VPS behind the same address, with no data lost in
+  the move.
+- A documented restore drill restores a studio (database, project code, media)
+  from off-host backups within the agreed time.
+- A workspace runs under gVisor and the escape tests pass.
+- After an unplanned reboot, everything is serving again with nobody logged in.
+
+**Until then, known and accepted on the current host:** workspace volumes and
+(once built) media are backed up only by the platform's local backups; the
+sandbox is hardened Docker without gVisor; there is no external uptime check.
 
 ---
 
 ## Milestone sequencing & dependencies
 
 ```text
-P0 ──► P1 ──► P2 ──► P3 ──► P4 ──► P5
+P0 ──► P1 ──► P2 ──► P3 ──► P4 ──► P5 ──► P6 (the VPS move, last)
         │       │
         └───────┴── (isolation tests must pass before any second tenant)
 ```
@@ -449,6 +483,8 @@ P0 ──► P1 ──► P2 ──► P3 ──► P4 ──► P5
 - P3 (hosting) can proceed in parallel with late P2 (quotas) once the release
   model is stable.
 - P4/P5 are sequential after P2/P3.
+- P6 (the VPS move) is last by decision: it is not started until everything
+  else is done, and nothing else depends on it.
 
 ## Competitive additions (from `16-competitive-features.md`)
 
