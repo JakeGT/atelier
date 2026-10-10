@@ -108,6 +108,7 @@ interface ContentRow {
     published: Json | null;
     published_at: Ts | null;
     rev: number | string;
+    fields: ContentDocument["fields"];
     updated_by: string | null;
     updated_at: Ts;
 }
@@ -197,7 +198,8 @@ const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_tok
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
     "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, archived_at, created_at";
-const CONTENT_COLS = "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, updated_by, updated_at";
+const CONTENT_COLS =
+    "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, fields, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
 const RELEASE_COLS = "id, project_id, tenant_id, number, state, code_sha, content_rev, actor_id, rollback_of, deployed_at, created_at";
 const DEPLOYMENT_COLS = "id, project_id, tenant_id, release_id, kind, provider, provider_ref, url, state, error, created_at";
@@ -263,6 +265,7 @@ const rowToContent = (r: ContentRow): ContentDocument => ({
     published: r.published,
     publishedAt: iso(r.published_at),
     rev: Number(r.rev),
+    fields: r.fields ?? null,
     updatedBy: r.updated_by,
     updatedAt: isoNow(r.updated_at),
 });
@@ -696,6 +699,15 @@ export class PostgresStore implements Store {
                         INSERT INTO content_revisions (document_id, project_id, tenant_id, rev, draft, updated_by)
                         VALUES (${doc.id}, ${doc.projectId}, ${doc.tenantId}, ${doc.rev}, ${json(input.draft)}, ${input.updatedBy})`;
                     return doc;
+                }),
+            setFields: async (tenantId, projectId, kind, slug, fields) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<ContentRow[]>`
+                        UPDATE content_documents SET fields = ${json(fields as unknown as Json)}
+                        WHERE project_id = ${projectId} AND kind = ${kind} AND slug = ${slug}
+                        RETURNING ${tx.unsafe(CONTENT_COLS)}`;
+                    const r = rows[0];
+                    return r ? rowToContent(r) : null;
                 }),
             get: async (tenantId, projectId, kind, slug) =>
                 this.withTenant(tenantId, async (tx) => {

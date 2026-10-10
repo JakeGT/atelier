@@ -31,14 +31,18 @@ export class HostingError extends Error {
     }
 }
 
+export interface DeployInput {
+    site: string;
+    archive: Uint8Array;
+    branch: string;
+    canonicalHost: string | null;
+    commit: string | null;
+    // The release's content: pages are published with their wording filled in (ADR-0014).
+    content?: { kind: string; slug: string; content: Record<string, unknown> | null }[];
+}
+
 export interface Hosting {
-    deploy(input: {
-        site: string;
-        archive: Uint8Array;
-        branch: string;
-        canonicalHost: string | null;
-        commit: string | null;
-    }): Promise<DeployResult>;
+    deploy(input: DeployInput): Promise<DeployResult>;
     listDomains(site: string): Promise<HostedDomain[]>;
     // Returns the host a DNS record for the domain must point at.
     addDomain(site: string, domain: string, recheck?: boolean): Promise<{ target: string }>;
@@ -80,7 +84,7 @@ export class DeployerHosting implements Hosting {
         this.fetch = opts.fetch ?? fetch;
     }
 
-    private async call<T>(method: string, path: string, init: { json?: unknown; body?: Uint8Array } = {}): Promise<T> {
+    private async call<T>(method: string, path: string, init: { json?: unknown; body?: Uint8Array; form?: FormData } = {}): Promise<T> {
         let res: Response;
         try {
             res = await this.fetch(`${this.url}${path}`, {
@@ -90,7 +94,7 @@ export class DeployerHosting implements Hosting {
                     ...(init.json !== undefined ? { "content-type": "application/json" } : {}),
                     ...(init.body ? { "content-type": "application/x-tar" } : {}),
                 },
-                body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
+                body: init.json !== undefined ? JSON.stringify(init.json) : (init.form ?? init.body),
                 // A deployment uploads the whole website; give it time, but less than the edge allows a request.
                 signal: AbortSignal.timeout(85_000),
             });
@@ -107,17 +111,16 @@ export class DeployerHosting implements Hosting {
         return body as T;
     }
 
-    deploy(input: {
-        site: string;
-        archive: Uint8Array;
-        branch: string;
-        canonicalHost: string | null;
-        commit: string | null;
-    }): Promise<DeployResult> {
+    deploy(input: DeployInput): Promise<DeployResult> {
         const query = new URLSearchParams({ branch: input.branch });
         if (input.canonicalHost) query.set("canonical", input.canonicalHost);
         if (input.commit) query.set("commit", input.commit);
-        return this.call<DeployResult>("POST", `/sites/${input.site}/deployments?${query}`, { body: input.archive });
+        const path = `/sites/${input.site}/deployments?${query}`;
+        if (!input.content?.length) return this.call<DeployResult>("POST", path, { body: input.archive });
+        const form = new FormData();
+        form.append("archive", new Blob([input.archive as Uint8Array<ArrayBuffer>], { type: "application/x-tar" }), "site.tar");
+        form.append("content", JSON.stringify(input.content));
+        return this.call<DeployResult>("POST", path, { form });
     }
 
     async listDomains(site: string): Promise<HostedDomain[]> {

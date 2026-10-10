@@ -1,5 +1,8 @@
+import { type ContentField, contentFieldSchema } from "@atelier/shared";
 import type { Context } from "hono";
+import { z } from "zod";
 import { type AgentTokenClaims, verifyAgentToken } from "../services/agentToken.ts";
+import { sanitizeRich } from "../services/fill.ts";
 import { type Api, PROJECT, param } from "./kit.ts";
 
 const KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -9,6 +12,28 @@ const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v) && typ
 // is no publish route here, for people or for the agent.
 export function contentRoutes(api: Api): void {
     const { route, store, audit, app, declared, secretsKey } = api;
+
+    // Rich-text fields are reduced to the allowed formatting before they are stored
+    // (and again when a page is filled): nothing else ever reaches a page.
+    const prepared = async (tenantId: string, projectId: string, kind: string, slug: string, draft: Record<string, unknown>) => {
+        const fields = (await store.content.get(tenantId, projectId, kind, slug))?.fields ?? [];
+        const rich = new Set(fields.filter((f) => f.type === "rich").map((f) => f.key));
+        if (rich.size === 0) return draft;
+        return Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, rich.has(k) && typeof v === "string" ? sanitizeRich(v) : v]));
+    };
+
+    const fieldList = z.array(contentFieldSchema).max(60);
+    // Describes how a document's fields are shown: labels, types, help. Its content is untouched.
+    const setFields = async (tenantId: string, projectId: string, kind: string, slug: string, body: unknown) => {
+        const parsed = fieldList.safeParse(isObject(body) ? body.fields : body);
+        if (!parsed.success) return { error: "fields must be a list of { key, label, type: text | long | rich | list, help? }" } as const;
+        const keys = new Set<string>();
+        const fields: ContentField[] = parsed.data.filter((f) => !keys.has(f.key) && keys.add(f.key));
+        const document = await store.content.setFields(tenantId, projectId, kind, slug, fields);
+        return document
+            ? ({ document } as const)
+            : ({ error: "save the document's content before describing its fields", missing: true } as const);
+    };
 
     route("get", `${PROJECT}/content`, "content.read", async (c) =>
         c.json({ documents: await store.content.list(c.get("org").id, c.get("project").id) }),
@@ -39,10 +64,21 @@ export function contentRoutes(api: Api): void {
             projectId: c.get("project").id,
             kind,
             slug,
-            draft: body,
+            draft: await prepared(c.get("org").id, c.get("project").id, kind, slug, body),
             updatedBy: c.get("user").id,
         });
         return c.json({ document });
+    });
+
+    route("put", `${PROJECT}/content/:kind/:slug/fields`, "content.write", async (c) => {
+        const out = await setFields(
+            c.get("org").id,
+            c.get("project").id,
+            param(c, "kind"),
+            param(c, "slug"),
+            await c.req.json().catch(() => null),
+        );
+        return "error" in out ? c.json({ error: out.error }, "missing" in out ? 404 : 400) : c.json(out);
     });
 
     route("get", `${PROJECT}/content/:kind/:slug/revisions`, "content.read", async (c) => {
@@ -98,6 +134,16 @@ export function contentRoutes(api: Api): void {
     agentRoute("get", "/api/agent/content/:kind/:slug", async (c, claims) =>
         c.json({ document: await store.content.get(claims.tenantId, claims.projectId, param(c, "kind"), param(c, "slug")) }),
     );
+    agentRoute("put", "/api/agent/content/:kind/:slug/fields", async (c, claims) => {
+        const out = await setFields(
+            claims.tenantId,
+            claims.projectId,
+            param(c, "kind"),
+            param(c, "slug"),
+            await c.req.json().catch(() => null),
+        );
+        return "error" in out ? c.json({ error: out.error }, "missing" in out ? 404 : 400) : c.json(out);
+    });
     agentRoute("put", "/api/agent/content/:kind/:slug", async (c, claims) => {
         const kind = param(c, "kind");
         const slug = param(c, "slug");
@@ -109,7 +155,7 @@ export function contentRoutes(api: Api): void {
             projectId: claims.projectId,
             kind,
             slug,
-            draft: body,
+            draft: await prepared(claims.tenantId, claims.projectId, kind, slug, body),
             updatedBy: null,
         });
         return c.json({ document: doc });

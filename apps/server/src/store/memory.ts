@@ -375,6 +375,14 @@ export class MemoryStore implements Store {
     };
 
     content: ContentStore = {
+        setFields: async (tenantId, projectId, kind, slug, fields) => {
+            const id = this.contentIndex.get(key(projectId, kind, slug));
+            const doc = id ? this.contentMap.get(id) : undefined;
+            if (!id || !doc || doc.tenantId !== tenantId) return null;
+            const next = { ...doc, fields };
+            this.contentMap.set(id, next);
+            return next;
+        },
         upsertDraft: async (input) => {
             // Mirror the composite FK: the project must belong to the tenant.
             const project = this.projectMap.get(input.projectId);
@@ -393,6 +401,7 @@ export class MemoryStore implements Store {
                       draft: input.draft,
                       published: null,
                       publishedAt: null,
+                      fields: null,
                       rev: 1,
                       updatedBy: input.updatedBy,
                       updatedAt: now(),

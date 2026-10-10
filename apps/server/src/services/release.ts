@@ -183,6 +183,12 @@ export class ReleaseService {
                 branch: "main",
                 canonicalHost: await this.canonicalHost(tenantId, projectId, site),
                 commit: release.codeSha,
+                // The wording pinned in this release fills the pages (ADR-0014).
+                content: (await this.store.releases.manifest(tenantId, release.id)).map((d) => ({
+                    kind: d.kind,
+                    slug: d.slug,
+                    content: d.content,
+                })),
             });
             await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
             await this.attachDomains(tenantId, projectId, site);

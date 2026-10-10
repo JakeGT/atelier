@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
+import { fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { agentInstructions } from "../services/instructions.ts";
 import { findProvider, parseModel, validModelRef } from "../services/providers.ts";
 import type { RunState } from "../services/runtime.ts";
@@ -325,9 +326,17 @@ export function workspaceRoutes(api: Api): void {
         // Forward buttons. The sandbox stops the editor reaching into the frame, so
         // the frame has to cooperate. Opened on its own, or published, a page is
         // served exactly as written.
-        if (c.req.header("sec-fetch-dest") === "iframe" && file.contentType.startsWith("text/html")) {
-            const html = `${Buffer.from(file.body).toString("utf8")}\n${PREVIEW_BRIDGE}`;
-            return new Response(html, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });
+        if (file.contentType.startsWith("text/html")) {
+            let html = Buffer.from(file.body).toString("utf8");
+            const written = html;
+            // The preview shows the wording as it is saved now (the drafts), exactly as
+            // publishing will fill it from a release (ADR-0014).
+            if (isBound(html)) {
+                const drafts = await store.content.list(claims.tenantId, claims.projectId);
+                html = fillHtml(html, lookupFrom(drafts.map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }))));
+            }
+            if (c.req.header("sec-fetch-dest") === "iframe") html = `${html}\n${PREVIEW_BRIDGE}`;
+            if (html !== written) return new Response(html, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });
         }
         return new Response(file.body, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });
     });

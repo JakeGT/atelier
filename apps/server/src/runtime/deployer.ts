@@ -7,6 +7,8 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
+import { z } from "zod";
+import { fillHtml, lookupFrom } from "../services/fill.ts";
 import { type CloudflarePages, DEFAULT_LIMITS, PagesError, SiteError, type SiteLimits, siteFromArchive } from "./pages.ts";
 
 export interface DeployerOptions {
@@ -16,6 +18,12 @@ export interface DeployerOptions {
     prefix: string;
     limits?: SiteLimits;
 }
+
+// The release's content, as the control plane sends it. Its values are only ever placed as text or sanitised.
+const contentDocuments = z
+    .array(z.object({ kind: z.string(), slug: z.string(), content: z.record(z.string(), z.unknown()).nullable() }))
+    .max(2000);
+const CONTENT_CAP = 8 * 1024 * 1024;
 
 const HOSTNAME = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const BRANCH = /^[a-z0-9][a-z0-9-]{0,40}$/;
@@ -66,7 +74,9 @@ export function deployerApp(opts: DeployerOptions): Hono {
         }
     });
 
-    // Body: a tar archive of the website's files. ?branch=main is production.
+    // Body: a tar archive of the website's files, or a form with that archive and
+    // the release's content (`content`: [{kind, slug, content}]) to fill pages with.
+    // ?branch=main is production.
     app.post("/sites/:name/deployments", async (c) => {
         const name = siteName(c);
         const branch = c.req.query("branch") ?? "main";
@@ -85,11 +95,24 @@ export function deployerApp(opts: DeployerOptions): Hono {
             if (body) {
                 for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
                     size += chunk.length;
-                    if (size > cap) throw new SiteError("the website is too large");
+                    if (size > cap + CONTENT_CAP) throw new SiteError("the website is too large");
                     chunks.push(Buffer.from(chunk));
                 }
             }
-            const site = siteFromArchive(Buffer.concat(chunks), limits);
+            let archive = Buffer.concat(chunks);
+            let fill: ((html: string) => string) | undefined;
+            const type = c.req.header("content-type") ?? "";
+            if (type.startsWith("multipart/form-data")) {
+                const form = await new Response(new Uint8Array(archive), { headers: { "content-type": type } }).formData();
+                const file = form.get("archive");
+                if (!(file instanceof Blob)) return c.json({ error: "invalid request" }, 400);
+                archive = Buffer.from(await file.arrayBuffer());
+                const documents = contentDocuments.safeParse(JSON.parse(String(form.get("content") ?? "[]")));
+                if (!documents.success) return c.json({ error: "invalid request" }, 400);
+                const lookup = lookupFrom(documents.data);
+                fill = (html) => fillHtml(html, lookup);
+            }
+            const site = siteFromArchive(archive, limits, fill);
             const { subdomain } = await pages.ensureProject(name);
             const deployment = await pages.deploy(name, site, { branch, canonicalHost: canonical, commit });
             return c.json({ ...deployment, siteUrl: `https://${subdomain}` }, 201);

@@ -79,7 +79,8 @@ export interface Site {
 }
 
 // Turns an archive into the files to serve, refusing anything that is not a plain file.
-export function siteFromArchive(archive: Buffer, limits: SiteLimits = DEFAULT_LIMITS): Site {
+// `fill`: given a page's HTML, returns it with its wording filled in (ADR-0014).
+export function siteFromArchive(archive: Buffer, limits: SiteLimits = DEFAULT_LIMITS, fill?: (html: string) => string): Site {
     let entries: ReturnType<typeof readTar>;
     try {
         entries = readTar(archive, { maxEntries: limits.maxFiles * 4 });
@@ -113,7 +114,10 @@ export function siteFromArchive(archive: Buffer, limits: SiteLimits = DEFAULT_LI
         if (total > limits.maxTotalBytes)
             throw new SiteError(`the website is larger than ${Math.round(limits.maxTotalBytes / 1024 / 1024)} MB`);
         const path = `/${parts.join("/")}`;
-        files.push({ path, body: entry.body, contentType: mimeFor(path), hash: assetHash(entry.body, path) });
+        const contentType = mimeFor(path);
+        // Pages are published with their wording filled in: finished HTML, no script needed.
+        const body = fill && contentType.startsWith("text/html") ? Buffer.from(fill(entry.body.toString("utf8")), "utf8") : entry.body;
+        files.push({ path, body, contentType, hash: assetHash(body, path) });
         if (files.length > limits.maxFiles) throw new SiteError(`the website has more than ${limits.maxFiles} files`);
     }
     if (!files.some((f) => f.path === "/index.html"))
