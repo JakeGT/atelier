@@ -434,3 +434,58 @@
     max-width: 62ch;
     margin: -4px 0 18px;
 }
+
+/* The card is the cover and title (a link) plus its three-dot menu. */
+.card {
+    position: relative;
+}
+
+.card-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+
+.card-link .card-meta {
+    padding-right: 40px;
+}
+
+.card:has(.card-menu.open) {
+    z-index: 5;
+}
+
+.card-menu {
+    position: absolute;
+    right: -4px;
+    bottom: 6px;
+}
+
+.card-menu > .btn {
+    color: var(--ink-3);
+    opacity: 0.55;
+    transition:
+        opacity 0.2s,
+        color 0.2s,
+        background 0.2s;
+}
+
+.card:hover .card-menu > .btn,
+.card-menu.open > .btn,
+.card-menu > .btn:focus-visible {
+    opacity: 1;
+    color: var(--ink);
+}
+
+.menu .menu-danger,
+.menu .menu-danger svg {
+    color: var(--seal);
+}
+
+.menu .menu-danger:hover {
+    background: var(--seal-wash);
+}
+
+.menu-up {
+    top: auto;
+    bottom: calc(100% + 8px);
+}
