@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the server, runtime, provisioner and egress images
-        run: for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:ci .; done
+        run: for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:ci .; done
       - name: The runtime image has its tools
         run: docker run --rm --entrypoint sh atelier-runtime:ci -c 'git --version && opencode --version'
       - name: The server image starts and answers health
