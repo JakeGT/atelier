@@ -6,6 +6,12 @@ import type { RunState } from "../services/runtime.ts";
 import { SHA_RE } from "../services/workspace.ts";
 import { type Api, type Ctx, PROJECT, param, startOfUtcDay } from "./kit.ts";
 
+// Appended to pages shown in the editor's preview frame. It reports the page being
+// shown (on every arrival, including Back and Forward) and moves through the
+// frame's own history when the editor asks. It can do nothing else: what it
+// tells the editor is treated as untrusted text.
+const PREVIEW_BRIDGE = `<script>(function(){try{var say=function(){parent.postMessage({atelierPreview:1,path:location.pathname.replace(/^\\/preview\\/[^/]+\\//,"")||"index.html"},"*")};addEventListener("pageshow",say);addEventListener("message",function(e){if(e.source!==parent||!e.data||e.data.atelierPreview!==1)return;if(e.data.go==="back")history.back();else if(e.data.go==="forward")history.forward()})}catch(e){}})()</script>`;
+
 const AGENT_TOKEN_TTL_S = 60 * 60;
 const PREVIEW_TOKEN_TTL_S = 2 * 60 * 60;
 
@@ -306,6 +312,15 @@ export function workspaceRoutes(api: Api): void {
         if (!project || project.archivedAt) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
         const file = await runtime.readFile(claims.projectId, rel).catch(() => null);
         if (!file) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        // Inside the editor's preview frame (and only there), a page is given a few
+        // lines that tell the editor which page is showing and obey its Back and
+        // Forward buttons. The sandbox stops the editor reaching into the frame, so
+        // the frame has to cooperate. Opened on its own, or published, a page is
+        // served exactly as written.
+        if (c.req.header("sec-fetch-dest") === "iframe" && file.contentType.startsWith("text/html")) {
+            const html = `${Buffer.from(file.body).toString("utf8")}\n${PREVIEW_BRIDGE}`;
+            return new Response(html, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });
+        }
         return new Response(file.body, { headers: { "content-type": file.contentType, ...PREVIEW_HEADERS } });
     });
 }

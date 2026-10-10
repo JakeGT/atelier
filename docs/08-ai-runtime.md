@@ -159,6 +159,16 @@ capability. Publishing remains a browser-origin action in the UI.
   and starts afresh if not; the prompt restates the original request so it
   works either way.
 
+## Back and Forward in the preview
+
+The preview frame is sandboxed with an opaque origin, so the editor cannot read
+where it is or drive its history. Pages served into the frame (requests with
+`Sec-Fetch-Dest: iframe`) get a few lines appended: they tell the editor which
+page is showing and call `history.back()` / `forward()` when asked. The editor
+keeps the trail, so the buttons know whether there is anywhere to go, and a
+reload returns to the page that was showing. A page opened on its own, or
+published, is served exactly as written.
+
 ## Several people on one website
 
 - **The pulse.** Every open editor posts `…/pulse {typing}` every two seconds

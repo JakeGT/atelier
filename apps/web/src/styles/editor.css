@@ -1231,3 +1231,44 @@
     border-radius: 50%;
     background: var(--live);
 }
+
+/* ---- preview: back and forward ---------------------------------------------------- */
+
+.frame-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.frame-nav .btn-sm {
+    white-space: nowrap;
+}
+
+.frame-nav .btn:disabled {
+    opacity: 0.35;
+}
+
+.frame-chrome .frame-lights {
+    display: none;
+}
+
+/* Room is found for the words on Back and Forward before anything else: the
+   size chooser names only the size in use, then the page name gives way. */
+@container (max-width: 900px) {
+    .segmented button:not(.on) .tool-label {
+        display: none;
+    }
+    .segmented button:not(.on) {
+        padding: 0;
+    }
+}
+
+@container (max-width: 470px) {
+    .frame-nav .tool-label {
+        display: none;
+    }
+    .frame-nav .btn-sm {
+        width: 30px;
+        padding: 0;
+    }
+}
