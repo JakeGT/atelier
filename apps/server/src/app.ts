@@ -11,6 +11,7 @@ import { health } from "./routes/health.ts";
 import type { ModelCatalog } from "./services/catalog.ts";
 import type { Hosting } from "./services/hosting.ts";
 import type { MediaStorage } from "./services/mediaStorage.ts";
+import type { Mailer } from "./services/notifier.ts";
 import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
@@ -33,6 +34,8 @@ export interface Deps {
     templates?: Template[];
     // Where uploaded files are kept; null or absent: no media library.
     storage?: MediaStorage | null;
+    // Sends e-mail; null or absent: notifications are shown in the app only.
+    mailer?: Mailer | null;
 }
 
 // Baseline headers for everything the app serves (the preview route adds a

@@ -147,6 +147,9 @@ export interface ContentStore {
     snapshot(tenantId: string, projectId: string): Promise<ContentDocument[]>;
     revisions(tenantId: string, documentId: string): Promise<ContentRevision[]>;
     revision(tenantId: string, documentId: string, rev: number): Promise<ContentRevision | null>;
+    // Retention: removes earlier versions older than `before`, always keeping each
+    // document's newest `keep` (and so its current one). Returns how many went.
+    pruneRevisions(tenantId: string, before: Date, keep: number): Promise<number>;
 }
 
 export interface AgentSessionStore {
@@ -169,6 +172,8 @@ export interface MessageStore {
         authorId: string | null;
     }): Promise<void>;
     list(tenantId: string, projectId: string, limit?: number): Promise<AgentMessage[]>;
+    // Retention: removes messages older than `before`; returns how many.
+    purgeBefore(tenantId: string, before: Date): Promise<number>;
 }
 
 export interface ReleaseStore {
@@ -241,6 +246,38 @@ export interface MediaStore {
     purge(tenantId: string, id: string): Promise<void>;
 }
 
+// Something a person should know about when they are not looking.
+export interface Notice {
+    id: string;
+    kind: string;
+    title: string;
+    body: string;
+    link: string | null;
+    createdAt: string;
+    readAt: string | null;
+}
+export interface NotificationStore {
+    // Null when this person has already been told about it (`dedupe`).
+    add(input: {
+        userId: string;
+        tenantId: string | null;
+        kind: string;
+        title: string;
+        body: string;
+        link: string | null;
+        dedupe: string | null;
+    }): Promise<Notice | null>;
+    list(userId: string, limit?: number): Promise<Notice[]>;
+    unread(userId: string): Promise<number>;
+    markRead(userId: string): Promise<void>;
+    markEmailed(userId: string, id: string): Promise<void>;
+    // Whether this person wants e-mail as well; and their address, to send it to.
+    emailWanted(userId: string): Promise<boolean>;
+    setEmailWanted(userId: string, on: boolean): Promise<void>;
+    // The platform's operators.
+    admins(): Promise<string[]>;
+}
+
 // Custom domains. A hostname is unique across the platform.
 export interface DomainStore {
     list(tenantId: string, projectId: string): Promise<ProjectDomain[]>;
@@ -292,6 +329,7 @@ export interface Store {
     deployments: DeploymentStore;
     domains: DomainStore;
     media: MediaStore;
+    notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
     close(): Promise<void>;

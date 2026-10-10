@@ -11,6 +11,7 @@ import type { ModelCatalog } from "../src/services/catalog.ts";
 import { cookieName } from "../src/services/cookies.ts";
 import type { Hosting } from "../src/services/hosting.ts";
 import type { MediaStorage } from "../src/services/mediaStorage.ts";
+import type { Mailer } from "../src/services/notifier.ts";
 import type { OidcService } from "../src/services/oidc.ts";
 import { LocalRuntime } from "../src/services/runtime.ts";
 import { SessionStore } from "../src/services/sessions.ts";
@@ -64,7 +65,13 @@ export function fakeAgent(): AgentRuntime & { calls: AgentRunInput[]; hold: () =
 export async function makeApp(
     env: Record<string, string> = {},
     oidc?: OidcService,
-    extra: { catalog?: ModelCatalog; providerFetch?: typeof fetch; hosting?: Hosting | null; storage?: MediaStorage | null } = {},
+    extra: {
+        catalog?: ModelCatalog;
+        providerFetch?: typeof fetch;
+        hosting?: Hosting | null;
+        storage?: MediaStorage | null;
+        mailer?: Mailer | null;
+    } = {},
 ) {
     const config = loadConfig({ AUTH_MODE: "off", COOKIE_SECURE: "false", PUBLIC_ORIGIN: "http://localhost:8080", ...env });
     const store = new MemoryStore();

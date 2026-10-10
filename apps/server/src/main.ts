@@ -10,7 +10,9 @@ import { connectedAsOwner, migrate } from "./db/migrate.ts";
 import { OpenCodeAgent } from "./services/agent.ts";
 import { DeployerHosting } from "./services/hosting.ts";
 import { DiskStorage, R2Storage } from "./services/mediaStorage.ts";
+import { ResendMailer } from "./services/notifier.ts";
 import { OidcService } from "./services/oidc.ts";
+import { runRetention } from "./services/retention.ts";
 import { ContainerRuntime, LocalRuntime, type WorkspaceRuntime } from "./services/runtime.ts";
 import { SessionStore } from "./services/sessions.ts";
 import { MemoryStore } from "./store/memory.ts";
@@ -37,6 +39,9 @@ if (config.databaseUrl) {
     try {
         const applied = await migrate(owner.sql);
         if (applied.length) console.log(`Applied database migrations: ${applied.join(", ")}.`);
+        // The activity record is append-only for the serving role, so its age limit is applied here, as the owner.
+        const old = await owner.sql`DELETE FROM audit_log WHERE occurred_at < now() - make_interval(days => ${config.retention.auditDays})`;
+        if (old.count) console.log(`Removed ${old.count} activity entries older than ${config.retention.auditDays} days.`);
     } catch (err) {
         console.error(`Couldn't prepare the database: ${(err as Error).message}`);
         await owner.close().catch(() => {});
@@ -115,7 +120,28 @@ console.log(
         : "Media library: off (set R2_BUCKET and its credentials to turn it on).",
 );
 
-const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting, storage });
+const mailer = config.mail ? new ResendMailer(config.mail) : null;
+console.log(
+    mailer
+        ? `Notifications: in the app, and by e-mail from ${config.mail?.from}.`
+        : "Notifications: in the app only (set RESEND_API_KEY and MAIL_FROM to e-mail them too).",
+);
+
+const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting, storage, mailer });
+
+// Retention: once shortly after start-up, then daily.
+const retain = () =>
+    runRetention(store, storage, config.retention).then(
+        (r) => {
+            if (r.messages || r.revisions || r.files)
+                console.log(
+                    `Retention: removed ${r.messages} old messages, ${r.revisions} old versions of wording, ${r.files} removed files.`,
+                );
+        },
+        (err: Error) => console.warn(`Retention failed: ${err.message}`),
+    );
+setTimeout(retain, 60_000).unref();
+setInterval(retain, 24 * 3_600_000).unref();
 
 // Stop workspaces nobody is using: their files stay, and the next request starts
 // them again in about a second. Keeps a single host from filling up with idle

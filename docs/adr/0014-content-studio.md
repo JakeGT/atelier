@@ -1,6 +1,6 @@
 # ADR-0014 — Content: one store, bound to the page, edited in three places; a media library
 
-- **Status:** Accepted in practice: the owner said to continue with phase 5 on 2026-10-10. Steps a–e are built (see "As built"); media (f–h) is not.
+- **Status:** Accepted in practice: the owner said to continue with phase 5 on 2026-10-10. Steps a–h are built (see the two "As built" sections), with the differences they list.
 - **Date:** 2026-10-10
 - **Extends:** ADR-0002 (content store), ADR-0007 (releases pin content), docs/09
 
@@ -267,3 +267,57 @@ drafts but never publish.
 - Whether assistants bind reliably has not been measured against real models
   (the first item under "To confirm"); it was exercised with pages written by
   hand.
+
+## As built: the media library, steps f–h (branch `p5-media`, 2026-10-10)
+
+The owner chose Cloudflare R2 for storage on 2026-10-10.
+
+- **Storage** (`services/mediaStorage.ts`): an R2 bucket through its
+  S3-compatible API, signed here with AWS Signature V4 (checked against Amazon's
+  published examples). Keys are `<studio id>/<website id>/<file name>`, built
+  from ids only. The control plane holds the bucket's key; workspaces and the
+  deployer do not. In development the files are in a folder. With nothing
+  configured the library says uploading is not switched on.
+- **Upload** (`services/media.ts`, `routes/media.ts`): what a file is comes from
+  its bytes. JPEG, PNG, WebP, AVIF, GIF, SVG, PDF, MP4, WebM, MP3 and M4A are
+  taken, up to 25 MB each, 500 MB and 1,000 files per website. Photographs are
+  turned upright, capped at 2,560 px wide and re-encoded, which drops camera and
+  location data, and get WebP copies 480, 960 and 1,600 px wide. SVGs are reduced
+  to an allow-list of drawing elements: no script, handlers, links or anything
+  fetched from elsewhere.
+- **Description:** a picture is not added until it has one sentence saying what
+  it shows, or is marked as decoration.
+- **In pages:** a file is `media/<name>` relative to the website's top folder.
+  The assistant lists the library with the `media_list` tool (descriptions and
+  sizes; it cannot see, add or remove files). `<img data-content-image="page/home#photo">`
+  with a field of type `image` is filled with the chosen file, its description,
+  its size and a `srcset` of its copies; the person changes it with **Choose a
+  picture**.
+- **Preview:** `/preview/<token>/media/<name>` serves library files.
+- **Publish:** the control plane finds every `media/<name>` that the release's
+  files or wording mention and sends those files to the deployer with the
+  archive; the deployer serves them under `/media/`. A file nothing mentions is
+  never published.
+- **Removing:** refused with where the file is used, unless the person says to
+  remove it anyway. A removed file leaves the library at once and is deleted
+  for good after 30 days, so an earlier release that used it can be put back in
+  the meantime.
+- **Where it shows:** the Content page has two tabs, **Wording** and **Pictures
+  and files**.
+
+**Differences from §5, and what is left:**
+
+- Smaller copies are made at upload, not at publish, and in WebP only (no AVIF
+  copies). The published page offers them through `srcset`; it is not rewritten
+  into a `<picture>` element.
+- The original is not kept: the stored file is the re-encoded one, at most
+  2,560 px wide. That is what removes location data.
+- No focal point.
+- Video: clips up to 25 MB can be uploaded and placed. There is no poster image
+  (that needs a video tool in the image) and no special handling of YouTube or
+  Vimeo links; the assistant embeds those as ordinary HTML.
+- Publishing sends media through the deployer in memory. Websites with hundreds
+  of megabytes of media would need the deployer to fetch from storage itself.
+- R2 is off this machine, so the files survive the loss of the host; their
+  records are in Postgres and are in its backups. The bucket itself has no
+  second copy.

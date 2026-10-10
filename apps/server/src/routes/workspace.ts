@@ -25,7 +25,7 @@ const PREVIEW_HEADERS = {
 
 // The assistant and its workspace: sessions, runs, the conversation, versions, preview.
 export function workspaceRoutes(api: Api): void {
-    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates, storage } = api;
+    const { route, store, runtime, audit, runtimeError, limits, app, config, secretsKey, presence, templates, storage, notifier } = api;
     const previewKey = `${secretsKey}:preview`;
     const apiUrl = config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`;
 
@@ -83,6 +83,14 @@ export function workspaceRoutes(api: Api): void {
         const { dailyTokenLimit } = limits(org);
         const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
         if (dailyTokenLimit !== null && used >= dailyTokenLimit) {
+            // Once a day, to the people who can change the limit.
+            await notifier.tellStudio(org.id, {
+                kind: "usage.limit",
+                title: `${org.name} has reached today's usage limit`,
+                body: "The assistant will not take new requests in this studio until midnight UTC. An owner or admin can raise or remove the limit in the studio's settings.",
+                link: `/o/${org.slug}/settings`,
+                dedupe: `limit:${org.id}:${new Date().toISOString().slice(0, 10)}`,
+            });
             return c.json({ error: "this studio has reached today's usage limit for the assistant; it resets at midnight UTC" }, 429);
         }
 
@@ -155,6 +163,28 @@ export function workspaceRoutes(api: Api): void {
             await store.messages.add({ ...base, role: "note", text, tools: run.result?.toolEvents ?? [] });
         } else {
             await store.messages.add({ ...base, role: "error", text: run.error ?? "The assistant stopped unexpectedly." });
+        }
+        // Whoever asked may have walked away: tell them if it did not finish.
+        if (run.status === "failed" || run.status === "timed_out") {
+            const asked = (await store.messages.list(tenantId, projectId)).find((m) => m.runId === run.id && m.role === "user");
+            const project = await store.projects.findById(tenantId, projectId);
+            const org = await store.organizations.findById(tenantId);
+            if (asked?.authorId && project && org) {
+                await notifier.tell([asked.authorId], {
+                    tenantId,
+                    kind: run.status === "failed" ? "assistant.failed" : "assistant.paused",
+                    title:
+                        run.status === "failed"
+                            ? `Your assistant could not finish on ${project.name}`
+                            : `Your assistant was paused on ${project.name}`,
+                    body:
+                        run.status === "failed"
+                            ? `It stopped with a problem: ${(run.error ?? "it stopped unexpectedly").slice(0, 300)}. Nothing was lost; open the website to ask again.`
+                            : "The request ran out of time before it finished. What it had done is saved. Open the website and choose Carry on to let it finish.",
+                    link: `/o/${org.slug}/p/${project.slug}`,
+                    dedupe: `run:${run.id}`,
+                });
+            }
         }
         const seconds = run.finishedAt ? Math.max(0, (new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000) : 0;
         const meter = (kind: Parameters<typeof store.usage.record>[0]["kind"], units: number) =>

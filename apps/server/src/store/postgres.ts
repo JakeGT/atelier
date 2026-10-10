@@ -29,6 +29,8 @@ import type {
     MediaStore,
     MembershipStore,
     MessageStore,
+    Notice,
+    NotificationStore,
     OrganizationStore,
     ProjectStore,
     ProviderKeyStore,
@@ -353,6 +355,7 @@ export class PostgresStore implements Store {
     deployments: DeploymentStore;
     domains: DomainStore;
     media: MediaStore;
+    notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
 
@@ -703,6 +706,16 @@ export class PostgresStore implements Store {
                         VALUES (${doc.id}, ${doc.projectId}, ${doc.tenantId}, ${doc.rev}, ${json(input.draft)}, ${input.updatedBy})`;
                     return doc;
                 }),
+            pruneRevisions: async (tenantId, before, keep) =>
+                this.withTenant(
+                    tenantId,
+                    async (tx) =>
+                        (
+                            await tx`
+                                DELETE FROM content_revisions r USING content_documents d
+                                WHERE d.id = r.document_id AND r.created_at < ${before} AND r.rev <= d.rev - ${Math.max(1, keep)}`
+                        ).count,
+                ),
             setFields: async (tenantId, projectId, kind, slug, fields) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<ContentRow[]>`
@@ -780,6 +793,8 @@ export class PostgresStore implements Store {
         };
 
         this.messages = {
+            purgeBefore: async (tenantId, before) =>
+                this.withTenant(tenantId, async (tx) => (await tx`DELETE FROM agent_messages WHERE created_at < ${before}`).count),
             add: async (input) => {
                 await this.withTenant(
                     input.tenantId,
@@ -957,6 +972,64 @@ export class PostgresStore implements Store {
                     (tx) => tx`DELETE FROM project_domains WHERE project_id = ${projectId} AND hostname = ${hostname}`,
                 );
             },
+        };
+
+        interface NoticeRow {
+            id: string;
+            kind: string;
+            title: string;
+            body: string;
+            link: string | null;
+            created_at: Ts;
+            read_at: Ts | null;
+        }
+        const rowToNotice = (r: NoticeRow): Notice => ({
+            id: r.id,
+            kind: r.kind,
+            title: r.title,
+            body: r.body,
+            link: r.link,
+            createdAt: isoNow(r.created_at),
+            readAt: r.read_at ? isoNow(r.read_at) : null,
+        });
+        this.notifications = {
+            add: async (n) =>
+                this.withUser(n.userId, async (tx) => {
+                    const rows = await tx<NoticeRow[]>`
+                        INSERT INTO notifications (id, user_id, tenant_id, kind, title, body, link, dedupe)
+                        VALUES (${randomUUID()}, ${n.userId}, ${n.tenantId}, ${n.kind}, ${n.title}, ${n.body}, ${n.link}, ${n.dedupe})
+                        ON CONFLICT (user_id, dedupe) DO NOTHING
+                        RETURNING id, kind, title, body, link, created_at, read_at`;
+                    // A person's old notifications go as new ones arrive (kept 90 days).
+                    await tx`DELETE FROM notifications WHERE created_at < now() - interval '90 days'`;
+                    const r = rows[0];
+                    return r ? rowToNotice(r) : null;
+                }),
+            list: async (userId, limit = 50) =>
+                this.withUser(userId, async (tx) => {
+                    const rows = await tx<NoticeRow[]>`
+                        SELECT id, kind, title, body, link, created_at, read_at FROM notifications ORDER BY created_at DESC LIMIT ${limit}`;
+                    return rows.map(rowToNotice);
+                }),
+            unread: async (userId) =>
+                this.withUser(userId, async (tx) => {
+                    const rows = await tx<{ n: string }[]>`SELECT count(*) AS n FROM notifications WHERE read_at IS NULL`;
+                    return Number(rows[0]?.n ?? 0);
+                }),
+            markRead: async (userId) => {
+                await this.withUser(userId, (tx) => tx`UPDATE notifications SET read_at = now() WHERE read_at IS NULL`);
+            },
+            markEmailed: async (userId, id) => {
+                await this.withUser(userId, (tx) => tx`UPDATE notifications SET emailed_at = now() WHERE id = ${id}`);
+            },
+            emailWanted: async (userId) => {
+                const rows = await this.sql<{ email_notifications: boolean }[]>`SELECT email_notifications FROM users WHERE id = ${userId}`;
+                return rows[0]?.email_notifications ?? false;
+            },
+            setEmailWanted: async (userId, on) => {
+                await this.sql`UPDATE users SET email_notifications = ${on} WHERE id = ${userId}`;
+            },
+            admins: async () => (await this.sql<{ id: string }[]>`SELECT id FROM users WHERE admin`).map((r) => r.id),
         };
 
         const MEDIA_COLS =

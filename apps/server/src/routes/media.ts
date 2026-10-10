@@ -61,6 +61,11 @@ export function mediaRoutes(api: Api): void {
             for (const f of files) await storage.put(storageKey(where, f.name), f.body, f.mime);
         } catch (err) {
             console.error(`media upload failed for ${project.id}: ${(err as Error).message}`);
+            await api.notifier.tellOperator(
+                "storage.failed",
+                "File storage is failing",
+                `An upload could not be stored: ${(err as Error).message}`,
+            );
             for (const f of files) await storage.delete(storageKey(where, f.name)).catch(() => {});
             return c.json({ error: "the file could not be stored just now; try again in a moment" }, 502);
         }

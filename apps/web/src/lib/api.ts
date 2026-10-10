@@ -385,8 +385,29 @@ export function reauthenticate(): void {
 }
 
 // About the signed-in person, not any one organisation.
+// Something that happened while the person was not looking.
+export interface Notice {
+    id: string;
+    kind: string;
+    title: string;
+    body: string;
+    link: string | null;
+    createdAt: string;
+    readAt: string | null;
+}
+export interface Inbox {
+    notifications: Notice[];
+    unread: number;
+    // Whether this person is e-mailed too, and whether this server can send e-mail at all.
+    email: boolean;
+    emailAvailable: boolean;
+}
+
 export const api = {
     config: () => get<PublicConfig>("/api/v1/config"),
+    notifications: () => get<Inbox>("/api/v1/notifications"),
+    readNotifications: () => post<{ ok: true }>("/api/v1/notifications/read"),
+    emailNotifications: (on: boolean) => put<{ email: boolean }>("/api/v1/notifications/email", { on }),
     session: async (): Promise<Session | null> => {
         const s = (await fetch("/auth/session").then((r) => noteBuild(r).json())) as Session | null;
         csrfToken = s?.csrfToken ?? null;

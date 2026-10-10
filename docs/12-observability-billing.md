@@ -86,8 +86,44 @@ its own model-provider key. Atelier never pays for or resells model usage.
 
 ## 5. Privacy & retention
 
-- Event `meta` is redacted (no full user messages, no secrets, no full env).
-- Detailed event retention (30 days) with monthly aggregates retained longer,
-  matching the current improvement-plan policy; tenant can delete history.
-- Audit records (auth, publish, destructive) are retained and never tenant-
-  deletable.
+As built (`services/retention.ts`; the periods were proposed by the main agent
+on 2026-10-10 at the owner's request, and each is a setting):
+
+| What | Kept for | Setting |
+| --- | --- | --- |
+| The conversation with the assistant | 12 months | `RETAIN_MESSAGES_DAYS` |
+| Earlier versions of a piece of wording | The newest 20 of each piece, and anything from the last 90 days | `RETAIN_REVISIONS_KEPT`, `RETAIN_REVISIONS_DAYS` |
+| A file removed from the media library | 30 days, then deleted from storage | `RETAIN_REMOVED_MEDIA_DAYS` |
+| The activity record | 24 months | `RETAIN_AUDIT_DAYS` |
+| Notifications | 90 days | fixed |
+
+Never removed by age: the current wording, releases and the wording pinned in
+them, the website's own versions (its git history), files still in the library,
+and usage records.
+
+The job runs a minute after start-up and then daily. The activity record is
+append-only for the serving database role, so its limit is applied at start-up
+by the owner role.
+
+Deleting a website removes its workspace, its live site and its uploaded
+files. **Not built:** deleting a whole studio, exporting a studio's data, and
+monthly aggregates of usage (usage records are small and are all kept).
+
+## 6. Alerting
+
+As built (`services/notifier.ts`). Every notification is shown in the app
+(**Notifications**, in the account menu; a labelled button appears beside it
+while there is something new) and e-mailed through Resend when
+`RESEND_API_KEY` and `MAIL_FROM` are set and the person has not turned e-mail
+off.
+
+| Event | Who is told |
+| --- | --- |
+| A request to the assistant fails, or runs out of time | Whoever asked |
+| Publishing fails on the hosting side | The studio's owners and admins, and whoever pressed Publish |
+| A studio reaches its daily usage limit | Its owners and admins, once a day |
+| Publishing or file storage fails on the platform's side | Platform admins in the app; `OPERATOR_EMAIL` by e-mail, at most every 30 minutes per kind |
+
+A problem with the website itself (no home page, a file too large) is shown to
+the person publishing and nobody is notified. Uptime checks from outside the
+machine are part of the VPS move (P6).

@@ -146,6 +146,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Documents describe their fields (label, type, help); the assistant is told to write them and to bind elements.
 - Not built: media (needs a storage decision), lists of multi-field items, publish-time limits. See ADR-0014 "As built".
 
+## Pictures and files, notifications, retention (branch `p5-media`)
+
+- **Media library:** uploads are prepared in `services/media.ts` (type from bytes, photographs re-encoded and given smaller copies, SVG sanitised) and kept in Cloudflare R2 (`services/mediaStorage.ts`, signed S3 requests; `MEDIA_STORAGE=disk` in development). Pages refer to `media/<name>`; `data-content-image` binds an `<img>` to a field. The release service sends the deployer the files a release mentions.
+- **Notifications:** `services/notifier.ts`, table `notifications` (one person's rows only, by RLS). In the app always; by e-mail through Resend when configured. Events and recipients are in docs/12 §6.
+- **Retention:** `services/retention.ts`, daily; periods in docs/12 §5.
+- Production needs four secrets for these to be on: the R2 access key id and secret, and a Resend key (see `apps/atelier/README.md` in the infrastructure repo). Without them the library says it is not switched on and notifications stay in the app.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
@@ -160,11 +167,9 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 The order from here (docs/13):
 
-1. **P5, in progress:** content studio steps a–e are built. Next: media (steps f–h, after Jake decides where files are stored), then data retention (E5.2) and alerting (E5.3).
+1. **P5 is built** (content studio, media, retention, alerting). What it leaves: lists of items with several fields, limits checked at publish, focal points, video posters, deleting a whole studio.
 2. **E4.5 Connect your own Cloudflare** (ADR-0013), when wanted.
 3. **P6, the VPS move, last.** Jake decided on 2026-10-10 that the VPS move is the final piece of work. It collects everything that needs the VPS: off-host backups and a restore drill, gVisor, uptime checks, reboot recovery. Do not start any of it early.
-
-Planned, not started: **the content studio** (ADR-0014, docs/13 E5.0 steps a–h). Content becomes what the page shows, edited in the preview, in a pop-up and on a dedicated Content page, with a media library. Step a (pop-up editing from the side panel) needs nothing else.
 
 Planned, not started: **Connect your own Cloudflare** (ADR-0013, docs/13 E4.5). A studio connects its own Cloudflare account by OAuth and has domains set up for it. The first step is answering the ADR's open questions against a real OAuth client and starting Cloudflare's approval for a public one.
 
