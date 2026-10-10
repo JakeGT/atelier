@@ -3,6 +3,8 @@ export interface Session {
     email: string;
     name: string;
     admin: boolean;
+    // False until they have been through (or skipped) the introduction.
+    onboarded: boolean;
     csrfToken: string | null;
 }
 
@@ -13,6 +15,8 @@ export interface Org {
     slug: string;
     name: string;
     defaultModel: string | null;
+    // The id of the person whose personal studio this is, if it is one.
+    personalOf: string | null;
     // The signed-in person's role in this organisation.
     role: Role;
 }
@@ -305,6 +309,8 @@ export const api = {
         const body = await post<{ redirect: string | null }>("/auth/logout");
         window.location.assign(body.redirect ?? "/");
     },
+    // The introduction is finished or skipped: it is not shown again.
+    finishOnboarding: () => post<{ ok: boolean }>("/api/v1/me/onboarded"),
     listOrgs: () => get<{ orgs: Org[] }>("/api/v1/orgs").then((b) => b.orgs),
     createOrg: (name: string) => post<{ org: Org }>("/api/v1/orgs", { name }).then((b) => b.org),
 };

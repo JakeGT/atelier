@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p3.4` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has P0, P1, P2 and BYOK. P3 (hosting) is [PR #5](https://github.com/JakeGT/atelier/pull/5) on `p3-hosting`, **not yet merged**.
+> Last updated 2026-10-10. Status: **`p3.5` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has P0, P1, P2 and BYOK. P3 (hosting) is [PR #5](https://github.com/JakeGT/atelier/pull/5) on `p3-hosting`; arrival and personal studios are [PR #6](https://github.com/JakeGT/atelier/pull/6) on `onboarding`, stacked on #5. **Neither is merged yet.**
 
 ## TL;DR
 
@@ -31,14 +31,14 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.4` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p3.5` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
-| Migrations | `0001`–`0009` applied; `db/grants.sql` re-applied at each start |
+| Migrations | `0001`–`0010` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
 | Networks | `platform-proxy`, `platform-database`, `atelier-control` (internal), `atelier-runtime` (internal), `atelier-outbound` (egress proxy only), `atelier-hosting` (deployer only) |
 | Secrets | `atelier_database_url` (app), `atelier_migration_database_url` (owner), `atelier_secrets_key`, `atelier_oidc_client_secret`, `atelier_provisioner_secret` |
 | Edge | Caddy refuses `/internal*` and `/api/agent/*` |
-| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T103732Z` (before p3.0) |
+| Backups before deploys | in the infra repo's `backups/`; the latest is `postgres-20261010T122941Z` (before p3.5) |
 
 Verified after deploy:
 - `/healthz` returns 200;
@@ -117,12 +117,19 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Custom domains are per website (the globe button in the editor).
 - Tested against a stand-in for Cloudflare (`scripts/fake-pages.ts`), not yet against Cloudflare itself.
 
+## Arrival (branch `onboarding`)
+
+- **Who gets in is decided in Authentik**, by group. Atelier admits anyone who completes a sign-in (`SIGNUP_MODE=open`).
+- **Everyone has one personal studio** from their first sign-in, and sees a three-step introduction once (`/welcome`).
+- **Shared studios**: owners and admins add people by e-mail under Studio settings → Members; it shows up the next time that person opens Atelier.
+- Details: `docs/07-auth-and-rbac.md` §3.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. The spike moves to the VPS migration (ADR-0012).
 - **`github.com` is on the egress allow-list,** because the assistant downloads its tools from GitHub releases. Baking them into the runtime image would let it come off.
 - **Workspace volumes aren't backed up.** `atelier-ws-*` holds project code (ADR-0009). This is a VPS go-live gate; the P3 remote mirror fixes it properly.
-- **Invitations don't send e-mail.** The inviter tells the person; they join at their next sign-in. They must also be on the platform's Authentik allowlist.
+- **Adding someone to a studio sends no e-mail.** They must already have access to Atelier (given in Authentik).
 - **Per-project role overrides** aren't built (organisation roles only).
 - **Two separate undo timelines:** code versions and content revisions aren't unified into one view.
 - **One old workspace container** (from before p2.0) keeps its old network until it is next used or reaped; it is then recreated in proxy mode.
@@ -132,5 +139,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 1. **Jake: publish a real website from the editor** and open its `*.pages.dev` address. The deployer has been run against Cloudflare directly (deploy, redeploy, redeploy an earlier version, delete), but not yet through a signed-in Publish, and custom domains have not been tried against Cloudflare.
 2. **Review and merge PR #5.**
 3. **Then P4's remaining epics** (templates and skills library, operator console, usage dashboards) on a new branch, or P5. Carried forward: the remote git mirror of project code (workspace volumes are not backed up), preview deployments, a sandboxed build if frameworks are ever allowed, gVisor.
+
+Planned, not started: **Connect your own Cloudflare** (ADR-0013, docs/13 E4.5). A studio connects its own Cloudflare account by OAuth and has domains set up for it. The first step is answering the ADR's open questions against a real OAuth client and starting Cloudflare's approval for a public one.
 
 Cloudflare notes: the token is an account API token with **Pages Write**. A brand-new Pages project can answer 522 or fail TLS on per-deployment addresses for a minute or so after its first deployment.

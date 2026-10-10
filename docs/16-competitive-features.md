@@ -66,6 +66,7 @@ Key: **[B]** = baseline, **[D]** = delighter. Phase from `13-implementation-plan
 | Atomic immutable deploys + instant rollback | B | P3 | Framer/Netlify; already the Cloudflare Pages model |
 | CDN + image optimization (WebP/AVIF) + Brotli | B | P3 | Framer; part of the deploy pipeline |
 | Custom domains + auto TLS | B | P3 | already planned |
+| Connect your own hosting account in one click; domains set up for you | D | P4 | Hosting "bring your own", like the AI keys; no token to paste (ADR-0013) |
 | Scheduled publishing | D | P5 | Webflow; defer |
 
 ### 2.4 SEO/marketing

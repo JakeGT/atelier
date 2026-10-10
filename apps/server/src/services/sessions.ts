@@ -6,6 +6,8 @@ export interface SessionUser {
     email: string;
     name: string;
     admin: boolean;
+    // Whether they have been through (or skipped) the introduction.
+    onboarded: boolean;
 }
 
 export interface OidcFlow {
@@ -74,7 +76,11 @@ export class SessionStore {
         }
         // Avoid a write per request: only record activity once a minute.
         if (now - s.lastSeenAt > 60_000) await this.backend.touch(idHash, now);
-        return { user: { id: user.id, email: user.email, name: user.name, admin: user.admin }, csrf: s.csrf, authTime: s.authTime };
+        return {
+            user: { id: user.id, email: user.email, name: user.name, admin: user.admin, onboarded: user.onboardedAt !== null },
+            csrf: s.csrf,
+            authTime: s.authTime,
+        };
     }
 
     async getUser(sessionId: string): Promise<SessionUser | undefined> {

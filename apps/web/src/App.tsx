@@ -7,17 +7,19 @@ import { Landing } from "./pages/Landing";
 import { Login, safeNext } from "./pages/Login";
 import { OrgSettings, type SettingsTab } from "./pages/OrgSettings";
 import { Studio } from "./pages/Studio";
+import { Welcome } from "./pages/Welcome";
 import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
 
 // Routes:
 //   /                      landing (public; adapts when signed in)
 //   /login                 sign in
 //   /studio                -> the organisation last used
+//   /welcome               the introduction, shown once to someone new
 //   /o/:org                that organisation's websites
 //   /o/:org/settings/:tab  organisation settings (general, models, members, usage, activity)
 //   /o/:org/p/:project     the editor
 type Route =
-    | { name: "landing" | "login" | "studio" | "missing" }
+    | { name: "landing" | "login" | "studio" | "welcome" | "missing" }
     | { name: "org"; org: string }
     | { name: "settings"; org: string; tab: SettingsTab }
     | { name: "editor"; org: string; project: string }
@@ -30,6 +32,7 @@ function match(path: string): Route {
     if (path === "/") return { name: "landing" };
     if (path === "/login") return { name: "login" };
     if (path === "/studio") return { name: "studio" };
+    if (path === "/welcome") return { name: "welcome" };
     let m = path.match(new RegExp(`^/o/${SLUG}/?$`));
     if (m?.[1]) return { name: "org", org: m[1] };
     m = path.match(new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`));
@@ -91,13 +94,20 @@ export function App() {
             navigate(safeNext(new URLSearchParams(window.location.search).get("next")), { replace: true });
     }, [session, isPrivate, route.name, path]);
 
+    // Someone new is taken through the introduction first, once.
+    useEffect(() => {
+        if (session && !session.onboarded && isPrivate && route.name !== "welcome") navigate("/welcome", { replace: true });
+    }, [session, isPrivate, route.name]);
+
     // /studio (and old /p/... links) resolve to an organisation: the one last used, else the first.
     const legacyProject = route.name === "legacy-editor" ? route.project : null;
     useEffect(() => {
         if (!session || !orgs?.length) return;
         if (route.name !== "studio" && route.name !== "legacy-editor") return;
+        if (!session.onboarded) return;
+        // The studio last used, else their own.
         const last = localStorage.getItem(LAST_ORG);
-        const org = orgs.find((o) => o.slug === last) ?? orgs[0];
+        const org = orgs.find((o) => o.slug === last) ?? orgs.find((o) => o.personalOf === session.id) ?? orgs[0];
         if (!org) return;
         navigate(legacyProject ? `/o/${org.slug}/p/${legacyProject}` : `/o/${org.slug}`, { replace: true });
     }, [session, orgs, route.name, legacyProject]);
@@ -125,7 +135,19 @@ export function App() {
         page = boot;
     } else if (route.name === "login") {
         page = session ? boot : <Login config={config} {...common} />;
-    } else if (session === null || orgs === null || route.name === "studio" || route.name === "legacy-editor") {
+    } else if (session === null || orgs === null) {
+        page = boot;
+    } else if (route.name === "welcome") {
+        page = (
+            <Welcome
+                session={session}
+                orgs={orgs}
+                onOrgsChanged={reloadOrgs}
+                onDone={() => setSession({ ...session, onboarded: true })}
+                {...common}
+            />
+        );
+    } else if (route.name === "studio" || route.name === "legacy-editor") {
         page = boot;
     } else if (!org) {
         // Not a member, or no such organisation: the same answer either way.

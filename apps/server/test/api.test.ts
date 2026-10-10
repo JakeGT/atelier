@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { AgentSession, AuditEntry, ContentDocument, ContentRevision, Project, Release } from "@atelier/shared";
 import { verifyAgentToken } from "../src/services/agentToken.ts";
-import { ensureUserOrg } from "../src/services/bootstrap.ts";
+import { ensurePersonalStudio } from "../src/services/bootstrap.ts";
 import type { RunState } from "../src/services/runs.ts";
 import { MemoryStore } from "../src/store/memory.ts";
 import { json, makeApp, SECRETS_KEY, signIn, type TestApp } from "./helpers.ts";
@@ -23,14 +22,20 @@ async function createProject(t: TestApp, api: string, write: Record<string, stri
     return (await json<{ project: Project }>(res)).project;
 }
 
-test("ensureUserOrg is idempotent and creates an owner membership", async () => {
+test("everyone gets one personal studio, which they own, however often they sign in", async () => {
     const store = new MemoryStore();
-    const userId = randomUUID();
-    await ensureUserOrg(store, userId, "alice@example.com", "Alice");
-    await ensureUserOrg(store, userId, "alice@example.com", "Alice");
-    const orgs = await store.organizations.listForUser(userId);
+    const user = await store.users.upsertIdentity({
+        issuer: "i",
+        subject: "alice",
+        email: "alice@example.com",
+        name: "Alice Okoro",
+        admin: false,
+    });
+    await ensurePersonalStudio(store, user);
+    await ensurePersonalStudio(store, user);
+    const orgs = await store.organizations.listForUser(user.id);
     assert.equal(orgs.length, 1);
-    assert.equal(await store.memberships.roleOf(orgs[0]?.id ?? "", userId), "owner");
+    assert.deepEqual([orgs[0]?.name, orgs[0]?.personalOf, orgs[0]?.role], ["Alice's studio", user.id, "owner"]);
 });
 
 test("api requires a session", async () => {

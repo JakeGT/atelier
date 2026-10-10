@@ -22,6 +22,8 @@ export interface UserStore {
     findByIdentity(issuer: string, subject: string): Promise<User | null>;
     upsertIdentity(input: { issuer: string; subject: string; email: string; name: string; admin: boolean }): Promise<User>;
     count(): Promise<number>;
+    // The introduction is done (or skipped); it is not shown again.
+    setOnboarded(id: string): Promise<void>;
 }
 
 export class SlugTakenError extends Error {
@@ -32,7 +34,10 @@ export class SlugTakenError extends Error {
 
 export interface OrganizationStore {
     // Slugs are unique across all organisations; a clash throws SlugTakenError.
-    create(input: { id: string; slug: string; name: string }): Promise<Organization>;
+    // `personalOf`: this is that person's personal studio (each person has one at most).
+    create(input: { id: string; slug: string; name: string; personalOf?: string }): Promise<Organization>;
+    // Marks an existing studio as a person's personal one. False if they already have one.
+    setPersonal(id: string, userId: string): Promise<boolean>;
     findById(id: string): Promise<Organization | null>;
     // With the caller's role in each, oldest membership first.
     listForUser(userId: string): Promise<(Organization & { role: OrgRole })[]>;

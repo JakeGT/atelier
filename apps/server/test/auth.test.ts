@@ -105,8 +105,44 @@ test("a callback without a login flow goes home with an error, not into a redire
     assert.equal(res.headers.get("location"), "/login?auth_error=expired");
 });
 
-test("an uninvited, non-admin account is refused", async () => {
-    const t = await makeApp({ AUTH_MODE: "oidc" }, stubOidc({ groups: [] }));
+test("anyone the identity provider lets sign in is given access, a personal studio, and the introduction once", async () => {
+    const t = await makeApp(
+        { AUTH_MODE: "oidc" },
+        stubOidc({ groups: [], subject: "maren", email: "maren@example.com", name: "Maren Okoro" }),
+    );
+    const cookies = jar();
+    cookies.absorb(await t.app.request("/auth/login"));
+    const res = await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() });
+    assert.equal(res.headers.get("location"), "/studio");
+    cookies.absorb(res);
+
+    type Me = { id: string; onboarded: boolean; csrfToken: string };
+    const me = (await (await t.app.request("/auth/session", { headers: cookies.header() })).json()) as Me;
+    assert.equal(me.onboarded, false);
+    const { orgs } = (await (await t.app.request("/api/v1/orgs", { headers: cookies.header() })).json()) as {
+        orgs: { name: string; role: string; personalOf: string | null }[];
+    };
+    assert.deepEqual(
+        orgs.map((o) => [o.name, o.role, o.personalOf]),
+        [["Maren's studio", "owner", me.id]],
+    );
+
+    // Finishing (or skipping) the introduction is remembered; signing in again makes no second studio.
+    const done = await t.app.request("/api/v1/me/onboarded", {
+        method: "POST",
+        headers: { ...cookies.header(), "x-atelier-csrf": me.csrfToken, origin: "http://localhost:8080" },
+    });
+    assert.equal(done.status, 200);
+    assert.equal(((await (await t.app.request("/auth/session", { headers: cookies.header() })).json()) as Me).onboarded, true);
+    cookies.absorb(await t.app.request("/auth/login"));
+    cookies.absorb(await t.app.request("/auth/callback?code=abc&state=x", { headers: cookies.header() }));
+    const again = (await (await t.app.request("/api/v1/orgs", { headers: cookies.header() })).json()) as { orgs: unknown[] };
+    assert.equal(again.orgs.length, 1);
+    assert.equal(((await (await t.app.request("/auth/session", { headers: cookies.header() })).json()) as Me).onboarded, true);
+});
+
+test("with SIGNUP_MODE=invite, an account no studio has added is refused", async () => {
+    const t = await makeApp({ AUTH_MODE: "oidc", SIGNUP_MODE: "invite" }, stubOidc({ groups: [] }));
     const cookies = jar();
     const login = await t.app.request("/auth/login");
     cookies.absorb(login);
@@ -115,9 +151,9 @@ test("an uninvited, non-admin account is refused", async () => {
     assert.equal(await t.store.users.count(), 0);
 });
 
-test("an invited newcomer is let in and joins the inviting organisation, not a studio of their own", async () => {
+test("someone a studio has added arrives with their own studio and that one too (and is let in even in invite mode)", async () => {
     const t = await makeApp(
-        { AUTH_MODE: "oidc" },
+        { AUTH_MODE: "oidc", SIGNUP_MODE: "invite" },
         stubOidc({ groups: [], subject: "newcomer", email: "Newcomer@Example.com", name: "New" }),
     );
     const owner = await t.store.users.upsertIdentity({
@@ -146,8 +182,11 @@ test("an invited newcomer is let in and joins the inviting organisation, not a s
         orgs: { slug: string; role: string }[];
     };
     assert.deepEqual(
-        orgs.map((o) => [o.slug, o.role]),
-        [["okoro", "editor"]],
+        orgs.map((o) => [o.slug.replace(/-[0-9a-f]{12}$/, ""), o.role]),
+        [
+            ["new", "owner"],
+            ["okoro", "editor"],
+        ],
     );
     assert.ok((await t.store.audit.list({ tenantId: org.id })).some((e) => e.action === "invitation.accept"));
 });

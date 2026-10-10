@@ -60,7 +60,11 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                                 >
                                     <span className="menu-main">
                                         {o.name}
-                                        <span className="mono muted">{ROLE_LABEL[o.role]}</span>
+                                        <span className="mono muted">
+                                            {o.personalOf === session.id
+                                                ? "Your personal studio"
+                                                : `Shared · you are ${ROLE_LABEL[o.role].toLowerCase()}`}
+                                        </span>
                                     </span>
                                     {o.id === org.id && <Check />}
                                 </button>
@@ -74,7 +78,7 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                                     setCreating(true);
                                 }}
                             >
-                                <Plus /> New studio
+                                <Plus /> New shared studio
                             </button>
                         </div>
                     )}
@@ -127,9 +131,12 @@ function NewStudio({ onClose, onOrgsChanged }: { onClose: () => void; onOrgsChan
     return (
         <Dialog onClose={onClose}>
             <form onSubmit={create}>
-                <p className="eyebrow">New studio</p>
+                <p className="eyebrow">New shared studio</p>
                 <h2>A separate room.</h2>
-                <p>A studio has its own websites, members and usage. Use one per client, team or business.</p>
+                <p>
+                    A studio has its own websites, members and usage. Make one for a client, a team or a business, then add the people who
+                    should work in it. Your personal studio stays as it is.
+                </p>
                 <label className="field-line">
                     <span className="eyebrow">Name</span>
                     <input

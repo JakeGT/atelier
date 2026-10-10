@@ -14,7 +14,7 @@ async function setup(limits?: { idleMinutes: number; maxHours: number }) {
 test("session survives within limits and re-reads the user", async () => {
     const { store, sessions, user } = await setup({ idleMinutes: 60, maxHours: 24 });
     const { id } = await sessions.createSession(user.id);
-    assert.deepEqual(await sessions.getUser(id), { id: user.id, email: "a@b.c", name: "A", admin: false });
+    assert.deepEqual(await sessions.getUser(id), { id: user.id, email: "a@b.c", name: "A", admin: false, onboarded: false });
     await store.users.upsertIdentity({ issuer: "https://idp/", subject: "s1", email: "new@b.c", name: "A", admin: true });
     assert.equal((await sessions.getUser(id))?.email, "new@b.c");
     assert.equal((await sessions.getUser(id))?.admin, true);

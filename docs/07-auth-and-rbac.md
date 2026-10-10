@@ -42,7 +42,7 @@ OIDC_CLIENT_SECRET_FILE=/run/secrets/atelier_oidc_client_secret
 OIDC_PROVIDER_NAME=jaketalling
 OIDC_ADMIN_GROUP=platform-admin
 OIDC_TRUST_EMAIL=true        # allowlist-only Google/GitHub/Discord sources, verified
-SIGNUP_MODE=invite
+SIGNUP_MODE=open             # the identity provider decides who may sign in (see §3)
 ```
 
 ## 2. Session lifecycle
@@ -57,15 +57,40 @@ SIGNUP_MODE=invite
 - Step-up (reauth) for secret-adjacent and destructive actions, via
   `prompt=login&max_age=0`, checked against `auth_time`.
 
-## 3. Account provisioning
+## 3. Who gets in, and what they get
 
-First sign-in creates an account only when the person is:
-- in `OIDC_ADMIN_GROUP`, or
-- holds a valid invite (verified email), or
-- would be the first account.
+**Access is decided by the identity provider** (as built on branch
+`onboarding`, 2026-10-10). Authentik only lets people in the right groups
+complete a sign-in to the Atelier application, so anyone who arrives has been
+given access, and Atelier admits them (`SIGNUP_MODE=open`, the default). Giving
+or removing access is done in Authentik, not in Atelier.
 
-Otherwise "You need an invite" (`INVITE_HINT`). This matches `triagent` and the
-platform's invite-allowlist posture.
+`SIGNUP_MODE=invite` remains for a provider that cannot restrict who signs in:
+then Atelier itself also refuses anyone who is not a platform admin, already
+here, or added to a studio by e-mail ("You need an invite", `INVITE_HINT`).
+
+On first sign-in a person gets:
+
+- **An account**, matched by issuer + subject.
+- **A personal studio**, which they own: "Maren's studio"
+  (`organizations.personal_of`, at most one per person, enforced by a unique
+  index). It is always theirs: its person cannot leave it, be removed from it or
+  stop being its owner. Being added to someone else's studio does not replace
+  it. `services/bootstrap.ts` makes it on every sign-in if it is missing.
+- **The introduction** (`/welcome`), once: name the studio, how the assistant
+  works, make a first website. Each step can be skipped. `users.onboarded_at`
+  records that it was finished or skipped; until then every private page leads
+  to it.
+
+People who had accounts before this keep the studio that was made for them
+then: at their next sign-in the oldest studio they own becomes their personal
+one, and they are not shown the introduction.
+
+**Adding someone to a shared studio** is still done in Atelier, by e-mail
+address, by an owner or admin (Studio settings → Members). The person must
+already have access to Atelier. The studio appears for them the next time they
+open Atelier (pending additions are taken up whenever their list of studios is
+loaded, and at sign-in). No e-mail is sent.
 
 ## 4. Tenant membership & roles
 

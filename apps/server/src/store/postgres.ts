@@ -46,6 +46,7 @@ interface UserRow {
     email: string;
     name: string;
     admin: boolean;
+    onboarded_at: Ts | null;
     created_at: Ts;
 }
 
@@ -57,6 +58,7 @@ interface OrgRow {
     default_model: string | null;
     max_projects: number | null;
     daily_token_limit: number | string | null;
+    personal_of: string | null;
 }
 
 interface InvitationRow {
@@ -188,7 +190,7 @@ const firstRow = <T>(rows: readonly T[]): T => {
     return row;
 };
 
-const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit";
+const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
     "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, agent_instructions, agent_model, archived_at, created_at";
@@ -204,6 +206,7 @@ const rowToUser = (r: UserRow): User => ({
     email: r.email,
     name: r.name,
     admin: r.admin,
+    onboardedAt: iso(r.onboarded_at),
     createdAt: isoNow(r.created_at),
 });
 
@@ -215,6 +218,7 @@ const rowToOrg = (r: OrgRow): Organization => ({
     defaultModel: r.default_model,
     maxProjects: r.max_projects,
     dailyTokenLimit: r.daily_token_limit === null ? null : Number(r.daily_token_limit),
+    personalOf: r.personal_of,
 });
 
 const rowToInvitation = (r: InvitationRow): Invitation => ({
@@ -349,13 +353,13 @@ export class PostgresStore implements Store {
             findById: async (id) => {
                 const rows = await this.sql<
                     UserRow[]
-                >`SELECT id, issuer, subject, email, name, admin, created_at FROM users WHERE id = ${id}`;
+                >`SELECT id, issuer, subject, email, name, admin, onboarded_at, created_at FROM users WHERE id = ${id}`;
                 const r = rows[0];
                 return r ? rowToUser(r) : null;
             },
             findByIdentity: async (issuer, subject) => {
                 const rows = await this.sql<UserRow[]>`
-                    SELECT id, issuer, subject, email, name, admin, created_at FROM users WHERE issuer = ${issuer} AND subject = ${subject}`;
+                    SELECT id, issuer, subject, email, name, admin, onboarded_at, created_at FROM users WHERE issuer = ${issuer} AND subject = ${subject}`;
                 const r = rows[0];
                 return r ? rowToUser(r) : null;
             },
@@ -364,8 +368,11 @@ export class PostgresStore implements Store {
                     INSERT INTO users (id, issuer, subject, email, name, admin)
                     VALUES (${randomUUID()}, ${input.issuer}, ${input.subject}, ${input.email}, ${input.name}, ${input.admin})
                     ON CONFLICT (issuer, subject) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, admin = EXCLUDED.admin
-                    RETURNING id, issuer, subject, email, name, admin, created_at`;
+                    RETURNING id, issuer, subject, email, name, admin, onboarded_at, created_at`;
                 return rowToUser(firstRow(rows));
+            },
+            setOnboarded: async (id) => {
+                await this.sql`UPDATE users SET onboarded_at = now() WHERE id = ${id} AND onboarded_at IS NULL`;
             },
             count: async () => {
                 const rows = await this.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM users`;
@@ -379,13 +386,27 @@ export class PostgresStore implements Store {
                     // Slugs are unique across organisations, which RLS hides from each
                     // other: let the constraint decide, quietly.
                     const rows = await tx<OrgRow[]>`
-                        INSERT INTO organizations (id, slug, name) VALUES (${input.id}, ${input.slug}, ${input.name})
+                        INSERT INTO organizations (id, slug, name, personal_of)
+                        VALUES (${input.id}, ${input.slug}, ${input.name}, ${input.personalOf ?? null})
                         ON CONFLICT (slug) DO NOTHING RETURNING ${tx.unsafe(ORG_COLS)}`;
                     const row = rows[0];
                     if (!row) throw new SlugTakenError();
                     await tx`INSERT INTO control.tenants (id, slug, name) VALUES (${input.id}, ${input.slug}, ${input.name})`;
                     return rowToOrg(row);
                 }),
+            setPersonal: async (id, userId) => {
+                try {
+                    const rows = await this.withTenant(
+                        id,
+                        (tx) => tx`UPDATE organizations SET personal_of = ${userId} WHERE id = ${id} AND personal_of IS NULL RETURNING id`,
+                    );
+                    return rows.length > 0;
+                } catch (err) {
+                    // The unique index: this person already has a personal studio.
+                    if ((err as { code?: string }).code === "23505") return false;
+                    throw err;
+                }
+            },
             findById: async (id) =>
                 this.withTenant(id, async (tx) => {
                     const rows = await tx<OrgRow[]>`SELECT ${tx.unsafe(ORG_COLS)} FROM organizations WHERE id = ${id}`;

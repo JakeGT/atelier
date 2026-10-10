@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
 import postgres from "postgres";
 import { connectedAsOwner, migrate } from "../src/db/migrate.ts";
-import { ensureUserOrg } from "../src/services/bootstrap.ts";
+import { ensurePersonalStudio } from "../src/services/bootstrap.ts";
 import { ReleaseService } from "../src/services/release.ts";
 import type { WorkspaceRuntime } from "../src/services/runtime.ts";
 import { SessionStore } from "../src/services/sessions.ts";
@@ -115,10 +115,11 @@ test("sign-in bootstrap creates an org + owner membership", { skip }, async () =
         name: "A",
         admin: false,
     });
-    await ensureUserOrg(store, user.id, user.email, user.name);
-    await ensureUserOrg(store, user.id, user.email, user.name);
+    await ensurePersonalStudio(store, user);
+    await ensurePersonalStudio(store, user);
     const orgs = await store.organizations.listForUser(user.id);
     assert.equal(orgs.length, 1);
+    assert.equal(orgs[0]?.personalOf, user.id);
     assert.equal(await store.memberships.roleOf(orgs[0]?.id ?? "", user.id), "owner");
 });
 
@@ -672,4 +673,34 @@ test("taking a website down: no release is live, nothing is published, and its a
     assert.deepEqual([cleared.hostingRef, cleared.productionRef], ["atl-x", null]);
     // The other tenant's website is untouched.
     assert.ok(await store.releases.findLive(b.tenantId, b.project.id));
+});
+
+test("personal studios: one per person; someone here before they existed keeps their oldest own studio", { skip }, async () => {
+    const mk = (n: string) =>
+        store.users.upsertIdentity({
+            issuer: "https://idp/",
+            subject: `${n}-${suffix}`,
+            email: `${n}-${suffix}@example.com`,
+            name: `${n} Person`,
+            admin: false,
+        });
+    // A newcomer: not onboarded, no studios. They get a fresh personal one.
+    const fresh = await mk("fresh");
+    assert.equal(fresh.onboardedAt, null);
+    const made = await ensurePersonalStudio(store, fresh);
+    assert.deepEqual([made.personalOf, made.name], [fresh.id, "fresh's studio"]);
+    // A second personal studio for the same person is refused by the database itself.
+    const spare = await store.organizations.create({ id: randomUUID(), slug: `spare-${suffix}`, name: "Spare" });
+    assert.equal(await store.organizations.setPersonal(spare.id, fresh.id), false);
+
+    // Someone from before: onboarded, already owns a studio. It becomes their personal one; none is added.
+    const old = await mk("old");
+    await store.users.setOnboarded(old.id);
+    const theirs = await store.organizations.create({ id: randomUUID(), slug: `old-${suffix}`, name: "Old Co" });
+    await store.memberships.add({ tenantId: theirs.id, userId: old.id, role: "owner" });
+    const veteran = (await store.users.findById(old.id)) ?? assert.fail("user gone");
+    assert.ok(veteran.onboardedAt);
+    const claimed = await ensurePersonalStudio(store, veteran);
+    assert.deepEqual([claimed.id, claimed.personalOf], [theirs.id, old.id]);
+    assert.equal((await store.organizations.listForUser(old.id)).length, 1);
 });

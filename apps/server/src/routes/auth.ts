@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Config } from "../config.ts";
 import { clientIp, RateLimiter, sameOrigin } from "../security.ts";
-import { ensureUserOrg } from "../services/bootstrap.ts";
+import { acceptInvitations, ensurePersonalStudio } from "../services/bootstrap.ts";
 import { clearCookie, readCookie, writeCookie } from "../services/cookies.ts";
 import { type OidcService, randomCodeVerifier, randomNonce, randomState } from "../services/oidc.ts";
 import type { SessionStore } from "../services/sessions.ts";
@@ -35,7 +35,7 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
                 name: "Local Developer",
                 admin: true,
             });
-            await ensureUserOrg(store, user.id, user.email, user.name);
+            await ensurePersonalStudio(store, user);
             const { id } = await sessions.createSession(user.id);
             writeCookie(c, "session", secure, id);
             return c.redirect(safeNext(c.req.query("next")));
@@ -63,13 +63,16 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             const claims = await oidc.handleCallback(c.req.url, flow.state, flow.nonce, flow.codeVerifier);
             const isAdmin = claims.groups.includes(oidc.adminGroup);
 
-            // Sign-up is invite-gated. Three ways in: a platform admin, someone who
-            // already has an account, or someone an organisation has invited by
-            // e-mail. The address is trustworthy here: an unverified one was refused
-            // on the line above unless the provider is configured as trusted.
+            // Who may use Atelier is decided by the identity provider: it only lets
+            // people it has been told to (its groups and policies) complete a sign-in,
+            // so anyone who arrives here has been given access. (SIGNUP_MODE=invite is
+            // for a provider that cannot do that: then only platform admins, people
+            // already here, and people a studio has added by e-mail get in.)
+            // The address is trustworthy: an unverified one is refused unless the
+            // provider is configured as trusted.
             if (!claims.email) return c.redirect("/login?auth_error=failed");
             if (oidc.trustEmail === false && !claims.verified) return c.redirect("/login?auth_error=unverified");
-            if (config.signupMode !== "open" && !isAdmin) {
+            if (config.signupMode === "invite" && !isAdmin) {
                 const existing = await store.users.findByIdentity(claims.issuer, claims.subject);
                 const invited = existing ? true : (await store.invitations.pendingFor(claims.email)).length > 0;
                 if (!invited) return c.redirect("/login?auth_error=denied");
@@ -83,19 +86,10 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
                 admin: isAdmin,
             });
 
-            // Invitations addressed to this person become memberships now. Someone who
-            // arrives with none, and belongs nowhere yet, gets a studio of their own.
-            const joined = await store.invitations.acceptAll(user.id, user.email);
-            for (const tenantId of joined) {
-                await store.audit.record({
-                    tenantId,
-                    actorId: user.id,
-                    action: "invitation.accept",
-                    target: `user:${user.id}`,
-                    detail: null,
-                });
-            }
-            await ensureUserOrg(store, user.id, user.email, user.name);
+            // Their own studio (made now if this is their first time), plus any
+            // studios they have been added to.
+            await ensurePersonalStudio(store, user);
+            await acceptInvitations(store, user);
 
             // A fresh session id on every sign-in (no fixation); replace any old one.
             const old = readCookie(c, "session", secure);
@@ -145,7 +139,15 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
         const session = sid ? await sessions.get(sid) : undefined;
         if (!session) return c.json(null);
         const { user } = session;
-        return c.json({ id: user.id, email: user.email, name: user.name, admin: user.admin, csrfToken: session.csrf });
+        // `onboarded`: false until they have been through (or skipped) the introduction.
+        return c.json({
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            admin: user.admin,
+            onboarded: user.onboarded,
+            csrfToken: session.csrf,
+        });
     });
 
     return app;

@@ -32,7 +32,10 @@ list. Before inventing a term, look for it here; when you add one, add it here.
 | We say | Meaning | We do not say |
 | --- | --- | --- |
 | **Website** | One site a person is building | Project |
-| **Studio** | A shared space with its own websites, members and usage | Organisation, tenant, workspace |
+| **Studio** | A space with its own websites, members and usage | Organisation, tenant, workspace |
+| **Your personal studio** | The studio everyone has from the start; always theirs | Default org, home tenant |
+| **Shared studio** | A studio made to work in with other people | Team, organisation |
+| **Add someone** | Give a person who already uses Atelier a place in a studio | Invite (access to Atelier itself is given elsewhere) |
 | **Your assistant** | The AI that builds the website | Agent, model, bot |
 | **Version** | A saved state of the website after one request to the assistant | Checkpoint, commit |
 | **Go back to this** | Make an earlier version the current one | Restore, revert, reset |

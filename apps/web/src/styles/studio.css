@@ -597,3 +597,152 @@
     line-height: 1.45;
     color: var(--ink-3);
 }
+
+/* ---- welcome ------------------------------------------------------------------- */
+
+.welcome {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.welcome-main {
+    flex: 1;
+    width: min(620px, 100%);
+    margin: 0 auto;
+    padding: 24px 24px 80px;
+}
+
+.welcome-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    margin: 12px 0 36px;
+    padding: 0;
+    list-style: none;
+    font-size: 13.5px;
+    color: var(--ink-3);
+}
+
+.welcome-steps li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.welcome-steps li.on {
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.welcome-steps li.done {
+    color: var(--ink-2);
+}
+
+.welcome-step-mark {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.welcome-steps li.on .welcome-step-mark {
+    border-color: var(--seal);
+    background: var(--seal);
+    color: var(--on-seal);
+}
+
+.welcome-steps li.done .welcome-step-mark {
+    border-color: transparent;
+    background: var(--live-wash);
+    color: var(--live);
+}
+
+.welcome-step-mark svg {
+    width: 12px;
+    height: 12px;
+}
+
+.welcome-card {
+    animation: reveal 0.5s var(--ease) both;
+}
+
+.welcome-card h1 {
+    margin: 10px 0 18px;
+    font-size: clamp(40px, 7vw, 60px);
+    line-height: 1.02;
+}
+
+.welcome-lede {
+    margin: 0 0 8px;
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--ink-2);
+}
+
+.welcome-how {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: how;
+}
+
+.welcome-how li {
+    position: relative;
+    padding: 14px 0 14px 44px;
+    border-top: 1px solid var(--line);
+    font-size: 15.5px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    counter-increment: how;
+}
+
+.welcome-how li::before {
+    content: counter(how);
+    position: absolute;
+    left: 2px;
+    top: 12px;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1;
+    color: var(--seal);
+}
+
+.welcome-how strong {
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.welcome-note {
+    margin: 4px 0 0;
+    padding: 14px 16px;
+    border-radius: var(--radius-m);
+    background: var(--paper-deep);
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-2);
+}
+
+.welcome-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-top: 28px;
+}
+
+.welcome-skip {
+    margin: 40px 0 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 13.5px;
+    color: var(--ink-3);
+}
+
+.welcome-skip .link {
+    color: var(--ink-2);
+}
