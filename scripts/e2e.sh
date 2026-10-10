@@ -36,7 +36,9 @@ fi
 
 cleanup
 "${COMPOSE[@]}" up -d db >/dev/null
-for _ in $(seq 1 60); do "${COMPOSE[@]}" exec -T db pg_isready -U postgres -q && break; sleep 1; done
+# Over TCP: while Postgres initialises it runs a temporary server on its socket
+# only, which answers "ready" and then shuts down.
+for _ in $(seq 1 60); do "${COMPOSE[@]}" exec -T db pg_isready -h 127.0.0.1 -U postgres -q && break; sleep 1; done
 # The same three roles as production (docs/14 §3).
 "${COMPOSE[@]}" exec -T db psql -U postgres -q -v ON_ERROR_STOP=1 <<'SQL'
 CREATE ROLE atelier LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'owner';
