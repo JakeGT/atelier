@@ -155,6 +155,16 @@ export function useDragScroll<T extends HTMLElement>(): (node: T | null) => void
             e.stopPropagation();
         };
         const noNativeDrag = (e: DragEvent) => e.preventDefault();
+        // Which way there is more, so the row can fade at that edge (it has no scroll bar to say so).
+        const edges = () => {
+            row.classList.toggle("more-before", row.scrollLeft > 8);
+            row.classList.toggle("more-after", row.scrollLeft + row.clientWidth < row.scrollWidth - 8);
+        };
+        edges();
+        const watch = new ResizeObserver(edges);
+        watch.observe(row);
+        for (const child of row.children) watch.observe(child);
+        row.addEventListener("scroll", edges, { passive: true });
         row.addEventListener("pointerdown", down);
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
@@ -168,6 +178,8 @@ export function useDragScroll<T extends HTMLElement>(): (node: T | null) => void
             window.removeEventListener("pointercancel", up);
             row.removeEventListener("click", click, true);
             row.removeEventListener("dragstart", noNativeDrag);
+            row.removeEventListener("scroll", edges);
+            watch.disconnect();
         };
     }, [row]);
     return setRow;

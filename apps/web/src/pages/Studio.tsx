@@ -291,7 +291,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                         );
                                     })}
                                 </div>
-                                <button type="button" className="btn btn-sm" onClick={() => setChoosing(true)}>
+                                <button type="button" className="btn btn-sm designs-all" onClick={() => setChoosing(true)}>
                                     <LayoutTemplate /> See all {starts.length} designs and templates, larger
                                 </button>
                             </div>

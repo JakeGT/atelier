@@ -1660,6 +1660,23 @@ button.where:hover {
     scroll-snap-type: x proximity;
     cursor: grab;
     user-select: none;
+    /* No scroll bar: it is dragged, swiped or moved through with the arrow keys, and fades where there is more. */
+    scrollbar-width: none;
+    --fade-before: 0px;
+    --fade-after: 0px;
+    mask-image: linear-gradient(to right, transparent, #000 var(--fade-before), #000 calc(100% - var(--fade-after)), transparent);
+}
+
+.designs-row::-webkit-scrollbar {
+    display: none;
+}
+
+.designs-row.more-before {
+    --fade-before: 56px;
+}
+
+.designs-row.more-after {
+    --fade-after: 56px;
 }
 
 /* Being dragged along with the mouse: it follows the hand exactly, and nothing under it reacts. */
@@ -1837,4 +1854,10 @@ button.where:hover {
 .movement li .btn {
     align-self: flex-start;
     margin-top: auto;
+}
+
+.designs-all {
+    display: flex;
+    width: fit-content;
+    margin: 6px auto 0;
 }
