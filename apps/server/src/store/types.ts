@@ -101,6 +101,8 @@ export interface ProjectStore {
     // Where the website is hosted: its project there, and its stable public address.
     // `productionRef`: omitted keeps the address, null clears it (the website was taken offline).
     setHosting(tenantId: string, id: string, hosting: { hostingRef: string; productionRef?: string | null }): Promise<Project>;
+    // A new picture of the home page was taken.
+    setCover(tenantId: string, id: string, at: Date): Promise<void>;
     // Removes the project and everything that hangs off it (content, releases, conversation).
     delete(tenantId: string, id: string): Promise<void>;
 }

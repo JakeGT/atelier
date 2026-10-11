@@ -87,6 +87,8 @@ export const projectSchema = z.object({
     agentModel: z.string().nullable(),
     // How much the assistant asks before it acts: 0 decides everything itself … 3 assumes nothing.
     askLevel: z.number().int().min(0).max(3),
+    // When the picture of its home page (shown on its card) was last taken; null if it has none yet.
+    coverAt: z.string().datetime().nullable(),
     archivedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
 });

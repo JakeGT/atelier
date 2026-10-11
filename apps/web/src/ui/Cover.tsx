@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 // A generated cover for a project: the same id always draws the same composition.
 // Four layouts × six palettes, picked from a hash, so a grid of projects looks
 // like a wall of studies rather than a list of grey boxes.
@@ -20,7 +22,16 @@ function hash(s: string): number {
     return h >>> 0;
 }
 
-export function Cover({ seed, label }: { seed: string; label: string }) {
+// `src`: a picture of the website's home page, when one has been taken. Until then (a website
+// with no page yet), and if the picture cannot be fetched, the drawn cover stands in.
+export function Cover({ seed, label, src }: { seed: string; label: string; src?: string }) {
+    const [failed, setFailed] = useState<string | null>(null);
+    if (src && failed !== src)
+        return <img className="cover cover-picture" src={src} alt="" loading="lazy" draggable={false} onError={() => setFailed(src)} />;
+    return <Drawn seed={seed} label={label} />;
+}
+
+function Drawn({ seed, label }: { seed: string; label: string }) {
     const h = hash(seed);
     const [bg, accent, ink] = PALETTES[h % PALETTES.length] ?? PALETTES[0];
     const layout = (h >>> 4) % 4;

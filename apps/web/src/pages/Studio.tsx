@@ -404,7 +404,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                             navigate(`/o/${org.slug}/p/${p.slug}`);
                                         }}
                                     >
-                                        <Cover seed={p.id} label={p.name} />
+                                        <Cover seed={p.id} label={p.name} src={a.coverUrl(p)} />
                                         <div className="card-meta">
                                             <strong>{p.name}</strong>
                                             <span className="mono muted">

@@ -390,6 +390,20 @@ test("design kit: a website starts in a look, and changing the look rewrites one
         inside(session.workspaceId, "cd /workspace && git log --format=%s").out,
         /^Changed the look to Midnight\nStarted with the Editorial look$/,
     );
+
+    // Its card gets a picture of the home page: taken by the browser in the real workspace, a few
+    // seconds after the change, of the page wearing the look it was just given.
+    let coverAt: string | null = null;
+    for (let i = 0; i < 40 && !coverAt; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        coverAt = (await json<{ project: { coverAt: string | null } }>(await call("GET", `/projects/${project.id}`))).project.coverAt;
+    }
+    assert.ok(coverAt, "no cover was taken within 40 seconds");
+    const cover = await call("GET", `/projects/${project.id}/cover`);
+    assert.equal(cover.headers.get("content-type"), "image/webp");
+    const bytes = Buffer.from(await cover.arrayBuffer());
+    assert.equal(bytes.subarray(0, 4).toString("latin1"), "RIFF");
+    assert.ok(bytes.length > 1500, `the cover is only ${bytes.length} bytes`);
 });
 
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {

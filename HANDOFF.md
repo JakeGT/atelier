@@ -219,6 +219,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 - `navigate()` and browser back/forward change the page inside a view transition (`lib/hooks.ts` `eased`; styles in `base.css` under "moving between pages"): the old page fades back, the new one fades up. Skipped for reduced motion and in browsers without view transitions. Page containers fade in when their data arrives.
 
+## Website covers (branch `website-covers`)
+
+- Each website's card on the studio page shows a picture of its home page. `services/cover.ts`: the control plane (`Covers`, in `routes/kit.ts`) asks for one a few seconds after any change (the `announce` middleware, and a finished assistant request); the workspace takes it (`takeCover`, daemon `POST /cover`, with its Chromium and the saved wording and media fetched through the agent API); it is kept beside the website's media as `_cover.webp` and `projects.cover_at` (migration 0022) records when. Served at `GET …/projects/:id/cover`.
+- A website that has not changed since this shipped gets its picture the next time it is opened in the editor. No home page: the drawn cover stays.
+- Off where there is no browser (tests; a dev machine without `CHROMIUM_PATH`).
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

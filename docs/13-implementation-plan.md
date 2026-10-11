@@ -416,6 +416,8 @@ current host. What needs the VPS is P6, which is last.
   for and built 2026-10-11 on `assistant-questions`).
 - E5.10 Reports about Atelier from people and from the assistant (ADR-0020,
   asked for and built 2026-10-11 on `feedback-reports`).
+- E5.11 Website covers (asked for and built 2026-10-11 on `website-covers`):
+  a picture of each website's home page on its card, retaken after every change.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

@@ -1050,3 +1050,14 @@ test("reports about Atelier are kept across studios and can be closed, not delet
     await store.projects.delete(a.tenantId, a.projectId);
     assert.ok((await store.feedback.list()).some((r) => r.id === made.id));
 });
+
+test("a website records when its cover was taken", { skip }, async () => {
+    const a = await studio("cover-a");
+    const b = await studio("cover-b");
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, null);
+    const at = new Date("2026-10-11T10:00:00.000Z");
+    await store.projects.setCover(b.tenantId, a.projectId, at);
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, null);
+    await store.projects.setCover(a.tenantId, a.projectId, at);
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, at.toISOString());
+});

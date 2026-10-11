@@ -81,6 +81,8 @@ export interface MonthUsage {
 export interface Project {
     // This person's role on this website (it can differ from their role in the studio).
     myRole?: Role;
+    // When the picture of its home page was last taken; absent or null if it has none yet.
+    coverAt?: string | null;
     id: string;
     tenantId: string;
     slug: string;
@@ -680,6 +682,9 @@ export function orgApi(org: string) {
         readMessages: (projectId: string) => post<{ ok: true }>(`${p(projectId)}/submissions/read`),
         removeMessage: (projectId: string, id: string) => del<{ ok: true }>(`${p(projectId)}/submissions/${id}`),
         messagesCsvUrl: (projectId: string) => `${p(projectId)}/submissions.csv`,
+        // The picture of a website's home page, if one has been taken. The time in the address lets it be kept until the next one.
+        coverUrl: (project: Pick<Project, "id" | "coverAt">) =>
+            project.coverAt ? `${p(project.id)}/cover?v=${encodeURIComponent(project.coverAt)}` : undefined,
         listMedia: (projectId: string) => get<MediaLibrary>(`${p(projectId)}/media`),
         uploadMedia: (projectId: string, file: File, about: { alt: string; decorative: boolean }) => {
             const form = new FormData();

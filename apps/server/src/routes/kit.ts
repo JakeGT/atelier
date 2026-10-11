@@ -11,7 +11,9 @@ import {
     requireRecentAuth,
     requireSession,
 } from "../middleware/auth.ts";
+import { signAgentToken } from "../services/agentToken.ts";
 import { ModelCatalog } from "../services/catalog.ts";
+import { Covers, type CoverTaker } from "../services/cover.ts";
 import type { Hosting } from "../services/hosting.ts";
 import type { MediaStorage } from "../services/mediaStorage.ts";
 import { type Mailer, Notifier } from "../services/notifier.ts";
@@ -53,6 +55,9 @@ export interface ApiDeps {
     notifier?: Notifier;
     // Starter templates; read from apps/server/templates unless given.
     templates?: Template[];
+    // What takes a website's cover picture (the workspace runtime, unless a test supplies its own), and how soon after a change.
+    coverTaker?: CoverTaker;
+    coverDelayMs?: number;
 }
 
 // Everything under an organisation, and under one of its projects.
@@ -88,13 +93,36 @@ export function createApi(deps: ApiDeps) {
     app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" ? next() : csrf(c, next)));
 
     const presence = new Presence();
+    // Pictures of each website's home page, for its card: retaken a few seconds after a change.
+    // Taken in the workspace; switched off where there is no browser to take them with (tests, a bare dev machine).
+    const covers = new Covers({
+        store,
+        storage: config.runtimeMode === "container" || process.env.CHROMIUM_PATH ? (deps.storage ?? null) : null,
+        taker: deps.coverTaker ?? deps.runtime,
+        access: (tenantId, projectId) => ({
+            apiUrl: config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`,
+            agentToken: signAgentToken(
+                { tenantId, projectId, sessionId: "cover", exp: Math.floor(Date.now() / 1000) + 600 },
+                deps.secretsKey,
+            ),
+        }),
+        ...(deps.coverDelayMs === undefined ? {} : { delayMs: deps.coverDelayMs }),
+    });
     // A successful change to a website tells everyone who has it open to reload what they show.
     const announce: MiddlewareHandler<Env> = async (c, next) => {
         await next();
         // Not the heartbeat itself, and not how much the assistant asks: that changes nothing a
         // website shows, and travels with the heartbeat instead of making every editor reload.
         const quiet = c.req.path.endsWith("/pulse") || c.req.path.endsWith("/asking");
-        if (c.req.method !== "GET" && c.res.status < 400 && !quiet) presence.touch(c.get("project").id);
+        if (c.req.method === "GET" || c.res.status >= 400 || quiet) return;
+        presence.touch(c.get("project").id);
+        // What the website shows may have changed (wording, a look, a restored version, a picture): its card
+        // gets a new picture. Not for things that change nothing on it, or that only start work whose end will.
+        if (
+            !/\/(messages|submissions(\/.*)?|template|share|releases(\/.*)?|domains(\/.*)?|members(\/.*)?)$/.test(c.req.path) &&
+            c.req.method !== "DELETE"
+        )
+            covers.changed(c.get("org").id, c.get("project").id);
     };
 
     function route(method: Method, path: string, requirement: Requirement, ...rest: [...MiddlewareHandler<Env>[], Handler]) {
@@ -117,6 +145,7 @@ export function createApi(deps: ApiDeps) {
         hosting: deps.hosting ?? null,
         templates: deps.templates ?? loadTemplates(),
         presence,
+        covers,
         storage: deps.storage ?? null,
         notifier:
             deps.notifier ??
