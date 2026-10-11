@@ -206,6 +206,9 @@ export function useDragScroll<T extends HTMLElement>(): {
         const watch = new ResizeObserver(edges);
         watch.observe(row);
         for (const child of row.children) watch.observe(child);
+        // What is in the row arrives after the row does (the designs are fetched): look again when it changes.
+        const contents = new MutationObserver(edges);
+        contents.observe(row, { childList: true });
         row.addEventListener("scroll", edges, { passive: true });
         row.addEventListener("pointerdown", down);
         row.addEventListener("wheel", stop, { passive: true });
@@ -225,6 +228,7 @@ export function useDragScroll<T extends HTMLElement>(): {
             row.removeEventListener("dragstart", noNativeDrag);
             row.removeEventListener("scroll", edges);
             watch.disconnect();
+            contents.disconnect();
         };
     }, [row]);
     const step = useCallback(

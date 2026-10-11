@@ -2011,11 +2011,150 @@ button.where:hover {
     gap: 6px;
 }
 
-.brief-asking {
-    margin-bottom: 10px;
-    padding: 4px clamp(16px, 2.2vw, 26px) 0;
+/* ---- the new-website form, kept short: everything on as few lines as stay readable ---- */
+
+.brief-name {
+    padding-top: 18px;
+    padding-bottom: 2px;
 }
 
-.brief-asking .asking {
-    max-width: 640px;
+.brief-text {
+    padding-top: 6px;
+    padding-bottom: 8px;
+}
+
+.designs {
+    margin-top: 6px;
+    padding-top: 14px;
+}
+
+.designs-head {
+    margin-bottom: 8px;
+}
+
+.designs-row {
+    padding-bottom: 6px;
+}
+
+.design {
+    width: 156px;
+}
+
+/* A design's name and what kind of thing it is, on one line. */
+.design-name {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+.design-tag {
+    flex: none;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.designs-all {
+    margin: 2px auto 0;
+}
+
+.brief-asking {
+    margin-top: 12px;
+    padding: 12px clamp(16px, 2.2vw, 26px);
+    border-top: 1px solid var(--line);
+}
+
+/* The slider across the whole width: its name, then the two ends with the slider between them. */
+.asking-row {
+    display: grid;
+    grid-template-columns: auto auto minmax(120px, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.asking-row-label {
+    margin-right: 8px;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.asking-row-end {
+    font-size: 12.5px;
+    white-space: nowrap;
+}
+
+.asking-row input[type="range"] {
+    width: 100%;
+    margin: 0;
+    accent-color: var(--seal);
+    cursor: pointer;
+}
+
+.asking-row-now {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--ink-3);
+}
+
+.asking-row-now strong {
+    color: var(--ink);
+}
+
+.brief-foot {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+.brief-foot .starters {
+    flex: 1;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.starter-chosen {
+    flex: none;
+}
+
+.starter-about {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    /* The name, the slider across the whole width, then its two ends under it. */
+    .asking-row {
+        grid-template-columns: 1fr 1fr;
+    }
+    .asking-row-label,
+    .asking-row input[type="range"] {
+        grid-column: 1 / -1;
+    }
+    .asking-row input[type="range"] {
+        grid-row: 2;
+    }
+    .asking-row-end {
+        grid-row: 3;
+    }
+    .asking-row-end:last-of-type {
+        text-align: right;
+    }
+    .starter-about {
+        display: none;
+    }
+    /* Narrow, the words in the description box run to three lines: room for all of them. */
+    .brief-text {
+        min-height: calc(3 * 1.5em + 14px);
+    }
 }

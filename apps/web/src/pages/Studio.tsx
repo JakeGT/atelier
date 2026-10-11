@@ -92,9 +92,9 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     // Everything a website can start from, in the order it is offered: the studio's own
     // templates, then looks (an empty website in a finished design), then finished websites.
     const starts: (Template & { tag: string })[] = [
-        ...templates.filter((t) => t.own).map((t) => ({ ...t, tag: "Your studio's" })),
-        ...looks.map((t) => ({ ...t, name: t.name.replace(/ look$/, ""), tag: "A look" })),
-        ...templates.filter((t) => !t.own).map((t) => ({ ...t, tag: "A finished website" })),
+        ...templates.filter((t) => t.own).map((t) => ({ ...t, tag: "Yours" })),
+        ...looks.map((t) => ({ ...t, name: t.name.replace(/ look$/, ""), tag: "Look" })),
+        ...templates.filter((t) => !t.own).map((t) => ({ ...t, tag: "Website" })),
     ];
     const chosen = starts.find((t) => t.id === template);
     const [choosing, setChoosing] = useState(false);
@@ -263,7 +263,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 value={brief}
                                 onChange={(e) => setBrief(e.target.value)}
                                 onKeyDown={onBriefKey}
-                                rows={3}
+                                rows={2}
                                 aria-label="Describe the website"
                             />
                             {/* The designs and templates are shown, not hidden behind a button: a row of
@@ -325,8 +325,10 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                                         <span className="gallery-blank">Empty</span>
                                                     )}
                                                 </span>
-                                                <span className="design-name">{t.name}</span>
-                                                {t.tag && <span className="design-tag mono muted">{t.tag}</span>}
+                                                <span className="design-name">
+                                                    {t.name}
+                                                    {t.tag && <span className="design-tag mono muted">{t.tag}</span>}
+                                                </span>
                                             </label>
                                         );
                                     })}
@@ -336,22 +338,17 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 </button>
                             </div>
                             <div className="brief-asking">
-                                <AskLevelSlider
-                                    level={askLevel}
-                                    onChange={setAskLevel}
-                                    full
-                                    note="For this new website. You can change it at any time under the message box in the editor."
-                                />
+                                <AskLevelSlider level={askLevel} onChange={setAskLevel} row />
                             </div>
-                            <p className="brief-start">
-                                {chosen
-                                    ? `${chosen.name}: ${chosen.description} It is there the moment you open the website; then ask your assistant to make it yours.`
-                                    : "Your assistant builds the first page from your description, or you start in the editor with nothing."}
-                            </p>
                             <div className="brief-foot">
                                 <span className="starters">
                                     <span className="starters-label">Starts from</span>
                                     <strong className="starter-chosen">{chosen ? chosen.name : "An empty page"}</strong>
+                                    <span className="starter-about muted">
+                                        {chosen
+                                            ? `${chosen.description} It is there the moment you open the website.`
+                                            : "Your assistant builds the first page from your description."}
+                                    </span>
                                 </span>
                                 <button type="submit" className="btn btn-seal" disabled={busy}>
                                     {busy ? (

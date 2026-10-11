@@ -1805,3 +1805,72 @@
     justify-content: center;
     min-width: max-content;
 }
+
+/* How much it asks, under the message box: a button like the two above it, which opens the
+   slider in place. The panel grows and shrinks smoothly; nothing changes on hover. */
+.asking-fold {
+    padding: 0 2px 4px;
+}
+
+.asking-fold-button {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+    color: var(--ink-2);
+}
+
+.asking-fold-button strong {
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.asking-fold-chevron {
+    transition: rotate 0.3s var(--ease);
+}
+
+.asking-fold.open .asking-fold-chevron {
+    rotate: 180deg;
+}
+
+.asking-fold-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+        grid-template-rows 0.32s var(--ease),
+        opacity 0.25s var(--ease);
+}
+
+.asking-fold.open .asking-fold-panel {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.asking-fold-panel > div {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.asking-fold-inner {
+    min-width: 0;
+    margin: 6px 0 2px;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+}
+
+.asking-fold-inner input[type="range"] {
+    display: block;
+    width: 100%;
+    margin: 2px 0;
+    accent-color: var(--seal);
+    cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .asking-fold-panel,
+    .asking-fold-chevron {
+        transition: none;
+    }
+}

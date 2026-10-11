@@ -1,4 +1,4 @@
-import { MessageCircleQuestion } from "lucide-react";
+import { ChevronDown, MessageCircleQuestion, SlidersHorizontal } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AssistantQuestions } from "../lib/api";
 
@@ -35,27 +35,107 @@ export function AskLevelSlider({
     onChange,
     disabled,
     full,
+    row,
     note,
 }: {
     level: number;
     onChange: (level: number) => void;
     disabled?: boolean;
     full?: boolean;
+    // Laid out as one line across the whole width (the new-website form).
+    row?: boolean;
     // Said after what the stop means, in place of the usual line about when it takes effect.
     note?: string;
 }) {
-    const [using, setUsing] = useState(false);
+    const [open, setOpen] = useState(false);
     const id = useId();
     const now = ASK_LEVELS[level] ?? ASK_LEVELS[1];
+    // One line across the whole width: what it is, the slider between its two ends, and under it
+    // what the chosen stop means. For a form that has room across and little to spare downwards.
+    if (row) {
+        return (
+            <fieldset className="asking-row" disabled={disabled}>
+                <label htmlFor={id} className="asking-row-label">
+                    How much your assistant asks you
+                </label>
+                <span className="asking-row-end muted">Decides everything itself</span>
+                <input
+                    id={id}
+                    type="range"
+                    min={0}
+                    max={ASK_LEVELS.length - 1}
+                    step={1}
+                    value={level}
+                    onChange={(e) => onChange(Number(e.target.value))}
+                    aria-valuetext={now?.name}
+                    list={`${id}-stops`}
+                />
+                <datalist id={`${id}-stops`}>
+                    {ASK_LEVELS.map((l, i) => (
+                        <option key={l.name} value={i} />
+                    ))}
+                </datalist>
+                <span className="asking-row-end muted">Assumes nothing</span>
+                <p className="asking-row-now" aria-live="polite">
+                    <strong>{now?.name}.</strong> {now?.about}
+                </p>
+            </fieldset>
+        );
+    }
+    // Under the message box: a button that says what it is and what is chosen. Pressing it
+    // opens the slider in place, smoothly; nothing moves on hover.
+    if (!full) {
+        return (
+            <div className={`asking-fold ${open ? "open" : ""}`}>
+                <button
+                    type="button"
+                    className="btn btn-sm btn-ghost asking-fold-button"
+                    onClick={() => setOpen((o) => !o)}
+                    aria-expanded={open}
+                    aria-controls={`${id}-panel`}
+                    disabled={disabled}
+                >
+                    <SlidersHorizontal />
+                    <span>How much your assistant asks you:</span>
+                    <strong>{now?.short}</strong>
+                    <ChevronDown className="asking-fold-chevron" />
+                </button>
+                <div className="asking-fold-panel" id={`${id}-panel`} inert={!open}>
+                    <div>
+                        <fieldset className="asking-fold-inner" disabled={disabled}>
+                            <input
+                                id={id}
+                                type="range"
+                                min={0}
+                                max={ASK_LEVELS.length - 1}
+                                step={1}
+                                value={level}
+                                onChange={(e) => onChange(Number(e.target.value))}
+                                aria-label="How much your assistant asks you before it acts"
+                                aria-valuetext={now?.name}
+                                list={`${id}-stops`}
+                            />
+                            <datalist id={`${id}-stops`}>
+                                {ASK_LEVELS.map((l, i) => (
+                                    <option key={l.name} value={i} />
+                                ))}
+                            </datalist>
+                            <div className="asking-ends muted">
+                                <span>Decides everything itself</span>
+                                <span>Assumes nothing</span>
+                            </div>
+                            <p className="asking-now" aria-live="polite">
+                                <strong>{now?.name}.</strong> {now?.about}{" "}
+                                <span className="muted">{note ?? "For this website, from your next request."}</span>
+                            </p>
+                        </fieldset>
+                    </div>
+                </div>
+            </div>
+        );
+    }
     return (
-        <fieldset
-            className={`asking ${full ? "asking-full" : ""}`}
-            disabled={disabled}
-            onFocus={() => setUsing(true)}
-            onBlur={() => setUsing(false)}
-            onMouseEnter={() => setUsing(true)}
-            onMouseLeave={() => setUsing(false)}
-        >
+        <fieldset className={`asking ${full ? "asking-full" : ""}`} disabled={disabled}>
             <legend className="asking-head">
                 <label htmlFor={id} className="eyebrow">
                     How much your assistant asks you
@@ -82,7 +162,7 @@ export function AskLevelSlider({
                 <span>Decides everything itself</span>
                 <span>Assumes nothing</span>
             </div>
-            {(full || using) && (
+            {full && (
                 <p className="asking-now" aria-live="polite">
                     {now?.about}{" "}
                     <span className="muted">{note ?? "For this website, from your next request; shared by everyone working on it."}</span>

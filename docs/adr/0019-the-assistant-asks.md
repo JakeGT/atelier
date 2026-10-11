@@ -32,7 +32,9 @@ unanswered question would hold a workspace busy.
 
 `projects.ask_level`, four stops. The slider is always in view (it was first a
 small button that opened it, and the owner could not find it): under the
-message box in the editor, in the website's settings, and in the new-website
+message box in the editor (a button that names the setting and the chosen stop,
+and opens the slider in place; nothing changes on hover), in the website's
+settings, and in the new-website
 form on the studio page, where it sets the level the website is created with.
 (`PUT …/asking`, anyone who can make requests; `askLevel` on create.)
 
