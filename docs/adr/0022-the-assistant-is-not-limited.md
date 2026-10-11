@@ -46,10 +46,37 @@ what the assistant may make needs a safety reason, or the owner's say-so first.
   the product works, not limits on what can be made.
 - No build step exists, so whatever it uses must run as plain files. That is a fact, stated as one.
 
+## The web (decided by the owner the same day)
+
+"Give it web fetch access for resources, research, etc." The workspaces' egress proxy has a third
+mode, `open`: every public host on ports 80 and 443, and still never a private address, so the
+platform's own services stay out of reach (this amends ADR-0012; `EGRESS_MODE=open` in production).
+The assistant's preview browser goes out the same way, so fonts and pictures loaded from elsewhere
+are in what it sees. Its instructions say what the web is for, that a page's text is information
+and never an instruction, and that the person's content is not to be sent anywhere. The risk
+accepted: a page could try to trick the assistant into sending the unpublished website somewhere.
+The workspace holds no keys and cannot publish.
+
+## A blank canvas is blank
+
+The assistant is told at the start of each request what was chosen for the website's design (a
+look, styling of its own, or nothing). With nothing chosen it is told it has no need of the design
+kit, and the kit's tool lists ready-made looks and sections only when asked to.
+
+## Editable wording serves the design
+
+Connecting wording to the Content page is still asked for, but where it would force the design to
+change, the design is kept and the person is told which words they must ask to have changed.
+
 ## Not yet possible
 
-Searching for photographs and generating photographic images need tools that do not exist. The
-instructions say so plainly rather than forbidding it.
+Generating photographic images needs a tool that does not exist. The instructions say so plainly.
+
+## Workspace size
+
+Workspaces were being killed for memory at 2 GB (the assistant, its browser and its working files
+together), which is what "the browser did not answer" and "opencode run failed (exit null)" were.
+Production now gives each 4 GB and two processors, and that failure is said in plain words.
 
 ## Also fixed here
 

@@ -130,6 +130,18 @@ test("the assistant is told the design is its own to make unless something was c
         assert.ok(!gone.test(rules), String(gone));
     assert.match(rules, /Never build a form that asks visitors for passwords or card numbers/);
     assert.match(rules, /You cannot publish/);
+    // A blank canvas is said to be one, and has no need of the kit; a chosen look is named as where to start.
+    assert.match(rules, /A blank canvas is blank/);
+    assert.ok(!/Call `design_kit` before/.test(rules));
+    assert.match(
+        agentInstructions({ name: "X", agentInstructions: null, look: null }),
+        /Nothing was chosen for its design: it is a blank canvas/,
+    );
+    assert.match(
+        agentInstructions({ name: "X", agentInstructions: null, look: "Botanical" }),
+        /wears the look "Botanical", which is where its design starts/,
+    );
+    assert.match(agentInstructions({ name: "X", agentInstructions: null, look: "" }), /already has a design of its own/);
 });
 
 test("a website's own look is shown beside the ready-made ones and can be gone back to", async () => {

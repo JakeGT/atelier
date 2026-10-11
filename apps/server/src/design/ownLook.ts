@@ -101,7 +101,10 @@ export function makeOwnLook(input: OwnLookInput): { look: OwnLook; warnings: str
     if (LOOKS.some((l) => l.name.toLowerCase() === name.toLowerCase()))
         return { error: `${name} is the name of a ready-made look. Give this one a name of its own.` };
     const base = findLook(input.startFrom ?? "studio");
-    if (!base) return { error: `There is no look called ${input.startFrom} to start from. Call design_kit to see the looks.` };
+    if (!base)
+        return {
+            error: `There is no look called ${input.startFrom} to start from. Leave startFrom out, or call design_kit with readyMade: true to see the looks.`,
+        };
     const tokens: Record<string, string> = { ...base.tokens };
     for (const [key, raw] of Object.entries(input.values ?? {})) {
         const value = String(raw).trim();
@@ -120,7 +123,7 @@ export function makeOwnLook(input: OwnLookInput): { look: OwnLook; warnings: str
         const found = fontValue(id);
         if (!found)
             return {
-                error: `"${id.slice(0, 60)}" cannot be used as a font: give a font's id from design_kit, or a CSS font-family value.`,
+                error: `"${id.slice(0, 60)}" cannot be used as a font: give the id of a typeface the website can carry, or a CSS font-family value.`,
             };
         tokens[key] = found.value;
         if (found.font && !fonts.includes(found.font.id)) fonts.push(found.font.id);

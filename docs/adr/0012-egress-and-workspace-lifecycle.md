@@ -94,3 +94,10 @@ wording as before.
 `registry.npmjs.org` stays: the engine installs its own small plugin package
 there on first use in each workspace. Baking that in as well would leave only
 the engine's own two hosts.
+
+## Amended 2026-10-11
+
+By the owner's decision the assistant may use the public web (ADR-0022). The proxy runs in a new
+mode, `open`, in production: any public host on ports 80 and 443. Private, loopback and link-local
+addresses are refused as before, so the control plane, the database and the host stay unreachable.
+The allow-list remains for installations that want `enforce`.

@@ -55,6 +55,7 @@ interface Pending {
 
 export class Browser {
     private readonly path: string;
+    private readonly proxy: string | null;
     private child: ChildProcess | null = null;
     private socket: WebSocket | null = null;
     private dir: string | null = null;
@@ -67,8 +68,11 @@ export class Browser {
     // One look at a time: a workspace has one processor, and two pages drawn at once are both slow.
     private queue: Promise<unknown> = Promise.resolve();
 
-    constructor(path: string) {
+    // `proxy`: the workspace's way out to the web, when it has one, so that what a page loads
+    // from other addresses (a font service, a picture) is in the pictures too.
+    constructor(path: string, proxy?: string | null) {
         this.path = path;
+        this.proxy = proxy || null;
         process.once("exit", this.kill);
     }
 
@@ -89,7 +93,7 @@ export class Browser {
                 "--disable-extensions",
                 "--disable-background-networking",
                 "--disable-sync",
-                "--no-proxy-server",
+                ...(this.proxy ? [`--proxy-server=${this.proxy}`, "--proxy-bypass-list=127.0.0.1;localhost"] : ["--no-proxy-server"]),
                 "--remote-debugging-port=0",
                 `--user-data-dir=${this.dir}`,
                 "about:blank",
@@ -347,7 +351,7 @@ export class Browser {
                     );
                 for (const src of m.broken)
                     problems.push(
-                        /^(https?:)?\/\//.test(src ?? "")
+                        !this.proxy && /^(https?:)?\/\//.test(src ?? "")
                             ? `A picture from another address cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${src}`
                             : `A picture did not load: ${src}`,
                     );
@@ -360,8 +364,8 @@ export class Browser {
                     const u = requests.get(id) ?? "";
                     if (u && !m.broken.some((b) => u.endsWith(b ?? "")) && problems.length < 12)
                         problems.push(
-                            /^https?:\/\/127\.0\.0\.1[:/]/.test(u)
-                                ? `Something the page asked for did not load: ${u.replace(/^https?:\/\/127\.0\.0\.1:\d+\//, "")}`
+                            this.proxy || /^https?:\/\/127\.0\.0\.1[:/]/.test(u)
+                                ? `Something the page asked for did not load: ${u.replace(/^https?:\/\/127\.0\.0\.1:\d+\//, "").slice(0, 160)}`
                                 : // This browser has no way out of the workspace, so nothing from another address can be seen here.
                                   `Loaded from another address, which cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${u.slice(0, 160)}`,
                         );

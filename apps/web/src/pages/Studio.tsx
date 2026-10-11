@@ -46,6 +46,8 @@ interface StudioProps {
 }
 
 const ASK_KEPT = "atelier.askLevel";
+// A deletion waiting for the person to confirm their sign-in; finished when they return.
+const PENDING_DELETE = "atelier.pendingDelete";
 
 export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme }: StudioProps) {
     const toast = useToast();
@@ -207,23 +209,36 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
 
     async function remove(p: Project) {
         try {
-            // A website is archived (stopped and frozen) before it can be deleted.
-            if (!p.archivedAt) {
-                await a.archiveProject(p.id);
-                setDeleting({ ...p, archivedAt: new Date().toISOString() });
-            }
             await a.deleteProject(p.id);
             setDeleting(null);
             toast(`${p.name} was deleted.`);
             await load();
         } catch (err) {
             if (err instanceof ReauthRequired) {
-                void load();
-                toast("Please confirm your sign-in, then delete again. The website is archived in the meantime.", "error");
+                // Nothing has changed yet. The deletion is remembered and finished when they come back signed in.
+                sessionStorage.setItem(PENDING_DELETE, JSON.stringify({ id: p.id, at: Date.now() }));
+                toast("Please confirm your sign-in. The website is deleted as soon as you have.", "error");
                 setTimeout(reauthenticate, 1200);
-            } else toast((err as Error).message, "error");
+            } else {
+                // A step failed part-way: the website may have been put away, so show where it is now.
+                void load();
+                toast((err as Error).message, "error");
+            }
         }
     }
+    // Back from confirming a sign-in that a deletion was waiting for: finish it.
+    const resumed = useRef(false);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, when the websites have loaded
+    useEffect(() => {
+        if (resumed.current || projects === null) return;
+        const raw = sessionStorage.getItem(PENDING_DELETE);
+        if (!raw) return;
+        resumed.current = true;
+        sessionStorage.removeItem(PENDING_DELETE);
+        const pending = JSON.parse(raw) as { id: string; at: number };
+        const project = [...projects, ...archived].find((x) => x.id === pending.id);
+        if (project && Date.now() - pending.at < 10 * 60_000) void remove(project);
+    }, [projects, archived]);
 
     return (
         <div className="studio">

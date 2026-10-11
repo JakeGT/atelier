@@ -16,7 +16,10 @@ export interface EgressConfig {
     allow: string[];
     // "observe" forwards everything public and logs what "enforce" would refuse:
     // for learning what a new agent version needs before tightening.
-    mode: "enforce" | "observe";
+    // "open" forwards everything public, as a matter of course: the assistant may use the
+    // web (references, research, fonts, pictures, libraries). In every mode the platform's
+    // own network and every private address stay out of reach.
+    mode: "enforce" | "observe" | "open";
     log?: (line: string) => void;
     // For tests: resolve names without DNS.
     resolve?: (host: string) => Promise<string>;
@@ -81,7 +84,7 @@ export function createEgressProxy(cfg: EgressConfig): Server {
             return { ok: false, status: 502, reason: "host did not resolve" };
         }
         if (!isPublicAddress(address)) return { ok: false, status: 403, reason: "host resolves to a private address" };
-        if (!listed) log(`egress observe: ${host}:${port} is not on the allow-list (allowed in observe mode)`);
+        if (!listed && cfg.mode === "observe") log(`egress observe: ${host}:${port} is not on the allow-list (allowed in observe mode)`);
         return { ok: true, address };
     }
 

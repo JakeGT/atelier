@@ -269,8 +269,8 @@ test("archive hides and freezes a website; restore brings it back; delete is per
     const agentAuth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
     assert.equal((await t.app.request("/api/agent/content", { headers: agentAuth })).status, 200);
 
-    // Not yet archived: deletion is refused. Editors cannot archive or delete.
-    assert.equal((await del(t, owner, url)).status, 409);
+    // Editors cannot archive or delete.
+    assert.equal((await del(t, editor, url)).status, 404);
     assert.equal((await post(t, editor, `${url}/archive`)).status, 404);
     assert.equal((await post(t, owner, `${url}/archive`)).status, 200);
 

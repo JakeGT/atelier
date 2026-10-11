@@ -67,6 +67,7 @@ ARG OPENCODE_VERSION=1.18.35
 # ripgrep: the assistant's engine searches files with it, and downloads it from GitHub if it is
 # not here; having it here is what lets github.com stay off the workspaces' allow-list.
 # Chromium and a few fonts: the assistant looks at the pages it builds (mcp/look.ts).
+# curl stays: the assistant downloads fonts, pictures and libraries into the website (ADR-0022).
 RUN apk add --no-cache git curl ripgrep chromium font-liberation font-dejavu font-noto-emoji && \
     ARCH=$([ "$(uname -m)" = "aarch64" ] && echo arm64 || echo x64) && \
     curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}-musl.tar.gz" -o /tmp/opencode.tgz && \
@@ -74,7 +75,6 @@ RUN apk add --no-cache git curl ripgrep chromium font-liberation font-dejavu fon
     mv /tmp/opencode /usr/local/bin/opencode && \
     chmod +x /usr/local/bin/opencode && \
     rm /tmp/opencode.tgz && \
-    apk del curl && \
     # The project volume is mounted here; a new named volume copies this ownership.
     mkdir -p /workspace && chown node:node /workspace
 ENV WORKSPACE_DIR=/workspace AGENT_STATE_DIR=/tmp/agent PORT=8090 HOME=/tmp/agent CHROMIUM_PATH=/usr/bin/chromium
