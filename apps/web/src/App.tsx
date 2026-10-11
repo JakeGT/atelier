@@ -40,7 +40,9 @@ function match(path: string): Route {
     if (path === "/login") return { name: "login" };
     if (path === "/studio") return { name: "studio" };
     if (path === "/welcome") return { name: "welcome" };
-    if (path === "/admin" || path === "/admin/") return { name: "operator", tab: "studios" };
+    // "/operator" is where notifications sent before 2026-10-11 point; it is the same place.
+    if (path === "/admin" || path === "/admin/" || path === "/operator" || path === "/operator/")
+        return { name: "operator", tab: "studios" };
     if (path === "/admin/activity") return { name: "operator", tab: "activity" };
     if (path === "/admin/reports") return { name: "operator", tab: "reports" };
     let m = path.match(new RegExp(`^/o/${SLUG}/?$`));

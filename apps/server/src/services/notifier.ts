@@ -166,11 +166,13 @@ export class Notifier {
 
     // Whoever runs this Atelier: a problem on the platform's side, not a studio's.
     async tellOperator(kind: string, title: string, body: string): Promise<void> {
+        // Where to go and look: reports have their own page.
+        const link = kind.startsWith("feedback.") ? "/admin/reports" : "/admin";
         const admins = await this.notifications.admins().catch(() => []);
         const hour = new Date().toISOString().slice(0, 13);
         for (const userId of admins) {
             await this.notifications
-                .add({ userId, tenantId: null, kind, title, body, link: "/operator", dedupe: `${kind}:${hour}` })
+                .add({ userId, tenantId: null, kind, title, body, link, dedupe: `${kind}:${hour}` })
                 .catch((err: Error) => console.warn(`could not notify operator: ${err.message}`));
         }
         const last = this.lastOperatorMail.get(kind) ?? 0;
@@ -180,11 +182,11 @@ export class Notifier {
             .send({
                 to: this.operatorEmail,
                 subject: `Atelier: ${title}`,
-                text: `${body}\n\n${this.origin}/operator\n`,
+                text: `${body}\n\n${this.origin}${link}\n`,
                 html: mailHtml({
                     title,
                     body,
-                    action: { href: `${this.origin}/operator`, label: "Open the operator pages" },
+                    action: { href: `${this.origin}${link}`, label: link === "/admin" ? "Open the operator pages" : "Open the reports" },
                     foot: "Sent to whoever runs this Atelier.",
                     origin: this.origin,
                 }),

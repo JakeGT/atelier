@@ -152,11 +152,29 @@ const setAttr = (el: Element, name: string, value: string): void => {
     else el.attrs.push({ name, value });
 };
 
-// An image from the library: its address, and (when the library knows it) its
+// A picture that is not in the library: a file of the website's own (img/mark.svg) or one at
+// another address. Anything that is not a plain address of a file is refused.
+// A full web address, or a path with no scheme at all (so never javascript: or data:).
+export const isPicturePath = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 600 &&
+    !/[\s"'<>\\]/.test(value) &&
+    (/^https?:\/\/[^/]/.test(value) || !value.includes(":"));
+
+// A picture: its address, and for one from the library (when the library knows it) its
 // description, its size, and smaller copies for the browser to choose from.
 function fillImage(el: Element, value: unknown, options: FillOptions): void {
+    if (el.tagName !== "img") return;
     const name = typeof value === "string" ? MEDIA_PATH.exec(value)?.[1] : undefined;
-    if (!name || el.tagName !== "img") return;
+    if (!name) {
+        // Not from the library: shown from where it is. A path within the website is taken from the website's top folder.
+        if (!isPicturePath(value)) return;
+        const elsewhere = /^(?:https?:\/\/|\/|\.{1,2}\/)/.test(value);
+        setAttr(el, "src", elsewhere ? value : `${options.base ?? ""}${value}`);
+        el.attrs = el.attrs.filter((a) => a.name !== "srcset" && a.name !== "sizes");
+        return;
+    }
     const base = options.base ?? "";
     setAttr(el, "src", `${base}media/${name}`);
     el.attrs = el.attrs.filter((a) => a.name !== "srcset");
@@ -312,7 +330,8 @@ function fillItem(node: Element, entry: Record<string, unknown>, options: FillOp
     if (percent) setPercent(node, percent.value);
     const image = named("data-item-image");
     if (image) {
-        if (typeof image.value !== "string" || !MEDIA_PATH.test(image.value)) return false;
+        // An entry with no picture (or something that is not one) goes without, rather than showing the first entry's.
+        if (!isPicturePath(image.value)) return false;
         fillImage(node, image.value, options);
         return true;
     }
