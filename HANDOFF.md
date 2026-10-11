@@ -209,6 +209,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - `feedback_reports` (migration 0021, not tenant-scoped, operator-only reads). People: account menu → "Report a problem or suggest an idea" (`ui/Report.tsx`, `POST /api/v1/feedback`). The assistant: tool `report_to_atelier` (`PUT /api/agent/feedback`), about tools and rules only.
 - Operator → Reports (`/admin/reports`); **`GET /api/v1/admin/feedback.md` is every open report as one document: read it at the start of a session to see what to improve.**
 
+## Gallery pictures (branch `fast-gallery`)
+
+- The looks and built-in templates are shown as pictures (`apps/server/assets/thumbs/*.webp`, served at `/design-thumbs/<name>.<fingerprint>.webp`, cached for good). The live page loads only in "Look closer", which is a large dialog that lays a desktop out at 1280 wide.
+- **After changing `kit.css`, `kit.js`, a look, the showcase sections or a built-in template, run `CHROMIUM_PATH=… pnpm thumbs` and commit the pictures.** A test fails until you do (`design.test.ts`, by fingerprint; CI has no Chromium, so it cannot take them itself).
+- A studio's own templates and the sections in the Design panel are still live miniatures.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

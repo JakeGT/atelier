@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 import type { Project } from "@atelier/shared";
 import { LAYOUTS, SAMPLE_CONTENT, samplePage } from "../src/design/layouts.ts";
 import { LOOKS, lookOf, MOTION_FILES, themeCss } from "../src/design/looks.ts";
+import { readThumbManifest, THUMB_DIR, thumbFingerprint, thumbSources } from "../src/design/thumbs.ts";
 import { coverageReport } from "../src/services/coverage.ts";
 import { KIT_CSS, MOTION_CONTENT, MOTION_TAGS } from "../src/services/designKit.ts";
 import { fillHtml, lookupFrom } from "../src/services/fill.ts";
+import { loadTemplates } from "../src/services/templates.ts";
 import { json, makeApp, signIn, type TestApp } from "./helpers.ts";
 
 type Who = Awaited<ReturnType<typeof signIn>>;
@@ -155,4 +158,30 @@ test("movement: GSAP comes from its package, the layer loads nothing, and every 
     const page = samplePage("t", LAYOUTS, true);
     assert.match(page, /<html lang="en" data-k-motion="auto">/);
     assert.ok(page.indexOf("kit.js") < page.indexOf("gsap.min.js") && page.indexOf("gsap.min.js") < page.indexOf("motion.js"));
+});
+
+test("every look and built-in template has a picture, taken of the design as it is now", async () => {
+    const sources = thumbSources(loadTemplates());
+    const recorded = readThumbManifest();
+    assert.equal(sources.length, LOOKS.length + loadTemplates().length);
+    for (const s of sources) {
+        // A design changed since its picture was taken: run `pnpm thumbs` (needs CHROMIUM_PATH) and commit the result.
+        assert.equal(recorded[s.name], thumbFingerprint(s), `${s.name}: its picture is out of date; run "pnpm thumbs"`);
+        assert.ok(existsSync(`${THUMB_DIR}${s.name}.webp`), `${s.name}: no picture; run "pnpm thumbs"`);
+    }
+    // The galleries are given the picture, and it is served for keeps.
+    const t = await makeApp();
+    const who = await signIn(t);
+    const kit = await json<{ looks: { id: string; imageUrl?: string }[] }>(await get(t, who, `${who.api}/design`));
+    const url = kit.looks.find((l) => l.id === "bold")?.imageUrl ?? "";
+    assert.match(url, /^\/design-thumbs\/look-bold\.[0-9a-f]{16}\.webp$/);
+    const picture = await t.app.request(url);
+    assert.equal(picture.headers.get("content-type"), "image/webp");
+    assert.match(picture.headers.get("cache-control") ?? "", /immutable/);
+    assert.ok((await picture.arrayBuffer()).byteLength > 2000);
+    const templates = await json<{ templates: { id: string; imageUrl?: string }[] }>(await get(t, who, `${who.api}/templates`));
+    assert.ok(templates.templates.filter((x) => !x.id.startsWith("studio:")).every((x) => x.imageUrl));
+    assert.equal((await t.app.request("/design-thumbs/look-bold.0000000000000000.webp")).status, 200);
+    assert.equal((await t.app.request("/design-thumbs/..%2fkit.css")).status, 404);
+    assert.equal((await t.app.request("/design-thumbs/look-nothere.0000000000000000.webp")).status, 404);
 });

@@ -1,5 +1,6 @@
 import { LAYOUTS } from "../design/layouts.ts";
 import { findLook, KIT_FILE, LOOKS, lookOf, THEME_FILE } from "../design/looks.ts";
+import { thumbFile, thumbUrl } from "../design/thumbs.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { kitFiles, sampleFile } from "../services/designKit.ts";
 import { type Api, ORG, PROJECT, param } from "./kit.ts";
@@ -27,7 +28,14 @@ export function designRoutes(api: Api): void {
     route("get", `${ORG}/design`, "project.read", async (c) => {
         const wearing = findLook(c.req.query("look"))?.id ?? "studio";
         return c.json({
-            looks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description, previewUrl: sample(l.id, null) })),
+            looks: LOOKS.map((l) => ({
+                id: l.id,
+                name: l.name,
+                description: l.description,
+                previewUrl: sample(l.id, null),
+                // A picture of it, shown at once; the live page is for looking closely.
+                imageUrl: thumbUrl(`look-${l.id}`),
+            })),
             layouts: LAYOUTS.map((l) => ({
                 id: l.id,
                 name: l.name,
@@ -82,6 +90,20 @@ export function designRoutes(api: Api): void {
         } catch (err) {
             return runtimeError(c, err);
         }
+    });
+
+    // Pictures of Atelier's own designs. Not private (they show nobody's website), and an address
+    // names one version of a picture, so browsers may keep it for good.
+    app.get("/design-thumbs/:file", (c) => {
+        const body = thumbFile(param(c, "file"));
+        if (!body) return c.json({ error: "not found" }, 404);
+        return new Response(new Uint8Array(body), {
+            headers: {
+                "content-type": "image/webp",
+                "cache-control": "public, max-age=31536000, immutable",
+                "x-content-type-options": "nosniff",
+            },
+        });
     });
 
     // The samples themselves.

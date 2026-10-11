@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
     "test": "node --test --test-reporter=spec \"apps/*/test/**/*.test.ts\"",
     "build:web": "pnpm --filter @atelier/web build",
+    "thumbs": "node apps/server/src/design/takeThumbs.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

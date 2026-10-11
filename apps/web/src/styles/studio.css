@@ -1588,9 +1588,21 @@ button.where:hover {
     margin-bottom: 14px;
 }
 
+.gallery-thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top;
+    pointer-events: none;
+}
+
 .gallery-look {
+    position: relative;
     margin: 14px auto 0;
-    height: min(62vh, 640px);
+    height: min(calc(100vh - 330px), 900px);
+    min-height: 320px;
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-m);
     overflow: hidden;
@@ -1603,6 +1615,28 @@ button.where:hover {
     width: 390px;
     max-width: 100%;
     border-radius: 28px;
+}
+
+.gallery-look-wait {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: start center;
+    background: #fff;
+}
+
+.gallery-look-wait img {
+    grid-area: 1 / 1;
+    width: 100%;
+}
+
+.gallery-look-wait .chip {
+    grid-area: 1 / 1;
+    align-self: center;
+    z-index: 1;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
 }
 
 .gallery-look iframe {

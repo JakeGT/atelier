@@ -71,6 +71,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                         name: `${l.name} look`,
                         description: l.description,
                         previewUrl: l.previewUrl,
+                        imageUrl: l.imageUrl,
                     })),
                 ),
             () => {},
@@ -298,7 +299,9 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                                     onChange={() => setTemplate(id)}
                                                 />
                                                 <span className="gallery-thumb" aria-hidden="true">
-                                                    {t.previewUrl ? (
+                                                    {t.imageUrl ? (
+                                                        <img src={t.imageUrl} alt="" loading="lazy" draggable={false} />
+                                                    ) : t.previewUrl ? (
                                                         <iframe
                                                             src={t.previewUrl}
                                                             title={`${t.name}, shown small`}

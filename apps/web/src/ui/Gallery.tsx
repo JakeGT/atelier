@@ -1,22 +1,75 @@
 import { ArrowLeft, Check, Monitor, Smartphone, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Template } from "../lib/api";
-import { Dialog } from "./kit";
+import { Dialog, Dots } from "./kit";
 
-// Starting points for a new website, each shown as it really looks: a live,
-// scaled-down copy of the template itself (not a picture of it), which can be
-// opened larger at desktop and phone width before it is chosen.
+// Starting points for a new website. Atelier's own are shown as pictures taken ahead
+// of time, so the gallery is there at once; a studio's own templates, which have no
+// picture, as a live scaled-down copy. "Look closer" opens the real page, live, at
+// desktop and phone width.
 
 function Thumb({ template }: { template: Template }) {
     return (
         <span className="gallery-thumb" aria-hidden="true">
-            {template.previewUrl ? (
+            {template.imageUrl ? (
+                // A picture taken ahead of time: there at once. The live page is one step away, in "Look closer".
+                <img src={template.imageUrl} alt="" loading="lazy" />
+            ) : template.previewUrl ? (
                 // Looked at, not used: no scripts, and it takes no clicks.
                 <iframe src={template.previewUrl} title={`${template.name}, shown small`} sandbox="" loading="lazy" tabIndex={-1} />
             ) : (
                 <span className="gallery-blank">An empty page</span>
             )}
         </span>
+    );
+}
+
+const DESKTOP = 1280;
+
+// One design, live, at the size it would really be. A desktop is 1280 wide: where the window is
+// narrower than that, the page is still laid out at 1280 and shown smaller, so "Desktop" never
+// turns into the phone layout. Its picture stands in until the live page has arrived.
+export function Closer({ src, picture, name, phone }: { src: string; picture?: string; name: string; phone: boolean }) {
+    const box = useRef<HTMLDivElement>(null);
+    const [size, setSize] = useState({ width: 0, height: 0 });
+    const [loaded, setLoaded] = useState(false);
+    useEffect(() => {
+        const el = box.current;
+        if (!el) return;
+        const measure = () => setSize({ width: el.clientWidth, height: el.clientHeight });
+        measure();
+        const watch = new ResizeObserver(measure);
+        watch.observe(el);
+        return () => watch.disconnect();
+    }, []);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: a different page has not arrived yet
+    useEffect(() => setLoaded(false), [src]);
+    // On a phone there is no room to show a desktop usefully: the page is shown as the phone would lay it out.
+    const narrow = size.width > 0 && size.width < 600;
+    const asIs = phone || narrow || size.width === 0;
+    const scale = asIs ? 1 : Math.min(1, size.width / DESKTOP);
+    return (
+        <div className={`gallery-look ${phone ? "gallery-look-phone" : ""}`} ref={box}>
+            {!loaded && (
+                <div className="gallery-look-wait" aria-live="polite">
+                    {picture && !phone && !narrow && <img src={picture} alt="" />}
+                    <span className="chip">
+                        <Dots /> Loading the live page…
+                    </span>
+                </div>
+            )}
+            <iframe
+                src={src}
+                title={`${name}, live`}
+                sandbox=""
+                onLoad={() => setLoaded(true)}
+                style={
+                    asIs
+                        ? undefined
+                        : { width: `${100 / scale}%`, height: `${100 / scale}%`, transform: `scale(${scale})`, transformOrigin: "top left" }
+                }
+            />
+        </div>
     );
 }
 
@@ -50,7 +103,7 @@ export function Gallery({
 
     if (looking) {
         return (
-            <Dialog onClose={onClose} wide>
+            <Dialog onClose={onClose} large>
                 <div className="gallery-look-head">
                     <button type="button" className="btn btn-sm" onClick={() => setLooking(null)}>
                         <ArrowLeft /> All designs and templates
@@ -80,9 +133,7 @@ export function Gallery({
                 </div>
                 <h2 className="display">{looking.name}</h2>
                 <p className="muted">{looking.description}</p>
-                <div className={`gallery-look ${phone ? "gallery-look-phone" : ""}`}>
-                    <iframe src={looking.previewUrl} title={`The ${looking.name} template`} sandbox="" />
-                </div>
+                <Closer src={looking.previewUrl ?? ""} picture={looking.imageUrl} name={looking.name} phone={phone} />
                 <div className="dialog-actions">
                     <button type="button" className="btn" onClick={() => setLooking(null)}>
                         Back
@@ -139,7 +190,7 @@ export function Gallery({
     };
 
     return (
-        <Dialog onClose={onClose} wide>
+        <Dialog onClose={onClose} large>
             <h2 className="display">Designs and templates</h2>
             <p className="muted">
                 A new website can begin empty, or as one of these: a small finished website that is there the moment you open it, for your

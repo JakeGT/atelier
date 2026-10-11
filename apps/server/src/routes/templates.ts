@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { thumbUrl } from "../design/thumbs.ts";
 import { readTar } from "../runtime/tar.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { baseOf, fillHtml, lookupFrom } from "../services/fill.ts";
@@ -34,7 +35,14 @@ export function templateRoutes(api: Api): void {
         const own = await store.studioTemplates.list(org.id);
         return c.json({
             templates: [
-                ...templates.map((t) => ({ id: t.id, name: t.name, description: t.description, own: false, previewUrl: link("", t.id) })),
+                ...templates.map((t) => ({
+                    id: t.id,
+                    name: t.name,
+                    description: t.description,
+                    own: false,
+                    previewUrl: link("", t.id),
+                    imageUrl: thumbUrl(`template-${t.id}`),
+                })),
                 ...own.map((t) => ({
                     id: `${STUDIO_PREFIX}${t.id}`,
                     name: t.name,
