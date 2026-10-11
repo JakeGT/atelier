@@ -229,7 +229,10 @@ test("every tenant-scoped table has RLS forced and a policy", { skip }, async ()
         SELECT c.relname, c.relforcerowsecurity AS forced,
                (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
         FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id'
-        WHERE c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace AND c.relname <> 'audit_log'`;
+        WHERE c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace
+          -- Two tables look across studios on purpose and are read by operator routes only:
+          -- the audit log, and reports about Atelier itself (ADR-0020).
+          AND c.relname NOT IN ('audit_log', 'feedback_reports')`;
     assert.ok(rows.length >= 9);
     for (const r of rows) {
         assert.equal(r.forced, true, `${r.relname} does not FORCE RLS`);
@@ -1023,4 +1026,27 @@ test("the assistant's questions belong to their studio; one set is open per webs
     assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.askLevel, 1);
     assert.equal((await store.projects.update(a.tenantId, a.projectId, { askLevel: 3 })).askLevel, 3);
     assert.equal((await store.projects.update(a.tenantId, a.projectId, { name: "Renamed" })).askLevel, 3);
+});
+
+test("reports about Atelier are kept across studios and can be closed, not deleted", { skip }, async () => {
+    const a = await studio("fb-a");
+    const made = await store.feedback.add({
+        id: randomUUID(),
+        source: "assistant",
+        kind: "tool",
+        text: "page_look had no tablet size.",
+        context: { studio: "A", website: "Site" },
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        userId: null,
+    });
+    assert.equal(made.status, "open");
+    assert.ok((await store.feedback.list({ status: "open" })).some((r) => r.id === made.id));
+    assert.equal((await store.feedback.setStatus(made.id, "done"))?.closedAt !== null, true);
+    assert.ok(!(await store.feedback.list({ status: "open" })).some((r) => r.id === made.id));
+    assert.equal((await store.feedback.setStatus(made.id, "open"))?.closedAt, null);
+    assert.equal(await store.feedback.setStatus(randomUUID(), "done"), null);
+    // It outlives the website it came from.
+    await store.projects.delete(a.tenantId, a.projectId);
+    assert.ok((await store.feedback.list()).some((r) => r.id === made.id));
 });

@@ -1,4 +1,4 @@
-import { ArrowRight, Bell, Check, LogOut, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
+import { ArrowRight, Bell, Check, LogOut, MessageSquareWarning, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Inbox, Session } from "../lib/api";
@@ -104,6 +104,16 @@ export function UserMenu({
                         }}
                     >
                         <Bell /> Notifications{unread > 0 ? ` (${unread} new)` : ""}
+                    </button>
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                            setOpen(false);
+                            window.dispatchEvent(new CustomEvent("atelier:report", { detail: "" }));
+                        }}
+                    >
+                        <MessageSquareWarning /> Report a problem or suggest an idea
                     </button>
                     {items.length > 0 && <div className="menu-rule" />}
                     {theme && onToggleTheme && (

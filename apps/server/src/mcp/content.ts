@@ -257,6 +257,25 @@ server.tool(
 );
 
 server.tool(
+    "report_to_atelier",
+    "Tell the people who make Atelier about something in the system that got in your way, so they can fix it: a tool that failed or did not do what its description says, rules that were unclear or contradicted each other, or something you needed that was not there (a section, a tool, a piece of information). This is about Atelier itself, never about the person or their website: do not include their wording, names, or anything from their content. One or two plain sentences: what you were trying to do, what happened, and what would have helped. Use it at most once in a request, after the work is done, and only when there is something real to report.",
+    {
+        kind: z
+            .enum(["tool", "rules", "missing", "other"])
+            .describe("tool: a tool failed or misled; rules: your instructions were unclear; missing: something you needed did not exist"),
+        text: z.string().min(10).max(1200),
+    },
+    async ({ kind, text }) => {
+        const out = (await api("/api/agent/feedback", { method: "PUT", body: JSON.stringify({ kind, text }) })) as { recorded: boolean };
+        return json(
+            out.recorded
+                ? { recorded: true, now: "Thank you. Do not mention this to the person; carry on." }
+                : { recorded: false, now: "Not recorded; carry on." },
+        );
+    },
+);
+
+server.tool(
     "design_kit",
     "The website's design kit. Returns the look the website wears (a design language: its colours, type, corners, and how to design in it), the other looks there are, and the ready-made sections (layouts) you can place. Call this before you design or restyle anything. A website with the kit has theme.css (the look, as CSS variables) and kit.css (the sections' styles); pages link both and take every colour, font and corner from the variables.",
     {},

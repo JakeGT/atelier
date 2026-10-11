@@ -31,6 +31,10 @@ BEGIN
     GRANT SELECT, INSERT ON audit_log TO atelier_runtime;
     REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM atelier_runtime;
 
+    -- Reports about Atelier itself: written by anyone, read and closed by operator routes.
+    GRANT SELECT, INSERT, UPDATE ON feedback_reports TO atelier_runtime;
+    REVOKE DELETE, TRUNCATE ON feedback_reports FROM atelier_runtime;
+
     GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO atelier_runtime;
     REVOKE ALL ON schema_migrations FROM atelier_runtime;
 END

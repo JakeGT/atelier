@@ -292,6 +292,17 @@ export interface SitePage {
     examples: { tag: string; text: string }[];
 }
 
+// A report about Atelier itself: from a person, or from the assistant about the system it works in.
+export interface FeedbackReport {
+    id: string;
+    source: "person" | "assistant";
+    kind: string;
+    text: string;
+    context: Record<string, string>;
+    status: "open" | "done";
+    createdAt: string;
+}
+
 // What the assistant has stopped to ask the person.
 export interface AssistantQuestions {
     id: string;
@@ -531,6 +542,21 @@ export const api = {
             flags?: StudioSummary["flags"];
         },
     ) => patch<{ studio: StudioSummary }>(`/api/v1/admin/studios/${id}`, changes),
+    // A report about Atelier itself, to whoever runs it.
+    report: (body: {
+        kind: "problem" | "idea";
+        text: string;
+        page: string;
+        org?: string;
+        project?: string;
+        screen?: string;
+        build?: string;
+    }) => post<{ ok: true }>("/api/v1/feedback", body),
+    operatorReports: (status?: "open" | "done") =>
+        get<{ reports: FeedbackReport[]; open: number }>(`/api/v1/admin/feedback${status ? `?status=${status}` : ""}`),
+    setReportStatus: (id: string, status: "open" | "done") =>
+        patch<{ report: FeedbackReport }>(`/api/v1/admin/feedback/${id}`, { status }).then((b) => b.report),
+    reportsDocumentUrl: "/api/v1/admin/feedback.md",
     operatorActivity: () => get<{ entries: AuditEntry[] }>("/api/v1/admin/audit").then((b) => b.entries),
     // The introduction is finished or skipped: it is not shown again.
     finishOnboarding: () => post<{ ok: boolean }>("/api/v1/me/onboarded"),

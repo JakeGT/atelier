@@ -204,6 +204,11 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - `projects.ask_level` 0 to 3 (slider under the message box, `PUT …/asking`); each level is a paragraph in `services/asking.ts`.
 - The preview says "Opening your website…" until the workspace has answered, instead of "Nothing on the easel yet".
 
+## Reports about Atelier (branch `feedback-reports`, ADR-0020)
+
+- `feedback_reports` (migration 0021, not tenant-scoped, operator-only reads). People: account menu → "Report a problem or suggest an idea" (`ui/Report.tsx`, `POST /api/v1/feedback`). The assistant: tool `report_to_atelier` (`PUT /api/agent/feedback`), about tools and rules only.
+- Operator → Reports (`/admin/reports`); **`GET /api/v1/admin/feedback.md` is every open report as one document: read it at the start of a session to see what to improve.**
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
