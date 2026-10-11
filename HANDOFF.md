@@ -120,7 +120,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 ## Arrival (branch `onboarding`)
 
 - **Who gets in is decided in Authentik**, by group. Atelier admits anyone who completes a sign-in (`SIGNUP_MODE=open`).
-- **Everyone has one personal studio** from their first sign-in, and sees a three-step introduction once (`/welcome`).
+- **Everyone has one personal studio** from their first sign-in, and sees a two-step introduction once (`/welcome`: name the studio, how the assistant works), which ends on the studio page. (It used to have a third step that made a first website; removed at the owner's request on 2026-10-11.)
 - **Shared studios**: owners and admins add people by e-mail under Studio settings → Members; it shows up the next time that person opens Atelier.
 - Details: `docs/07-auth-and-rbac.md` §3.
 
