@@ -117,3 +117,58 @@ export function timeAgo(iso: string): string {
     if (abs < 86400 * 14) return RELATIVE.format(Math.round(diff / 86400), "day");
     return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
+
+// Lets a row that scrolls sideways be dragged along with the mouse. A press that
+// moves is a drag and chooses nothing; a press that stays put is still a click.
+// Touch and trackpads already scroll it themselves.
+// Give what it returns to the row as its `ref` (the row may appear later than the page).
+export function useDragScroll<T extends HTMLElement>(): (node: T | null) => void {
+    const [row, setRow] = useState<T | null>(null);
+    useEffect(() => {
+        if (!row) return;
+        let start: { x: number; left: number } | null = null;
+        let dragged = false;
+        const down = (e: PointerEvent) => {
+            if (e.pointerType !== "mouse" || e.button !== 0 || row.scrollWidth <= row.clientWidth) return;
+            start = { x: e.clientX, left: row.scrollLeft };
+            dragged = false;
+        };
+        const move = (e: PointerEvent) => {
+            if (!start) return;
+            const dx = e.clientX - start.x;
+            if (!dragged && Math.abs(dx) < 6) return;
+            if (!dragged) {
+                dragged = true;
+                row.classList.add("dragging");
+            }
+            row.scrollLeft = start.left - dx;
+        };
+        const up = () => {
+            start = null;
+            row.classList.remove("dragging");
+        };
+        // The click that ends a drag is swallowed, so letting go over a card does not choose it.
+        const click = (e: MouseEvent) => {
+            if (!dragged) return;
+            dragged = false;
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        const noNativeDrag = (e: DragEvent) => e.preventDefault();
+        row.addEventListener("pointerdown", down);
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
+        row.addEventListener("click", click, true);
+        row.addEventListener("dragstart", noNativeDrag);
+        return () => {
+            row.removeEventListener("pointerdown", down);
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            row.removeEventListener("click", click, true);
+            row.removeEventListener("dragstart", noNativeDrag);
+        };
+    }, [row]);
+    return setRow;
+}

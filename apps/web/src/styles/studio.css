@@ -1658,6 +1658,19 @@ button.where:hover {
     padding: 4px 4px 12px;
     overflow-x: auto;
     scroll-snap-type: x proximity;
+    cursor: grab;
+    user-select: none;
+}
+
+/* Being dragged along with the mouse: it follows the hand exactly, and nothing under it reacts. */
+.designs-row.dragging {
+    cursor: grabbing;
+    scroll-snap-type: none;
+}
+
+.designs-row.dragging .design {
+    cursor: grabbing;
+    pointer-events: none;
 }
 
 .design {

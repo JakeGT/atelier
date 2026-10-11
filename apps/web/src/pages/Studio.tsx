@@ -16,7 +16,7 @@ import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Org, Project, Session, Template } from "../lib/api";
 import { api, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
-import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
+import { navigate, type Theme, timeAgo, useClickOutside, useDragScroll } from "../lib/hooks";
 import { Cover } from "../ui/Cover";
 import { Gallery } from "../ui/Gallery";
 import { Dialog, Dots, useToast } from "../ui/kit";
@@ -83,6 +83,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     ];
     const chosen = starts.find((t) => t.id === template);
     const [choosing, setChoosing] = useState(false);
+    const designsRow = useDragScroll<HTMLDivElement>();
     // Saving a website as one of the studio's own starting points.
     const [saving, setSaving] = useState<Project | null>(null);
     const [templateName, setTemplateName] = useState("");
@@ -257,7 +258,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                     <strong>Pick a design to start from</strong>
                                     <span className="muted"> · or leave it empty and describe what you want</span>
                                 </p>
-                                <div className="designs-row">
+                                <div className="designs-row" ref={designsRow}>
                                     {[
                                         { id: "", name: "An empty page", description: "", tag: "" } as Template & { tag: string },
                                         ...starts,
