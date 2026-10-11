@@ -69,7 +69,7 @@ const appCsp = (nonce: string): string =>
 // Paths the single-page app never owns: a miss here is a real 404.
 const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz|f)(\/|$)/;
 
-export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } {
+export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[]; notifier: Notifier } {
     const app = new Hono();
 
     // The built web app, when present (WEB_DIST_DIR in the image). Its entry script
@@ -116,5 +116,5 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
         app.get("/", (c) => c.json({ name: "atelier", status: "ok" }));
     }
 
-    return { app, declared: api.declared };
+    return { app, declared: api.declared, notifier };
 }

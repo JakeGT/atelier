@@ -35,12 +35,13 @@
   who is not the studio's owner can therefore see those names. If Atelier is
   opened to studios who should not be visible to the operator even by name,
   drop them from `context`.
-- "Every so often" is event-driven (the assistant reports when something
-  happens), not a scheduled survey. A scheduled digest e-mail is not built; the
-  operator's notifications and the one-document download cover it.
+- The assistant reports when something happens, not on a schedule. What is
+  scheduled is the **weekly digest** (asked for by the owner on 2026-10-11):
+  once per ISO week, on the first daily check of that week, the operator gets
+  every open report as one e-mail and a notification (`weeklyDigest`,
+  `Notifier.tellOperatorOnce`). Nothing open: nothing sent.
 - Reports are not deleted by age.
 
 ## To confirm
 
 1. Whether the person who reported should be told when it is dealt with.
-2. Whether a weekly digest by e-mail is wanted.

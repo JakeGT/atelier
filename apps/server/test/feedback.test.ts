@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Project } from "@atelier/shared";
-import { reportsDocument } from "../src/routes/feedback.ts";
+import { isoWeek, reportsDocument, weeklyDigest } from "../src/routes/feedback.ts";
+import { Notifier } from "../src/services/notifier.ts";
 import type { FeedbackReport } from "../src/store/types.ts";
 import { json, makeApp, signIn, type TestApp } from "./helpers.ts";
 
@@ -104,4 +105,47 @@ test("open reports read as one document; closing one takes it out", async () => 
         ["assistant"],
     );
     assert.match(reportsDocument([]), /Nothing is open\./);
+});
+
+test("the weekly digest: every open report in one e-mail, once a week, and nothing when nothing is open", async () => {
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const t = await makeApp({ OPERATOR_EMAIL: "ops@example.com" }, undefined, { mailer: { send: async (m) => void sent.push(m) } });
+    const notifier = new Notifier(t.store, {
+        mailer: { send: async (m) => void sent.push(m) },
+        publicOrigin: "https://atelier.example",
+        operatorEmail: "ops@example.com",
+    });
+    const monday = new Date("2026-10-12T06:00:00Z");
+    assert.equal(isoWeek(monday), "2026-W42");
+    assert.equal(isoWeek(new Date("2026-10-11T23:00:00Z")), "2026-W41");
+    assert.equal(isoWeek(new Date("2027-01-01T12:00:00Z")), "2026-W53");
+    assert.equal(await weeklyDigest(t.store, notifier, monday), false);
+    assert.equal(sent.length, 0);
+    const base = { context: { studio: "Kiln" }, tenantId: null, projectId: null, userId: null };
+    await t.store.feedback.add({
+        ...base,
+        id: "00000000-0000-4000-8000-00000000000a",
+        source: "person",
+        kind: "problem",
+        text: "The preview is blank.",
+    });
+    await t.store.feedback.add({
+        ...base,
+        id: "00000000-0000-4000-8000-00000000000b",
+        source: "assistant",
+        kind: "missing",
+        text: "No timeline section.",
+    });
+    assert.equal(await weeklyDigest(t.store, notifier, monday), true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.to, "ops@example.com");
+    assert.equal(sent[0]?.subject, "Atelier: 2 open reports this week");
+    assert.match(
+        sent[0]?.text ?? "",
+        /1 from people, 1 from the assistant[\s\S]*The preview is blank\.[\s\S]*No timeline section\.[\s\S]*https:\/\/atelier\.example\/admin\/reports/,
+    );
+    // The same week again (the next day, or after a restart): not sent twice.
+    assert.equal(await weeklyDigest(t.store, notifier, new Date("2026-10-13T06:00:00Z")), false);
+    assert.equal(await weeklyDigest(t.store, notifier, new Date("2026-10-19T06:00:00Z")), true);
+    assert.equal(sent.length, 2);
 });

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { RateLimiter } from "../security.ts";
 import { verifyAgentToken } from "../services/agentToken.ts";
-import type { FeedbackReport } from "../store/types.ts";
+import type { Notifier } from "../services/notifier.ts";
+import type { FeedbackReport, Store } from "../store/types.ts";
 import { type Api, param } from "./kit.ts";
 
 const PERSON_KINDS = ["problem", "idea"] as const;
@@ -42,6 +43,28 @@ export function reportsDocument(reports: FeedbackReport[], now = new Date()): st
             .filter(Boolean)
             .join("\n") || "Nothing is open.\n"
     }`;
+}
+
+// "2026-W41": the ISO week a day falls in.
+export function isoWeek(day: Date): string {
+    const d = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
+    // Thursday of this week decides the year.
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const week = Math.ceil(((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86_400_000 + 1) / 7);
+    return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// Once a week, what is still open, to whoever runs this Atelier. Nothing open: nothing sent.
+// Called daily; it sends on the first call of each week from Monday on. Returns whether it sent.
+export async function weeklyDigest(store: Store, notifier: Notifier, now = new Date()): Promise<boolean> {
+    const open = await store.feedback.list({ status: "open", limit: 1000 });
+    if (open.length === 0) return false;
+    const people = open.filter((r) => r.source === "person").length;
+    const week = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+    const fresh = open.filter((r) => r.createdAt >= week).length;
+    const title = `${open.length} open ${open.length === 1 ? "report" : "reports"} this week`;
+    const summary = `${people} from people, ${open.length - people} from the assistant; ${fresh} new in the last seven days.`;
+    return notifier.tellOperatorOnce("feedback.digest", isoWeek(now), title, `${summary}\n\n${reportsDocument(open, now)}`);
 }
 
 // Reports about Atelier itself (ADR-0020): from a person, from the assistant, and for the operator to read.

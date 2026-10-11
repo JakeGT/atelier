@@ -49,6 +49,7 @@ export class Notifier {
     private readonly operatorEmail: string | null;
     // The operator is e-mailed about one kind of problem at most this often.
     private readonly lastOperatorMail = new Map<string, number>();
+    private readonly sentOnce = new Set<string>();
 
     constructor(store: Store, opts: { mailer: Mailer | null; publicOrigin: string; operatorEmail?: string | null }) {
         this.store = store;
@@ -90,6 +91,36 @@ export class Notifier {
         const members = await this.store.memberships.list(tenantId).catch(() => []);
         const responsible = members.filter((m) => m.role === "owner" || m.role === "admin").map((m) => m.userId);
         await this.tell([...responsible, ...alsoTell], { ...notice, tenantId });
+    }
+
+    // Something sent to the operator once per period (a weekly digest). `period` names it ("2026-W41"):
+    // the notification is recorded once per operator and period, and the e-mail goes only when it was
+    // newly recorded, so a restart in the same week does not send it again. Returns whether it was sent.
+    async tellOperatorOnce(kind: string, period: string, title: string, body: string): Promise<boolean> {
+        if (this.sentOnce.has(`${kind}:${period}`)) return false;
+        const admins = await this.notifications.admins().catch(() => []);
+        let fresh = admins.length === 0;
+        for (const userId of admins) {
+            const made = await this.notifications
+                .add({
+                    userId,
+                    tenantId: null,
+                    kind,
+                    title,
+                    body: body.slice(0, 1500),
+                    link: "/admin/reports",
+                    dedupe: `${kind}:${period}`,
+                })
+                .catch(() => null);
+            if (made) fresh = true;
+        }
+        this.sentOnce.add(`${kind}:${period}`);
+        if (!fresh) return false;
+        if (this.mailer && this.operatorEmail)
+            await this.mailer
+                .send({ to: this.operatorEmail, subject: `Atelier: ${title}`, text: `${body}\n\n${this.origin}/admin/reports\n` })
+                .catch((err: Error) => console.warn(`could not e-mail the operator: ${err.message}`));
+        return true;
     }
 
     // Whoever runs this Atelier: a problem on the platform's side, not a studio's.
