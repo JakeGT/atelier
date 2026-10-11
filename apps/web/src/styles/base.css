@@ -956,8 +956,9 @@ textarea {
     gap: 6px;
     padding: 10px 16px;
     border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-    scrollbar-width: none;
+    /* Every provider is in view: they wrap onto as many lines as they need, rather than
+       running off the side where a mouse cannot follow. */
+    flex-wrap: wrap;
 }
 
 .scope {
@@ -1113,6 +1114,13 @@ textarea {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* A sentence of explanation is read whole: it wraps rather than being cut short. */
+.model-name .model-hint {
+    white-space: normal;
+    overflow: visible;
+    line-height: 1.45;
 }
 
 .model-name .mono {
