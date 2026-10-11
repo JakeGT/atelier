@@ -63,9 +63,13 @@ export class Browser {
     private readonly listeners = new Set<(method: string, params: Record<string, unknown>, sessionId?: string) => void>();
     private idle: NodeJS.Timeout | null = null;
     private starting: Promise<void> | null = null;
+    private stuck = false;
+    // One look at a time: a workspace has one processor, and two pages drawn at once are both slow.
+    private queue: Promise<unknown> = Promise.resolve();
 
     constructor(path: string) {
         this.path = path;
+        process.once("exit", this.kill);
     }
 
     private async start(): Promise<void> {
@@ -90,7 +94,8 @@ export class Browser {
                 `--user-data-dir=${this.dir}`,
                 "about:blank",
             ],
-            { stdio: ["ignore", "ignore", "pipe"] },
+            // Its own process group, so closing it takes its helper processes with it.
+            { stdio: ["ignore", "ignore", "pipe"], detached: true },
         );
         this.child = child;
         const endpoint = await new Promise<string>((resolve, reject) => {
@@ -148,6 +153,8 @@ export class Browser {
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.pending.delete(id);
+                // A browser that has stopped answering will not start again by being asked: the next look gets a new one.
+                this.stuck = true;
                 reject(new Error(`the browser did not answer (${method})`));
             }, 30_000);
             this.pending.set(id, {
@@ -164,20 +171,52 @@ export class Browser {
         });
     }
 
+    // Stops the browser and its helpers at once. Also what happens when this process ends,
+    // so a browser never outlives whoever was looking.
+    private readonly kill = (): void => {
+        const pid = this.child?.pid;
+        if (pid) {
+            try {
+                process.kill(-pid, "SIGKILL");
+            } catch {
+                this.child?.kill("SIGKILL");
+            }
+        }
+        this.child = null;
+    };
+
     async close(): Promise<void> {
         if (this.idle) clearTimeout(this.idle);
         this.socket?.close();
         this.socket = null;
-        this.child?.kill("SIGKILL");
-        this.child = null;
+        this.kill();
         this.starting = null;
+        this.stuck = false;
         if (this.dir) await rm(this.dir, { recursive: true, force: true }).catch(() => {});
         this.dir = null;
     }
 
     // Opens `url` at a visitor's screen size and returns pictures of it from `from` pixels down.
-    async look(url: string, size: Size, from = 0): Promise<Look> {
+    // Looks wait their turn, and one that fails because the browser itself gave up (it stopped
+    // answering, or closed) is tried once more with a new browser.
+    look(url: string, size: Size, from = 0): Promise<Look> {
+        const run = async (): Promise<Look> => {
+            try {
+                return await this.once(url, size, from);
+            } catch (err) {
+                if (!/did not answer|browser closed|not running|did not start|could not connect/.test((err as Error).message)) throw err;
+                await this.close();
+                return await this.once(url, size, from);
+            }
+        };
+        const turn = this.queue.then(run, run);
+        this.queue = turn.catch(() => {});
+        return turn;
+    }
+
+    private async once(url: string, size: Size, from: number): Promise<Look> {
         if (this.idle) clearTimeout(this.idle);
+        if (this.stuck) await this.close();
         if (!this.socket) {
             this.starting ??= this.start();
             try {
@@ -306,7 +345,12 @@ export class Browser {
                     problems.push(
                         `The page is wider than the screen (${m.scrollWidth}px on a ${m.viewport}px screen), so it scrolls sideways. Too wide: ${m.wide.join("; ") || "unknown"}.`,
                     );
-                for (const src of m.broken) problems.push(`A picture did not load: ${src}`);
+                for (const src of m.broken)
+                    problems.push(
+                        /^(https?:)?\/\//.test(src ?? "")
+                            ? `A picture from another address cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${src}`
+                            : `A picture did not load: ${src}`,
+                    );
                 for (const u of m.unseen) problems.push(`Cannot be seen: ${u}.`);
                 for (const o of m.overlaps) problems.push(`Overlapping: ${o}.`);
                 for (const c of m.cut) problems.push(`Cut off: ${c}.`);
@@ -315,7 +359,12 @@ export class Browser {
                 for (const id of failed) {
                     const u = requests.get(id) ?? "";
                     if (u && !m.broken.some((b) => u.endsWith(b ?? "")) && problems.length < 12)
-                        problems.push(`Something the page asked for did not load: ${u.replace(/^https?:\/\/127\.0\.0\.1:\d+\//, "")}`);
+                        problems.push(
+                            /^https?:\/\/127\.0\.0\.1[:/]/.test(u)
+                                ? `Something the page asked for did not load: ${u.replace(/^https?:\/\/127\.0\.0\.1:\d+\//, "")}`
+                                : // This browser has no way out of the workspace, so nothing from another address can be seen here.
+                                  `Loaded from another address, which cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${u.slice(0, 160)}`,
+                        );
                 }
                 const start = Math.max(0, Math.min(Math.floor(from), Math.max(0, m.height - 200)));
                 const pictures: string[] = [];

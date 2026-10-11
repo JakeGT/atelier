@@ -142,6 +142,8 @@ export interface DesignLook {
     description: string;
     previewUrl: string;
     imageUrl?: string;
+    // The look made for this website alone, rather than one of the ready-made ones.
+    own?: boolean;
 }
 // A ready-made section of a page.
 export interface DesignLayout {

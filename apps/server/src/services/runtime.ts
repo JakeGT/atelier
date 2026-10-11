@@ -418,7 +418,10 @@ export class ContainerRuntime implements WorkspaceRuntime {
         }
         // No home page yet; or a workspace on an earlier runtime, which cannot take one.
         if (res.status === 204 || res.status === 404) return null;
-        if (!res.ok) throw new Error(`workspace ${res.status}`);
+        if (!res.ok) {
+            const said = ((await res.json().catch(() => null)) as { error?: string } | null)?.error;
+            throw new Error(`workspace ${res.status}${said ? `: ${said}` : ""}`);
+        }
         return new Uint8Array(await res.arrayBuffer());
     }
     async exportTree(projectId: string, sha: string): Promise<Uint8Array> {

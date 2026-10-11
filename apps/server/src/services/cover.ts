@@ -95,8 +95,9 @@ export class Covers {
     private readonly taker: CoverTaker;
     private readonly access: (tenantId: string, projectId: string) => { apiUrl: string; agentToken: string };
     private readonly delayMs: number;
+    private readonly busy: (projectId: string) => boolean;
     private readonly waiting = new Map<string, NodeJS.Timeout>();
-    private readonly taking = new Set<string>();
+    private readonly taking = new Map<string, Promise<boolean>>();
     private readonly again = new Set<string>();
 
     constructor(opts: {
@@ -105,12 +106,16 @@ export class Covers {
         taker: CoverTaker;
         access: (tenantId: string, projectId: string) => { apiUrl: string; agentToken: string };
         delayMs?: number;
+        // The assistant is at work on this website: its workspace has one processor, and a second
+        // browser beside the assistant's own makes both crawl. The picture waits.
+        busy?: (projectId: string) => boolean;
     }) {
         this.store = opts.store;
         this.storage = opts.storage;
         this.taker = opts.taker;
         this.access = opts.access;
         this.delayMs = opts.delayMs ?? 4000;
+        this.busy = opts.busy ?? (() => false);
     }
 
     // The website changed: picture it again soon.
@@ -126,28 +131,51 @@ export class Covers {
         this.waiting.set(projectId, timer);
     }
 
+    // The website is about to be put away (archived, deleted): no picture is wanted, and one being
+    // taken is waited for, so that taking it cannot wake a workspace that has just been stopped.
+    async quiet(projectId: string): Promise<void> {
+        const pending = this.waiting.get(projectId);
+        if (pending) clearTimeout(pending);
+        this.waiting.delete(projectId);
+        this.again.delete(projectId);
+        await this.taking.get(projectId)?.catch(() => false);
+    }
+
     // Takes and keeps a new cover now. Never throws: a card without a fresh picture is not a failure.
     async refresh(tenantId: string, projectId: string): Promise<boolean> {
         if (!this.storage) return false;
+        if (this.busy(projectId)) {
+            this.changed(tenantId, projectId);
+            return false;
+        }
         if (this.taking.has(projectId)) {
             this.again.add(projectId);
             return false;
         }
-        this.taking.add(projectId);
+        const taking = this.take(tenantId, projectId);
+        this.taking.set(projectId, taking);
+        try {
+            return await taking;
+        } finally {
+            this.taking.delete(projectId);
+            if (this.again.delete(projectId)) this.changed(tenantId, projectId);
+        }
+    }
+
+    private async take(tenantId: string, projectId: string): Promise<boolean> {
+        const storage = this.storage;
+        if (!storage) return false;
         try {
             const project = await this.store.projects.findById(tenantId, projectId);
             if (!project || project.archivedAt) return false;
             const picture = await this.taker.cover(projectId, this.access(tenantId, projectId));
             if (!picture) return false;
-            await this.storage.put(coverKey(tenantId, projectId), picture, "image/webp");
+            await storage.put(coverKey(tenantId, projectId), picture, "image/webp");
             await this.store.projects.setCover(tenantId, projectId, new Date());
             return true;
         } catch (err) {
             console.warn(`could not picture website ${projectId}: ${(err as Error).message}`);
             return false;
-        } finally {
-            this.taking.delete(projectId);
-            if (this.again.delete(projectId)) this.changed(tenantId, projectId);
         }
     }
 }

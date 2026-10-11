@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { findLook, LOOK_PREFIX, THEME_FILE, themeCss } from "../design/looks.ts";
+import { OWN, OWN_FILE } from "../design/ownLook.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { answersPrompt, answersText, isAskLevel } from "../services/asking.ts";
 import { starter } from "../services/designKit.ts";
@@ -468,7 +469,8 @@ export function workspaceRoutes(api: Api): void {
         const claims = verifyAgentToken(param(c, "token"), previewKey);
         if (!claims?.sessionId.startsWith("preview")) return c.json({ error: "preview link expired" }, 403, PREVIEW_HEADERS);
         // "What would this website look like in another look?": the same pages, with that look's theme.css.
-        const tryLook = findLook(claims.sessionId.startsWith("preview+look:") ? claims.sessionId.slice("preview+look:".length) : null);
+        const trying = claims.sessionId.startsWith("preview+look:") ? claims.sessionId.slice("preview+look:".length) : null;
+        const tryLook = findLook(trying);
         const prefix = `/preview/${param(c, "token")}/`;
         const rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
@@ -476,7 +478,8 @@ export function workspaceRoutes(api: Api): void {
         if (tryLook && rel === THEME_FILE) {
             return new Response(themeCss(tryLook), { headers: { "content-type": "text/css; charset=utf-8", ...PREVIEW_HEADERS } });
         }
-        const file = await runtime.readFile(claims.projectId, rel).catch(() => null);
+        // The same, for the look made for this website: the copy it keeps stands in for its theme.
+        const file = await runtime.readFile(claims.projectId, trying === OWN && rel === THEME_FILE ? OWN_FILE : rel).catch(() => null);
         if (!file) {
             // Not one of the website's own files: a file from its media library, perhaps.
             const name = /^media\/([^/]+)$/.exec(rel)?.[1] ?? "";

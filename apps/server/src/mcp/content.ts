@@ -1,11 +1,13 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { FONTS } from "../design/fonts.ts";
 import { findLayout, LAYOUTS } from "../design/layouts.ts";
-import { findLook, KIT_FILE, KIT_SCRIPT, LOOKS, lookOf, MOTION_FILES, THEME_FILE, themeCss } from "../design/looks.ts";
+import { findLook, KIT_FILE, KIT_SCRIPT, LOOKS, lookOf, MOTION_FILES, STACKS, THEME_FILE, themeCss } from "../design/looks.ts";
+import { lookIn, makeOwnLook, OWN, OWN_FILE, OWN_VALUES, ownLookFiles, readOwnLook } from "../design/ownLook.ts";
 import { coverageReport } from "../services/coverage.ts";
 import { KIT_CSS, KIT_JS, MOTION_CONTENT, MOTION_TAGS } from "../services/designKit.ts";
 import { Browser, browserPath } from "./look.ts";
@@ -126,8 +128,6 @@ const browser = (() => {
 })();
 let site: Awaited<ReturnType<typeof serveSite>> | null = null;
 const vision = process.env.ATELIER_VISION === "1";
-let looks = 0;
-const MAX_LOOKS = 16;
 
 interface LibraryFile {
     path: string;
@@ -152,10 +152,6 @@ server.tool(
     async ({ page, size, from }) => {
         if (!browser)
             return json({ unavailable: "Looking at pages is not available in this workspace. Check the HTML and CSS carefully instead." });
-        if (++looks > MAX_LOOKS)
-            return json({
-                unavailable: `You have looked ${MAX_LOOKS} times in this request, which is the most allowed. Finish with what you know.`,
-            });
         const file = inside(workspace, page);
         if (!file || !/\.html?$/i.test(page))
             return json({ error: "page must be the path of an .html file in the website, e.g. index.html" });
@@ -217,7 +213,12 @@ server.tool(
 
 // ---- the design kit: looks and ready-made sections --------------------------------------
 
-const currentLook = async (): Promise<string | null> => lookOf(await readFile(join(workspace, THEME_FILE), "utf8").catch(() => ""));
+const themeNow = (): Promise<string> => readFile(join(workspace, THEME_FILE), "utf8").catch(() => "");
+const currentLook = async (): Promise<string | null> => lookOf(await themeNow());
+// The look made for this website, worn or put by.
+const savedOwnLook = async () => readOwnLook(await readFile(join(workspace, OWN_FILE), "utf8").catch(() => ""));
+const NO_COLOURS =
+    "Pages that take colour, type, corners and shadows from these variables (var(--accent) and so on) can be restyled all at once, by you or by the person in one click. Prefer that, and when the look is not what the person wants, change the look (design_make_look) rather than each page. Where the design needs something the variables do not give, write it directly: nothing about the design is restricted.";
 
 server.tool(
     "ask_person",
@@ -277,20 +278,35 @@ server.tool(
 
 server.tool(
     "design_kit",
-    "The website's design kit. Returns the look the website wears (a design language: its colours, type, corners, and how to design in it), the other looks there are, and the ready-made sections (layouts) you can place. Call this before you design or restyle anything. A website with the kit has theme.css (the look, as CSS variables) and kit.css (the sections' styles); pages link both and take every colour, font and corner from the variables.",
+    "The website's design kit. Returns the look the website wears (a design language: its colours, type, corners, and how to design in it), what to do about it, the fonts for making a look, and the ready-made looks and sections a person may ask for by name. Call this before you design or restyle anything. A website with the kit has theme.css (the look, as CSS variables) and kit.css (the sections' styles); pages link both and take every colour, font and corner from the variables.",
     {},
     async () => {
-        const id = await currentLook();
-        const look = findLook(id);
+        const look = lookIn(await themeNow());
+        const own = await savedOwnLook();
         return json({
             look: look ? { id: look.id, name: look.name, howToDesignInIt: look.guidance, variables: look.tokens } : null,
             note: look
-                ? "Use only these variables for colour, type, corners and shadows (var(--accent) and so on). Never write a colour or a font name into a page or another stylesheet: the person can change the look at any time, and everything must follow."
-                : "This website does not have the kit yet. To give it one, call design_use_look with a look's id, link theme.css and kit.css from every page (theme.css first), and replace the pages' own colours and fonts with the variables.",
+                ? NO_COLOURS
+                : "This website has no look yet. Make one for it with design_make_look, link theme.css and kit.css from every page (theme.css first), and take the pages' colours and fonts from the variables.",
+            whatToDo: !look
+                ? "Nothing has been chosen, so the design is yours: make a look for this website from what the person described (design_make_look) and design its pages yourself. The ready-made looks and sections listed here are for when the person asks for one by name; do not lean towards them."
+                : look.id === OWN
+                  ? 'This website wears a look made for it. Start from it, and change it freely with design_make_look (startFrom "own") whenever the website would be better for it or the person asks.'
+                  : `This website wears the ready-made look "${look.name}", which the person chose. It is where the design starts, not a limit: begin from it, and change any part of it (design_make_look, starting from "${look.id}") wherever that makes the website better or closer to what the person describes.`,
+            ...(own && look?.id !== OWN
+                ? {
+                      putBy: `This website also has a look of its own, "${own.name}", which it is not wearing now. design_use_look with id "own" brings it back.`,
+                  }
+                : {}),
+            fonts: {
+                carriedByTheWebsite: FONTS.map((f) => ({ id: f.id, name: f.name, description: f.description })),
+                alreadyOnDevices: Object.entries(STACKS).map(([id, st]) => ({ id, name: st.name })),
+                note: "These are only what is to hand: any typeface may be used. A font the website carries looks the same for every visitor and tells no other company who visited; one already on devices costs nothing to load but differs from device to device; one loaded from a font service is the widest choice.",
+            },
             movement:
                 "For animation of any kind, call design_motion: it puts GSAP and the kit's movement layer in the website and tells you how to use them.",
-            looks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
-            sections: LAYOUTS.map((l) => ({
+            readyMadeLooks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
+            readyMadeSections: LAYOUTS.map((l) => ({
                 id: l.id,
                 name: l.name,
                 description: l.description,
@@ -303,7 +319,7 @@ server.tool(
 
 server.tool(
     "design_section",
-    "The HTML of one ready-made section from design_kit, to place in a page. It uses the kit's classes, so it wears the website's look, and its wording is already marked as editable. After placing it: replace PAGE in every reference with the page's name (page/PAGE#headline -> page/home#headline), rename a field if the page already has one of that name, rewrite the sample words for this website, and save the wording with content_upsert_draft and described fields. A list's first entry is the pattern for all of them: save one object per entry.",
+    "The HTML of one ready-made section from design_kit, to place in a page when the person asks for it or the website is already built from these. It uses the kit's classes, so it wears the website's look, and its wording is already marked as editable. After placing it: replace PAGE in every reference with the page's name (page/PAGE#headline -> page/home#headline), rename a field if the page already has one of that name, rewrite the sample words for this website, and save the wording with content_upsert_draft and described fields. A list's first entry is the pattern for all of them: save one object per entry.",
     { id: z.string() },
     async ({ id }) => {
         const layout = findLayout(id);
@@ -369,12 +385,15 @@ server.tool(
 
 server.tool(
     "design_use_look",
-    "Give the website a look, or change the one it wears: writes theme.css (the look's variables) and kit.css (the sections' styles) into the website. Use it when the person asks for a look by name, or to move a website that has its own colours and fonts onto the kit. Afterwards every page must link both files and use the variables; then look at the pages.",
+    "Give the website one of the ready-made looks: writes theme.css (the look's variables) and kit.css into the website. Use it only when the person asks for that look by name; otherwise make a look of the website's own with design_make_look. The id \"own\" brings back the look made for this website. Afterwards every page must link both files and use the variables; then look at the pages.",
     { id: z.string() },
     async ({ id }) => {
-        const look = findLook(id);
+        const own = id === OWN ? await savedOwnLook() : null;
+        if (id === OWN && !own) return json({ error: "This website has no look of its own yet. Make one with design_make_look." });
+        const look = own ?? findLook(id);
         if (!look) return json({ error: `There is no look called ${id}. Call design_kit to see the looks.` });
-        await writeFile(join(workspace, THEME_FILE), themeCss(look));
+        if (own) await writeOwn(own);
+        else await writeFile(join(workspace, THEME_FILE), themeCss(look));
         await writeFile(join(workspace, KIT_FILE), KIT_CSS);
         await writeFile(join(workspace, KIT_SCRIPT), KIT_JS);
         return json({
@@ -386,5 +405,88 @@ server.tool(
     },
 );
 
+const writeOwn = async (look: NonNullable<Awaited<ReturnType<typeof savedOwnLook>>>): Promise<string[]> => {
+    const files = ownLookFiles(look);
+    for (const file of files) {
+        await mkdir(dirname(join(workspace, file.path)), { recursive: true });
+        await writeFile(join(workspace, file.path), file.body);
+    }
+    return files.map((f) => f.path);
+};
+
+server.tool(
+    "design_make_look",
+    `Make a look for this website alone, or change the one it has: its colours, lettering, corners, spacing and movement, as CSS variables in theme.css. This is how a website gets a design language that can be restyled in one step: use it for a new website, and whenever the person asks to change something about the look (a colour, a font, the corners, the whole feeling). Any CSS value is accepted, and you may add variables of your own. Give every value that matters to the design; anything you leave out is filled in from the look named in startFrom (use "own" to adjust the look this website already has). You are told if text may be hard to read; that is advice. Afterwards look at the pages with page_look, and tell the person in a sentence what the look is. The variables the kit's styles read: ${Object.entries(
+        OWN_VALUES,
+    )
+        .map(([k, v]) => `${k} (${v})`)
+        .join("; ")}.`,
+    {
+        name: z.string().describe("A short name the person will see beside the ready-made looks, e.g. Blush Editorial"),
+        description: z.string().describe("One line the person reads: what the look is like, in plain words"),
+        howToDesignInIt: z
+            .string()
+            .describe("A few sentences for whoever designs in this look later: the feeling, how to use the accent, what to avoid"),
+        startFrom: z
+            .string()
+            .default("studio")
+            .describe("Where values you leave out come from: own (this website's look) or the id of a ready-made look"),
+        displayFont: z
+            .string()
+            .optional()
+            .describe(
+                "Headlines: the id of a font from design_kit's fonts (the website then carries it), or any CSS font-family value for a font you add or load yourself",
+            ),
+        bodyFont: z.string().optional().describe("Body text: likewise"),
+        values: z
+            .record(z.string(), z.string())
+            .default({})
+            .describe('The look\'s values, e.g. {"--bg": "#fff5f7", "--accent": "#c2185b"}'),
+    },
+    async ({ name, description, howToDesignInIt, startFrom, displayFont, bodyFont, values }) => {
+        // Adjusting the look it already made: start from that, fonts included.
+        const before = startFrom === OWN ? await savedOwnLook() : null;
+        if (startFrom === OWN && !before) return json({ error: "This website has no look of its own yet. Start from a ready-made look." });
+        const made = makeOwnLook({
+            name,
+            description,
+            howToDesignInIt,
+            startFrom: before ? "studio" : startFrom,
+            displayFont,
+            bodyFont,
+            values: before ? { ...ownValues(before.tokens), ...values } : values,
+        });
+        if ("error" in made) return json({ error: made.error });
+        if (before) {
+            // Fonts not chosen again stay as they were.
+            for (const key of ["--font-display", "--font-body"] as const) {
+                const kept = before.tokens[key];
+                if (kept && !(key === "--font-display" ? displayFont : bodyFont)) made.look.tokens[key] = kept;
+            }
+            made.look.fonts = FONTS.filter((f) =>
+                [made.look.tokens["--font-display"], made.look.tokens["--font-body"]].some((v) => v?.includes(`"${f.family}"`)),
+            ).map((f) => f.id);
+        }
+        const written = await writeOwn(made.look);
+        await writeFile(join(workspace, KIT_FILE), KIT_CSS);
+        await writeFile(join(workspace, KIT_SCRIPT), KIT_JS);
+        return json({
+            written: [...written.filter((p) => p !== OWN_FILE), KIT_FILE, KIT_SCRIPT],
+            look: made.look.name,
+            variables: made.look.tokens,
+            ...(made.warnings.length ? { worthFixing: made.warnings } : {}),
+            now: `Link theme.css from every page, before the website's other stylesheets. ${NO_COLOURS} Look at the pages with page_look.`,
+        });
+    },
+);
+
+// The values of a look that design_make_look accepts back (fonts are given separately).
+const ownValues = (tokens: Record<string, string>): Record<string, string> =>
+    Object.fromEntries(Object.entries(tokens).filter(([k]) => k in OWN_VALUES));
+
 const transport = new StdioServerTransport();
+// When the assistant goes (it finished, or was stopped), so does this, and with it the browser it opened.
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) process.once(signal, () => process.exit(0));
+process.stdin.once("end", () => process.exit(0));
+process.stdin.once("close", () => process.exit(0));
 await server.connect(transport);

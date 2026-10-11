@@ -1,6 +1,6 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.30` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> Last updated 2026-10-11. Status: **`p5.31` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
 > `main` has everything through PR #15. Nineteen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`, [#29](https://github.com/JakeGT/atelier/pull/29) `fast-gallery`, [#30](https://github.com/JakeGT/atelier/pull/30) `asking-visible`, [#31](https://github.com/JakeGT/atelier/pull/31) `page-transitions`, [#32](https://github.com/JakeGT/atelier/pull/32) `website-covers`, [#33](https://github.com/JakeGT/atelier/pull/33) `straight-to-studio`, [#34](https://github.com/JakeGT/atelier/pull/34) `operator-access`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
 
 ## TL;DR
@@ -27,11 +27,18 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 **Git:** `main` has P0–P2 and BYOK. `p3-hosting` (PR #5) has P3. The infra repo's Atelier commits are local only and not pushed.
 
+## The rule about the assistant (read this first)
+
+**If it is not a safety concern, the assistant is not limited** (the owner, 2026-10-11; ADR-0022).
+Ready-made looks, sections and templates are starting points a person may pick, never something
+the assistant is steered to or held in. Before adding any instruction, tool check or cap that
+narrows what the assistant may make, have a safety reason or ask the owner.
+
 ## Current deployment
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.30` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.31` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
