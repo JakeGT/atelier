@@ -215,6 +215,10 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **After changing `kit.css`, `kit.js`, a look, the showcase sections or a built-in template, run `CHROMIUM_PATH=… pnpm thumbs` and commit the pictures.** A test fails until you do (`design.test.ts`, by fingerprint; CI has no Chromium, so it cannot take them itself).
 - A studio's own templates and the sections in the Design panel are still live miniatures.
 
+## Moving between pages (branch `page-transitions`)
+
+- `navigate()` and browser back/forward change the page inside a view transition (`lib/hooks.ts` `eased`; styles in `base.css` under "moving between pages"): the old page fades back, the new one fades up. Skipped for reduced motion and in browsers without view transitions. Page containers fade in when their data arrives.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).
