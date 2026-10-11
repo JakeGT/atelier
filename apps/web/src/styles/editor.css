@@ -1,7 +1,7 @@
 .editor {
     --chat-w: clamp(320px, 27vw, 420px);
     --side-w: 300px;
-    height: 100dvh;
+    height: calc(100dvh - var(--visit-bar, 0px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -2031,4 +2031,17 @@ fieldset:disabled .ask-track {
 
 .asking .ask-track input[type="range"] {
     top: 10px;
+}
+
+/* On a narrow chat panel the setting's button wraps onto two lines rather than widening the panel. */
+.asking-fold {
+    min-width: 0;
+}
+
+.asking-fold-button {
+    flex-wrap: wrap;
+    row-gap: 0;
+    min-width: 0;
+    height: auto;
+    white-space: normal;
 }

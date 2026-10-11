@@ -129,7 +129,8 @@ export function App() {
     const orgSlug = "org" in route ? route.org : null;
     const org = orgSlug ? orgs?.find((o) => o.slug === orgSlug) : undefined;
     useEffect(() => {
-        if (org) localStorage.setItem(LAST_ORG, org.slug);
+        // A studio being visited is not "where this person was last": their own is.
+        if (org && !org.visiting) localStorage.setItem(LAST_ORG, org.slug);
     }, [org]);
 
     const boot = (
@@ -193,6 +194,7 @@ export function App() {
 
     return (
         <ToastProvider>
+            {org?.visiting && session && <VisitNotice org={org} />}
             {page}
             <ReportHost />
             <UpdateNotice />
@@ -266,6 +268,34 @@ function Missing({ title, body, whole }: { title: string; body: string; whole?: 
                     Back to your studio
                 </button>
             </div>
+        </div>
+    );
+}
+
+// An operator is inside a studio they do not belong to. Said plainly for as long as they
+// are, with when it ends and the way out, so it is never mistaken for a studio of their own.
+function VisitNotice({ org }: { org: Org }) {
+    const [leaving, setLeaving] = useState(false);
+    const until = org.visiting ? new Date(org.visiting).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const leave = async () => {
+        setLeaving(true);
+        await api.operatorLeave(org.id).catch(() => {});
+        window.location.assign("/admin");
+    };
+    return (
+        <div className="visit-notice" role="status">
+            <span>
+                <strong>
+                    <span className="visit-more">You are inside </span>
+                    {org.name}
+                    <span className="visit-more"> as an operator</span>
+                    <span className="visit-less">: operator visit</span>
+                </strong>
+                , until {until}.<span className="visit-more"> Its owners have been told, and what you do here is in its activity.</span>
+            </span>
+            <button type="button" className="btn btn-sm" disabled={leaving} onClick={() => void leave()}>
+                Leave this studio
+            </button>
         </div>
     );
 }

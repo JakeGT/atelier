@@ -54,16 +54,34 @@ export function requireCsrf(sessions: SessionStore, publicOrigin: string, secure
 // The URL names the organisation (/orgs/:org/...); membership decides whether the
 // caller may enter. An organisation the caller does not belong to is a 404, the
 // same as one that does not exist, so slugs cannot be probed.
+// The studios a person can enter: the ones they belong to and, for an operator, any they
+// are visiting (ADR-0021). A visit gives an admin's role in that studio, never the owner's,
+// until it runs out; `visiting` says until when.
+export async function studiosFor(
+    store: Store,
+    user: Pick<SessionUser, "id" | "admin">,
+): Promise<(Awaited<ReturnType<Store["organizations"]["listForUser"]>>[number] & { visiting?: string })[]> {
+    const own = await store.organizations.listForUser(user.id);
+    if (!user.admin) return own;
+    const visited = [];
+    for (const visit of await store.operatorVisits.active(user.id)) {
+        if (own.some((o) => o.id === visit.studioId)) continue;
+        const org = await store.organizations.findById(visit.studioId);
+        if (org) visited.push({ ...org, role: "admin" as const, visiting: visit.until });
+    }
+    return [...own, ...visited];
+}
+
 export function loadOrg(store: Store) {
     return async (c: ApiContext, next: Next) => {
         const slug = c.req.param("org") ?? "";
-        const orgs = await store.organizations.listForUser(c.get("user").id);
+        const orgs = await studiosFor(store, c.get("user"));
         const org = orgs.find((o) => o.slug === slug);
         if (!org || org.status === "archived") return c.json({ error: "not found" }, 404);
         // A suspended studio is shown as suspended to its members, and does nothing until restored.
         if (org.status === "suspended")
             return c.json({ error: "this studio has been suspended; contact whoever runs Atelier for you" }, 403);
-        const { role, ...organization } = org;
+        const { role, visiting: _visiting, ...organization } = org;
         c.set("org", organization);
         c.set("role", role);
         await next();

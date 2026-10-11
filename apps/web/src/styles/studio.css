@@ -2162,3 +2162,18 @@ button.where:hover {
     object-position: top;
     background: #fff;
 }
+
+/* ---- operator: going into a studio ---- */
+
+.operator-enter {
+    display: grid;
+    gap: 10px;
+    justify-items: start;
+    margin: 18px 0 4px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+}
+
+.operator-enter .field-line {
+    width: 100%;
+}

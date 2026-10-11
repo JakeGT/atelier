@@ -225,6 +225,10 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - A website that has not changed since this shipped gets its picture the next time it is opened in the editor. No home page: the drawn cover stays.
 - Off where there is no browser (tests; a dev machine without `CHROMIUM_PATH`).
 
+## Operators visiting studios (branch `operator-access`, ADR-0021)
+
+- Operator console → a studio → "Go into this studio": step-up, a reason, 60 minutes as that studio's **admin** (not owner). `operator_visits` (migration 0023); roles resolved in `studiosFor` (`middleware/auth.ts`). The studio's activity records it and its owners are notified. A strip across the top (`VisitNotice` in `App.tsx`) shows while inside; `POST /api/v1/admin/studios/:id/leave` ends it.
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

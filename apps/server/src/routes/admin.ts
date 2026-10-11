@@ -3,6 +3,9 @@ import { type Api, param } from "./kit.ts";
 // The operator console (P4): everything here needs to be a platform operator
 // (the identity provider's admin group), and looks across studios, which no
 // studio route may do.
+// How long an operator's visit to a studio lasts before it has to be asked for again.
+export const VISIT_MINUTES = 60;
+
 export function adminRoutes(api: Api): void {
     const { route, store, runtime, stepUp } = api;
 
@@ -68,6 +71,48 @@ export function adminRoutes(api: Api): void {
             detail: { ...patch },
         });
         return c.json({ studio: updated });
+    });
+
+    // ---- going into a studio (ADR-0021) ---------------------------------------------------
+    // An operator does not belong to the studios they look after. To help in one they open it:
+    // for a limited time, with an admin's role (never the owner's: the studio cannot be deleted
+    // or exported), after confirming who they are, with a line in the studio's own activity and
+    // word sent to its owners. Leaving, or the time running out, ends it.
+
+    route("post", "/api/v1/admin/studios/:id/enter", "admin.tenants", stepUp, async (c) => {
+        const id = param(c, "id");
+        const org = /^[0-9a-f-]{36}$/.test(id) ? await store.organizations.findById(id) : null;
+        if (!org || org.status === "archived") return c.json({ error: "not found" }, 404);
+        if (org.status === "suspended") return c.json({ error: "this studio is paused; restore it before going in" }, 409);
+        const user = c.get("user");
+        if ((await store.memberships.roleOf(org.id, user.id)) !== null) return c.json({ slug: org.slug, until: null });
+        const body = (await c.req.json().catch(() => null)) as { reason?: unknown } | null;
+        const reason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 300) : "";
+        if (reason.length < 3) return c.json({ error: "say why you are going in; the studio's owners are shown it" }, 400);
+        const visit = await store.operatorVisits.start(user.id, org.id, new Date(Date.now() + VISIT_MINUTES * 60_000));
+        await store.audit.record({
+            tenantId: org.id,
+            actorId: user.id,
+            action: "operator.enter",
+            target: `org:${org.id}`,
+            detail: { reason, until: visit.until },
+        });
+        void api.notifier.tellStudio(org.id, {
+            kind: "operator.visit",
+            title: `Someone who runs Atelier opened ${org.name}`,
+            body: `${user.name} opened this studio to help, for up to ${VISIT_MINUTES} minutes. Their reason: “${reason}”. While inside they can do what an admin of the studio can; they cannot delete or export it. Everything they do is in the studio's activity.`,
+            link: `/o/${org.slug}/settings/activity`,
+            dedupe: null,
+        });
+        return c.json({ slug: org.slug, until: visit.until });
+    });
+
+    route("post", "/api/v1/admin/studios/:id/leave", "admin.tenants", async (c) => {
+        const id = param(c, "id");
+        const user = c.get("user");
+        if (/^[0-9a-f-]{36}$/.test(id) && (await store.operatorVisits.end(user.id, id)))
+            await store.audit.record({ tenantId: id, actorId: user.id, action: "operator.leave", target: `org:${id}`, detail: null });
+        return c.json({ ok: true });
     });
 
     route("get", "/api/v1/admin/audit", "admin.audit", async (c) => c.json({ entries: await store.audit.list({ limit: 500 }) }));

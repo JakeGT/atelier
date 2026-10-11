@@ -1343,3 +1343,50 @@ textarea {
     min-height: 100vh;
     color: var(--ink);
 }
+
+/* An operator is inside someone else's studio: a strip across the top of every page for as
+   long as they are. It takes its own room (nothing is covered); pages that fill the window
+   allow for it through --visit-bar. */
+:root:has(.visit-notice) {
+    --visit-bar: 44px;
+}
+
+.visit-notice {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    height: 44px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--seal);
+    background: color-mix(in srgb, var(--seal) 12%, var(--paper));
+    font-size: 13.5px;
+    white-space: nowrap;
+}
+
+.visit-notice > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.visit-notice .btn {
+    flex: none;
+}
+
+.visit-less {
+    display: none;
+}
+
+/* Narrow: the short form, which fits without being cut off. */
+@media (max-width: 900px) {
+    .visit-more {
+        display: none;
+    }
+    .visit-less {
+        display: inline;
+    }
+}

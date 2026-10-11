@@ -21,6 +21,8 @@ export interface Org {
     personalOf: string | null;
     // The signed-in person's role in this organisation.
     role: Role;
+    // Set when an operator is inside this studio without belonging to it: when the visit ends.
+    visiting?: string;
 }
 
 export interface Member {
@@ -539,6 +541,10 @@ export const api = {
     },
     templates: () => get<{ templates: Template[] }>("/api/v1/templates").then((b) => b.templates),
     // Operators only.
+    // Go into a studio you do not belong to, for a limited time; its owners are shown the reason.
+    operatorEnter: (id: string, reason: string) =>
+        post<{ slug: string; until: string | null }>(`/api/v1/admin/studios/${id}/enter`, { reason }),
+    operatorLeave: (id: string) => post<{ ok: true }>(`/api/v1/admin/studios/${id}/leave`),
     operatorOverview: () => get<OperatorOverview>("/api/v1/admin/studios"),
     operatorUpdate: (
         id: string,
