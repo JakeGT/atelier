@@ -262,7 +262,9 @@ export const agentMessageSchema = z.object({
     // "note": the request was stopped or ran out of time; it can be carried on.
     role: z.enum(["user", "assistant", "error", "note"]),
     text: z.string(),
-    tools: z.array(z.object({ name: z.string(), state: z.string(), target: z.string().nullable().optional() })).nullable(),
+    tools: z
+        .array(z.object({ name: z.string(), state: z.string(), target: z.string().nullable().optional(), said: z.string().optional() }))
+        .nullable(),
     runId: z.string().uuid().nullable(),
     // Who wrote it (a person's request); null for the assistant's replies.
     authorId: z.string().uuid().nullable(),
