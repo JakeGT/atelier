@@ -61,7 +61,7 @@ export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onT
                             role="tab"
                             aria-selected={current === t}
                             className={current === t ? "on" : ""}
-                            onClick={() => navigate(`/o/${org.slug}/settings/${t}`)}
+                            onClick={() => navigate(`/o/${org.slug}/settings/${t}`, { quiet: true })}
                         >
                             {TAB_LABEL[t]}
                         </button>

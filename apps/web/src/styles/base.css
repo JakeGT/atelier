@@ -556,6 +556,16 @@ textarea {
    place. Unhurried, and the same everywhere, so moving about the studio feels like one
    place rather than a series of jumps. (lib/hooks.ts starts it; reduced motion skips it.) */
 
+/* The picture of the page that the browser animates must never be in the way: clicks and
+   typing go to the page beneath it at once, so nothing is held up while it plays. */
+::view-transition,
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+    pointer-events: none;
+}
+
 ::view-transition-old(root) {
     animation: page-leave 0.22s var(--ease) both;
 }
