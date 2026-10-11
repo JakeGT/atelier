@@ -1,6 +1,8 @@
 import {
     Archive,
     ArchiveRestore,
+    ArrowLeft,
+    ArrowRight,
     ArrowUp,
     ArrowUpRight,
     CloudOff,
@@ -254,11 +256,34 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                             {/* The designs and templates are shown, not hidden behind a button: a row of
                                 live miniatures to pick from, with the rest one step away. */}
                             <div className="designs" role="radiogroup" aria-labelledby="designs-label">
-                                <p className="designs-label" id="designs-label">
-                                    <strong>Pick a design to start from</strong>
-                                    <span className="muted"> · or leave it empty and describe what you want</span>
-                                </p>
-                                <div className="designs-row" ref={designsRow}>
+                                <div className="designs-head">
+                                    <p className="designs-label" id="designs-label">
+                                        <strong>Pick a design to start from</strong>
+                                        <span className="muted"> · or leave it empty and describe what you want</span>
+                                    </p>
+                                    {(designsRow.more.before || designsRow.more.after) && (
+                                        <div className="designs-move">
+                                            <span className="muted designs-hint">Drag the row, or</span>
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm"
+                                                disabled={!designsRow.more.before}
+                                                onClick={() => designsRow.step(-1)}
+                                            >
+                                                <ArrowLeft /> Back
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm"
+                                                disabled={!designsRow.more.after}
+                                                onClick={() => designsRow.step(1)}
+                                            >
+                                                More <ArrowRight />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="designs-row" ref={designsRow.ref}>
                                     {[
                                         { id: "", name: "An empty page", description: "", tag: "" } as Template & { tag: string },
                                         ...starts,
