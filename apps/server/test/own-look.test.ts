@@ -130,6 +130,9 @@ test("the assistant is told the design is its own to make unless something was c
         assert.ok(!gone.test(rules), String(gone));
     assert.match(rules, /Never build a form that asks visitors for passwords or card numbers/);
     assert.match(rules, /You cannot publish/);
+    // A named reference is looked up without being asked.
+    assert.match(rules, /expected to without being told/);
+    assert.match(rules, /go and look at the real thing before you design/);
     // A blank canvas is said to be one, and has no need of the kit; a chosen look is named as where to start.
     assert.match(rules, /A blank canvas is blank/);
     assert.ok(!/Call `design_kit` before/.test(rules));
