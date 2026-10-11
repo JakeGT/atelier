@@ -192,6 +192,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Forms:** `<form data-form="name">` with no action. Preview and publishing fill in `…/f/<signed token>` (`services/forms.ts`, `fill.ts` option `forms`). `routes/forms.ts` receives (public, limited, robot trap), stores (`form_submissions`, migration 0019), and notifies owners and admins. Read under **Content → Messages from visitors** (`editor/Messages.tsx`, `…/content/messages`), API `…/submissions`.
 - A website published before this must be published again for its forms to send.
 
+## Movement (branch `motion-gsap`, ADR-0018)
+
+- **GSAP** is a server dependency; `design_motion` (assistant tool) writes `gsap.min.js`, `ScrollTrigger.min.js` and the kit's `assets/motion.js` into a website. Attributes: `data-k-reveal`, `data-k-stagger`, `data-k-count`, `data-k-parallax`, `data-k-motion="auto"`.
+- Each look has `--motion-duration`, `--motion-ease`, `--motion-distance`. The assistant's page check looks with movement off.
+- People ask in words (Design → Movement). **GSAP's licence forbids tools for building animations visually without code: do not add animation controls to the interface on top of GSAP** (ADR-0018).
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

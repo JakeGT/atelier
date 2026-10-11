@@ -424,16 +424,17 @@ export const LAYOUTS: Layout[] = [
 export const findLayout = (id: string): Layout | undefined => LAYOUTS.find((l) => l.id === id);
 
 // A whole page showing some sections, wearing whatever theme.css is beside it.
-export function samplePage(title: string, sections: Layout[]): string {
+// `motion`: the page as it is with movement switched on for the kit's sections.
+export function samplePage(title: string, sections: Layout[], motion = false): string {
     return `<!doctype html>
-<html lang="en">
+<html lang="en"${motion ? ' data-k-motion="auto"' : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="kit.css">
-<script src="kit.js" defer></script>
+<script src="kit.js" defer></script>${motion ? '\n<script src="gsap.min.js" defer></script>\n<script src="ScrollTrigger.min.js" defer></script>\n<script src="motion.js" defer></script>' : ""}
 </head>
 <body>
 ${sections.map((s) => s.html.replaceAll("page/PAGE#", "page/home#")).join("\n")}

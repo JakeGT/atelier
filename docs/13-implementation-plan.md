@@ -410,6 +410,8 @@ current host. What needs the VPS is P6, which is last.
   on `interactive-forms`): no framework; the kit's own small script; forms on
   published websites are received by Atelier and read under Content → Messages
   from visitors.
+- E5.8 Movement with GSAP (ADR-0018, asked for and built 2026-10-11 on
+  `motion-gsap`): written by the assistant, speed and feel from the look.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

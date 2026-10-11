@@ -1800,3 +1800,28 @@ button.where:hover {
         gap: 2px;
     }
 }
+
+/* ---- Design: movement ---- */
+
+.movement {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.movement li {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+}
+
+.movement li .btn {
+    align-self: flex-start;
+    margin-top: auto;
+}

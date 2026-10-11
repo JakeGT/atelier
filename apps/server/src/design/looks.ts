@@ -277,7 +277,28 @@ export const LOOK_PREFIX = "look:";
 // editor can tell which one a website is wearing.
 const MARKER = /^\/\* atelier-look: ([a-z0-9-]+) /;
 export const THEME_FILE = "theme.css";
+// How each look moves: how long a movement takes (seconds), its GSAP ease, and how far
+// things travel as they arrive (pixels). Part of the look, so a change of look changes
+// the movement with everything else.
+const MOTION: Record<string, [duration: string, ease: string, distance: string]> = {
+    editorial: ["0.9", "power2.out", "22"],
+    studio: ["0.6", "power3.out", "28"],
+    bold: ["0.45", "expo.out", "48"],
+    soft: ["0.8", "power1.out", "20"],
+    mono: ["0.3", "power1.out", "10"],
+    botanical: ["0.95", "sine.out", "24"],
+    midnight: ["0.7", "power3.out", "32"],
+    classic: ["1", "power1.out", "16"],
+};
+for (const look of LOOKS) {
+    const [duration, ease, distance] = MOTION[look.id] ?? ["0.7", "power2.out", "24"];
+    Object.assign(look.tokens, { "--motion-duration": duration, "--motion-ease": ease, "--motion-distance": distance });
+}
+
 export const KIT_FILE = "kit.css";
+// Movement: GSAP itself, its scroll plugin, and the kit's layer over them. Written into a
+// website only when movement is asked for.
+export const MOTION_FILES = ["gsap.min.js", "ScrollTrigger.min.js", "motion.js"] as const;
 // The behaviour of the interactive sections.
 export const KIT_SCRIPT = "kit.js";
 
