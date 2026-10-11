@@ -86,6 +86,7 @@ export interface ProjectPatch {
     name?: string;
     agentInstructions?: string | null;
     agentModel?: string | null;
+    askLevel?: number;
     archived?: boolean;
 }
 
@@ -131,6 +132,31 @@ export interface UsageStore {
     total(tenantId: string, kinds: UsageKind[], since: Date): Promise<number>;
     // Per calendar month (UTC, "2026-10") and kind, since `since`.
     monthly(tenantId: string, since: Date): Promise<{ month: string; kind: string; units: number }[]>;
+}
+
+// Questions the assistant asked the person, and what it was told.
+export interface AgentQuestionSet {
+    id: string;
+    projectId: string;
+    sessionId: string | null;
+    questions: { question: string; why: string; options: string[] }[];
+    answers: string[] | null;
+    askedAt: string;
+    closedAt: string | null;
+}
+export interface AgentQuestionStore {
+    // Asking again sets aside whatever was still open.
+    ask(input: {
+        id: string;
+        tenantId: string;
+        projectId: string;
+        sessionId: string | null;
+        questions: AgentQuestionSet["questions"];
+    }): Promise<AgentQuestionSet>;
+    // The questions waiting for an answer, if any.
+    open(tenantId: string, projectId: string): Promise<AgentQuestionSet | null>;
+    // Closes the open set: with answers, or (null) set aside unanswered. False if it was not open.
+    close(tenantId: string, projectId: string, id: string, answers: string[] | null, userId: string | null): Promise<boolean>;
 }
 
 // What a visitor sent through one of a website's forms.
@@ -399,6 +425,7 @@ export interface Store {
     projectMembers: ProjectMemberStore;
     studioTemplates: StudioTemplateStore;
     forms: FormStore;
+    questions: AgentQuestionStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;

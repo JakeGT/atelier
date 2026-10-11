@@ -85,6 +85,8 @@ export const projectSchema = z.object({
     // Guidance the owner gives the assistant for this website, and an optional model.
     agentInstructions: z.string().nullable(),
     agentModel: z.string().nullable(),
+    // How much the assistant asks before it acts: 0 decides everything itself … 3 assumes nothing.
+    askLevel: z.number().int().min(0).max(3),
     archivedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
 });

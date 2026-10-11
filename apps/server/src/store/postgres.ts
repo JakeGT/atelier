@@ -19,6 +19,8 @@ import type {
 } from "@atelier/shared";
 import postgres from "postgres";
 import type {
+    AgentQuestionSet,
+    AgentQuestionStore,
     AgentSessionStore,
     AuditStore,
     ContentStore,
@@ -101,6 +103,7 @@ interface ProjectRow {
     hosting_ref: string | null;
     template: string | null;
     agent_instructions: string | null;
+    ask_level: number;
     agent_model: string | null;
     archived_at: Ts | null;
     created_at: Ts;
@@ -207,7 +210,7 @@ const firstRow = <T>(rows: readonly T[]): T => {
 const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of, flags";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
-    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, archived_at, created_at";
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, ask_level, archived_at, created_at";
 const CONTENT_COLS =
     "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, fields, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
@@ -260,6 +263,7 @@ const rowToProject = (r: ProjectRow): Project => ({
     template: r.template,
     agentInstructions: r.agent_instructions,
     agentModel: r.agent_model,
+    askLevel: r.ask_level,
     archivedAt: iso(r.archived_at),
     createdAt: isoNow(r.created_at),
 });
@@ -364,6 +368,7 @@ export class PostgresStore implements Store {
     projectMembers: ProjectMemberStore;
     studioTemplates: StudioTemplateStore;
     forms: FormStore;
+    questions: AgentQuestionStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
@@ -703,6 +708,7 @@ export class PostgresStore implements Store {
                             name = COALESCE(${patch.name ?? null}, name),
                             agent_instructions = CASE WHEN ${patch.agentInstructions !== undefined} THEN ${patch.agentInstructions ?? null} ELSE agent_instructions END,
                             agent_model = CASE WHEN ${patch.agentModel !== undefined} THEN ${patch.agentModel ?? null} ELSE agent_model END,
+                            ask_level = COALESCE(${patch.askLevel ?? null}, ask_level),
                             archived_at = CASE WHEN ${archive}::boolean IS NULL THEN archived_at WHEN ${archive}::boolean THEN now() ELSE NULL END,
                             status = CASE WHEN ${archive}::boolean IS NULL THEN status WHEN ${archive}::boolean THEN 'archived' ELSE 'active' END,
                             updated_at = now()
@@ -1085,6 +1091,54 @@ export class PostgresStore implements Store {
                         SELECT project_id, role FROM project_members WHERE user_id = ${userId}`;
                     return rows.map((r) => ({ projectId: r.project_id, role: r.role }));
                 }),
+        };
+
+        interface QuestionRow {
+            id: string;
+            project_id: string;
+            session_id: string | null;
+            questions: AgentQuestionSet["questions"];
+            answers: string[] | null;
+            asked_at: Ts;
+            closed_at: Ts | null;
+        }
+        const rowToQuestion = (r: QuestionRow): AgentQuestionSet => ({
+            id: r.id,
+            projectId: r.project_id,
+            sessionId: r.session_id,
+            questions: r.questions ?? [],
+            answers: r.answers,
+            askedAt: isoNow(r.asked_at),
+            closedAt: r.closed_at ? isoNow(r.closed_at) : null,
+        });
+        const QUESTION_COLS = "id, project_id, session_id, questions, answers, asked_at, closed_at";
+        this.questions = {
+            ask: async (q) =>
+                this.withTenant(q.tenantId, async (tx) => {
+                    await tx`UPDATE agent_questions SET closed_at = now() WHERE project_id = ${q.projectId} AND closed_at IS NULL`;
+                    const rows = await tx<QuestionRow[]>`
+                        INSERT INTO agent_questions (id, project_id, tenant_id, session_id, questions)
+                        VALUES (${q.id}, ${q.projectId}, ${q.tenantId}, ${q.sessionId}, ${json(q.questions as unknown as Json)})
+                        RETURNING ${tx.unsafe(QUESTION_COLS)}`;
+                    return rowToQuestion(firstRow(rows));
+                }),
+            open: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<QuestionRow[]>`
+                        SELECT ${tx.unsafe(QUESTION_COLS)} FROM agent_questions
+                        WHERE project_id = ${projectId} AND closed_at IS NULL ORDER BY asked_at DESC LIMIT 1`;
+                    return rows[0] ? rowToQuestion(rows[0]) : null;
+                }),
+            close: async (tenantId, projectId, id, answers, userId) =>
+                this.withTenant(
+                    tenantId,
+                    async (tx) =>
+                        (
+                            await tx`
+                                UPDATE agent_questions SET answers = ${answers === null ? null : json(answers as unknown as Json)}, closed_at = now(), answered_by = ${userId}
+                                WHERE id = ${id} AND project_id = ${projectId} AND closed_at IS NULL`
+                        ).count > 0,
+                ),
         };
 
         interface FormRow {

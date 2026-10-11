@@ -18,6 +18,8 @@ interface PreviewProps {
     onDevice: (d: Device) => void;
     onReload: () => void;
     hasPage: boolean;
+    // The website is still being opened (its workspace is starting): not known yet whether it has pages.
+    opening?: boolean;
     working: boolean;
     // Whether this person may change wording (then the preview offers "Edit text").
     canEdit: boolean;
@@ -42,7 +44,19 @@ const REF = /^[a-z0-9][a-z0-9-]{0,63}\/[a-z0-9][a-z0-9-]{0,63}#[A-Za-z][\w-]{0,6
 const safePath = (v: unknown): string | null =>
     typeof v === "string" && v.length < 300 && !v.includes("..") && /^[\w\-./%~ ]+$/.test(v) ? v : null;
 
-export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, working, canEdit, onWording, onOpenWording }: PreviewProps) {
+export function Preview({
+    url,
+    reloadKey,
+    device,
+    onDevice,
+    onReload,
+    hasPage,
+    opening,
+    working,
+    canEdit,
+    onWording,
+    onOpenWording,
+}: PreviewProps) {
     const frame = useRef<HTMLIFrameElement>(null);
     const [trail, setTrail] = useState<Trail>({ pages: [HOME], at: 0 });
     // Set when Back or Forward was pressed: the next page to report is a move along the trail, not a new visit.
@@ -212,6 +226,12 @@ export function Preview({ url, reloadKey, device, onDevice, onReload, hasPage, w
                             title="Website preview"
                             sandbox="allow-scripts allow-forms allow-popups allow-modals"
                         />
+                    ) : opening ? (
+                        <div className="frame-empty" aria-live="polite">
+                            <Dots />
+                            <h3 className="display">Opening your website…</h3>
+                            <p className="muted">Its workspace is starting. This can take a little while after an update.</p>
+                        </div>
                     ) : (
                         <div className="frame-empty">
                             <svg viewBox="0 0 120 120" aria-hidden="true">

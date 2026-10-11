@@ -2,10 +2,11 @@ import { ArrowUp, Clock, Lightbulb, Play, RotateCcw, Square } from "lucide-react
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clock, stepDone, stepList, summary } from "../lib/activity";
-import type { Pulse, Run, ThreadMessage } from "../lib/api";
+import type { AssistantQuestions, Pulse, Run, ThreadMessage } from "../lib/api";
 import { useClickOutside } from "../lib/hooks";
 import { IDEAS } from "../lib/ideas";
 import { Dots } from "../ui/kit";
+import { AskLevelControl, QuestionCard } from "./Asking";
 import { UploadButton } from "./Media";
 import { Prose } from "./Prose";
 
@@ -43,6 +44,11 @@ interface ChatProps {
     onMoreTime: () => void;
     onCarryOn: () => void;
     onRetryWorkspace?: () => void;
+    // What the assistant has stopped to ask, and how much it asks on this website.
+    asked?: AssistantQuestions | null;
+    onAnswer?: (answers: string[]) => void;
+    askLevel?: number;
+    onAskLevel?: (level: number) => void;
 }
 
 // "Maren", "Maren and Sol", "Maren, Sol and 2 others"
@@ -162,6 +168,14 @@ export function Chat(props: ChatProps) {
                                 )}
                             </article>
                         ))}
+                        {props.asked && !run && (
+                            <QuestionCard
+                                key={props.asked.id}
+                                asked={props.asked}
+                                canAnswer={ready}
+                                onAnswer={(list) => props.onAnswer?.(list)}
+                            />
+                        )}
                         {run && <Working run={run} whose={theirs} canAct={ready} onStop={props.onStop} onMoreTime={props.onMoreTime} />}
                     </div>
                 )}
@@ -238,6 +252,7 @@ export function Chat(props: ChatProps) {
                             <Lightbulb /> Ideas for what to ask
                         </button>
                         <UploadButton label="Add pictures or files" onAdded={props.onFileAdded} />
+                        {props.onAskLevel && <AskLevelControl level={props.askLevel ?? 1} onChange={props.onAskLevel} />}
                         {ideasOpen && (
                             <div className="menu menu-left menu-up" role="menu">
                                 <p className="menu-label eyebrow">Choose one, then change it or send it</p>

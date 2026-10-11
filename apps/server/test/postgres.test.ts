@@ -995,3 +995,32 @@ test("what visitors send through a form belongs to its studio, and goes with its
     await store.projects.delete(a.tenantId, a.projectId);
     assert.equal((await store.forms.list(a.tenantId, a.projectId)).length, 0);
 });
+
+test("the assistant's questions belong to their studio; one set is open per website", { skip }, async () => {
+    const a = await studio("ask-a");
+    const b = await studio("ask-b");
+    const q = [{ question: "Who is it for?", why: "Tone", options: ["Families", "Chefs"] }];
+    const first = await store.questions.ask({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        sessionId: null,
+        questions: q,
+    });
+    const second = await store.questions.ask({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        sessionId: null,
+        questions: q,
+    });
+    assert.equal((await store.questions.open(a.tenantId, a.projectId))?.id, second.id);
+    assert.equal(await store.questions.close(a.tenantId, a.projectId, first.id, ["x"], a.userId), false);
+    assert.equal(await store.questions.open(b.tenantId, a.projectId), null);
+    assert.equal(await store.questions.close(b.tenantId, a.projectId, second.id, ["x"], b.userId), false);
+    assert.equal(await store.questions.close(a.tenantId, a.projectId, second.id, ["Chefs"], a.userId), true);
+    assert.equal(await store.questions.open(a.tenantId, a.projectId), null);
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.askLevel, 1);
+    assert.equal((await store.projects.update(a.tenantId, a.projectId, { askLevel: 3 })).askLevel, 3);
+    assert.equal((await store.projects.update(a.tenantId, a.projectId, { name: "Renamed" })).askLevel, 3);
+});

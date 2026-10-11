@@ -1,3 +1,5 @@
+import { askRules, DEFAULT_ASK_LEVEL, isAskLevel } from "./asking.ts";
+
 // What every Atelier assistant is told, whatever the website. The owner's own
 // guidance for a project is appended beneath it. This is how the product's rules
 // reach the model; the rules that matter for safety (the assistant cannot
@@ -61,14 +63,15 @@ The person edits wording directly, without you, and the website shows what they 
 
 ## Talking to the person
 - Reply in a few plain sentences: what you changed and anything they should look at. No code unless they ask.
-- If a request could mean two different things, ask one short question instead of guessing.`;
+- How much to ask before acting is the person's choice; it is set out under "How much to ask" below. Follow it exactly.`;
 
 const MAX_PROJECT_INSTRUCTIONS = 8_000;
 
-export function agentInstructions(project: { name: string; agentInstructions: string | null }): string {
+export function agentInstructions(project: { name: string; agentInstructions: string | null; askLevel?: number }): string {
     const own = project.agentInstructions?.trim().slice(0, MAX_PROJECT_INSTRUCTIONS);
     return [
         HOUSE_RULES,
+        askRules(isAskLevel(project.askLevel) ? project.askLevel : DEFAULT_ASK_LEVEL),
         `## This website\nIts name is "${project.name}".`,
         own ? `## What the owner has asked you to keep in mind\n${own}` : "",
     ]

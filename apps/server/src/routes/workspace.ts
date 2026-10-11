@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { findLook, LOOK_PREFIX, THEME_FILE, themeCss } from "../design/looks.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
+import { answersPrompt, answersText, isAskLevel } from "../services/asking.ts";
 import { starter } from "../services/designKit.ts";
 import { baseOf, fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { formActions, formNames } from "../services/forms.ts";
@@ -127,8 +128,27 @@ export function workspaceRoutes(api: Api): void {
         const body = await c.req.json().catch(() => null);
         if (org.flags.assistant === false) return c.json({ error: "the assistant has been switched off for this studio" }, 403);
         // "Carry on": pick up the request that was stopped or ran out of time.
-        const resume = body?.resume === true;
+        let resume = body?.resume === true;
         let prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+        // What is shown in the conversation, when it differs from what the assistant is sent.
+        let shown: string | null = null;
+        // Questions the assistant is waiting on. Answering them, or saying something else instead,
+        // carries the same request on: it still knows what it was doing.
+        const waiting = await store.questions.open(org.id, project.id);
+        let answers: string[] | null = null;
+        if (body?.answers !== undefined) {
+            if (!waiting || waiting.id !== body.answers?.id)
+                return c.json({ error: "those questions are no longer waiting for an answer" }, 409);
+            const given: unknown[] = Array.isArray(body.answers.answers) ? body.answers.answers : [];
+            answers = waiting.questions.map((_, i) => (typeof given[i] === "string" ? (given[i] as string).trim().slice(0, 2000) : ""));
+            prompt = answersPrompt(waiting.questions, answers);
+            shown = answersText(waiting.questions, answers);
+            resume = true;
+        } else if (waiting && prompt) {
+            shown = prompt;
+            prompt = `Instead of answering your questions, I am telling you this. Carry on with it in mind, and ask again only if you still must:\n\n${prompt}`;
+            resume = true;
+        }
         if (resume && !prompt) {
             const last = (await store.messages.list(org.id, project.id)).filter((m) => m.role === "user").at(-1);
             prompt = last ? `Carry on with this request from where you left off, and finish it:\n\n${last.text}` : "";
@@ -184,12 +204,13 @@ export function workspaceRoutes(api: Api): void {
                 vision: model ? ((await api.catalog.get()).models.find((m) => m.ref === model)?.vision ?? false) : false,
             });
             presence.setRun(project.id, { runId: run.id, userId: c.get("user").id, name: c.get("user").name });
+            if (waiting) await store.questions.close(org.id, project.id, waiting.id, answers, c.get("user").id);
             await store.messages.add({
                 tenantId: org.id,
                 projectId: project.id,
                 sessionId: session.id,
                 role: "user",
-                text: resume && !body?.prompt ? "Carry on." : prompt,
+                text: shown ?? (resume && !body?.prompt ? "Carry on." : prompt),
                 runId: run.id,
                 authorId: c.get("user").id,
             });
@@ -222,6 +243,25 @@ export function workspaceRoutes(api: Api): void {
             await store.messages.add({ ...base, role: "note", text, tools: run.result?.toolEvents ?? [] });
         } else {
             await store.messages.add({ ...base, role: "error", text: run.error ?? "The assistant stopped unexpectedly." });
+        }
+        // It stopped to ask something: tell whoever it is working for, in case they have walked away.
+        if (run.status === "done") {
+            const open = await store.questions.open(tenantId, projectId);
+            if (open && open.askedAt >= run.startedAt) {
+                const asked = (await store.messages.list(tenantId, projectId)).find((m) => m.runId === run.id && m.role === "user");
+                const project = await store.projects.findById(tenantId, projectId);
+                const org = await store.organizations.findById(tenantId);
+                if (asked?.authorId && project && org) {
+                    await notifier.tell([asked.authorId], {
+                        tenantId,
+                        kind: "assistant.question",
+                        title: `Your assistant has a question about ${project.name}`,
+                        body: `${open.questions.map((q) => `- ${q.question}`).join("\n")}\n\nIt is waiting for your answer before it carries on.`,
+                        link: `/o/${org.slug}/p/${project.slug}`,
+                        dedupe: `question:${open.id}`,
+                    });
+                }
+            }
         }
         // Whoever asked may have walked away: tell them if it did not finish.
         if (run.status === "failed" || run.status === "timed_out") {
@@ -367,7 +407,20 @@ export function workspaceRoutes(api: Api): void {
         for (const id of new Set(messages.map((m) => m.authorId).filter((x): x is string => x !== null))) {
             authors[id] = (await store.users.findById(id))?.name ?? "Someone";
         }
-        return c.json({ messages, activeRun, authors });
+        // What the assistant is waiting to be told, once it has stopped to ask.
+        const question = activeRun || project.archivedAt ? null : await store.questions.open(tenantId, project.id);
+        return c.json({ messages, activeRun, authors, question, askLevel: project.askLevel });
+    });
+
+    // How much the assistant asks before it acts on this website. Anyone who can ask it things can set it.
+    route("put", `${PROJECT}/asking`, "project.edit", async (c) => {
+        const refused = refuseArchived(c);
+        if (refused) return refused;
+        const body = (await c.req.json().catch(() => null)) as { level?: unknown } | null;
+        if (!isAskLevel(body?.level)) return c.json({ error: "level must be 0, 1, 2 or 3" }, 400);
+        const project = await store.projects.update(c.get("org").id, c.get("project").id, { askLevel: body.level });
+        await audit(c, "project.asking", `project:${project.id}`, { level: body.level });
+        return c.json({ askLevel: project.askLevel });
     });
 
     route("get", `${PROJECT}/checkpoints`, "project.read", async (c) => {
