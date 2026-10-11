@@ -249,6 +249,8 @@ export interface Pulse {
     run: Run | null;
     runBy: { id: string; name: string; you: boolean } | null;
     stamp: number;
+    // How much the assistant asks on this website (someone else may have changed it).
+    askLevel?: number;
 }
 
 export interface ThreadMessage {

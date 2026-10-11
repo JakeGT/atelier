@@ -132,6 +132,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     // What the assistant has stopped to ask, and how much it asks on this website.
     const [question, setQuestion] = useState<AssistantQuestions | null>(null);
     const [askLevel, setAskLevel] = useState(1);
+    // When the slider was last moved here.
+    const askedAt = useRef(0);
     // The website's versions are known (an empty list then means an empty website, not "still opening").
     const [known, setKnown] = useState(false);
 
@@ -244,6 +246,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     );
     const changeAsking = useCallback(
         (level: number) => {
+            askedAt.current = Date.now();
             setAskLevel(level);
             a.setAsking(pid, level).catch((err: Error) => toast(err.message, "error"));
         },
@@ -279,6 +282,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 setPeople(pulse.people);
                 setRunBy(pulse.runBy);
                 setActiveRun(pulse.run);
+                // Someone else moved the slider. (Not just after moving it here: the answer may be on its way.)
+                if (typeof pulse.askLevel === "number" && Date.now() - askedAt.current > 4000) setAskLevel(pulse.askLevel);
                 const was = seen.current;
                 // Pages written while it works show in the preview straight away.
                 const written = pulse.run ? pulse.run.steps.filter(changedFiles).length : 0;

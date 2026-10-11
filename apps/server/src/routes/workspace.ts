@@ -361,6 +361,8 @@ export function workspaceRoutes(api: Api): void {
             }
         }
         return c.json({
+            // How much the assistant asks here, so a change by one person reaches the others without a reload.
+            askLevel: c.get("project").askLevel,
             people: presence.others(project.id, user.id),
             run,
             runBy: run && active ? { id: active.userId, name: active.name, you: active.userId === user.id } : null,

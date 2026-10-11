@@ -91,7 +91,10 @@ export function createApi(deps: ApiDeps) {
     // A successful change to a website tells everyone who has it open to reload what they show.
     const announce: MiddlewareHandler<Env> = async (c, next) => {
         await next();
-        if (c.req.method !== "GET" && c.res.status < 400 && !c.req.path.endsWith("/pulse")) presence.touch(c.get("project").id);
+        // Not the heartbeat itself, and not how much the assistant asks: that changes nothing a
+        // website shows, and travels with the heartbeat instead of making every editor reload.
+        const quiet = c.req.path.endsWith("/pulse") || c.req.path.endsWith("/asking");
+        if (c.req.method !== "GET" && c.res.status < 400 && !quiet) presence.touch(c.get("project").id);
     };
 
     function route(method: Method, path: string, requirement: Requirement, ...rest: [...MiddlewareHandler<Env>[], Handler]) {

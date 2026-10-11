@@ -172,3 +172,16 @@ test("a new website can be made with the level chosen for it", async () => {
     );
     assert.equal(usual.project.askLevel, 1);
 });
+
+test("changing how much it asks does not make editors reload; the heartbeat carries it instead", async () => {
+    const t = await makeApp();
+    const who = await signIn(t);
+    const { project } = await json<{ project: Project }>(await send(t, who, "POST", `${who.api}/projects`, { name: "Okoro" }));
+    const p = `${who.api}/projects/${project.id}`;
+    const beat = async () => json<{ stamp: number; askLevel: number }>(await send(t, who, "POST", `${p}/pulse`, { typing: false }));
+    const before = await beat();
+    assert.equal((await send(t, who, "PUT", `${p}/asking`, { level: 3 })).status, 200);
+    const after = await beat();
+    assert.equal(after.stamp, before.stamp);
+    assert.equal(after.askLevel, 3);
+});
