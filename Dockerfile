@@ -68,7 +68,11 @@ ARG OPENCODE_VERSION=1.18.35
 # not here; having it here is what lets github.com stay off the workspaces' allow-list.
 # Chromium and a few fonts: the assistant looks at the pages it builds (mcp/look.ts).
 # curl stays: the assistant downloads fonts, pictures and libraries into the website (ADR-0022).
-RUN apk add --no-cache git curl ripgrep chromium font-liberation font-dejavu font-noto-emoji && \
+# Media tools: the assistant edits and converts pictures and clips itself (resize, crop, JPEG to
+# WebP, video to GIF, contact sheets): ffmpeg, ImageMagick, cwebp/gif2webp, gifsicle, pngquant, jpegoptim.
+RUN apk add --no-cache git curl ripgrep chromium font-liberation font-dejavu font-noto-emoji \
+        ffmpeg imagemagick imagemagick-jpeg imagemagick-webp imagemagick-svg imagemagick-tiff imagemagick-heic \
+        libwebp-tools gifsicle pngquant jpegoptim && \
     ARCH=$([ "$(uname -m)" = "aarch64" ] && echo arm64 || echo x64) && \
     curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}-musl.tar.gz" -o /tmp/opencode.tgz && \
     tar -xzf /tmp/opencode.tgz -C /tmp && \

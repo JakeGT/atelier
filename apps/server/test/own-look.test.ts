@@ -133,6 +133,10 @@ test("the assistant is told the design is its own to make unless something was c
     // A named reference is looked up without being asked.
     assert.match(rules, /expected to without being told/);
     assert.match(rules, /go and look at the real thing before you design/);
+    // It is told what it has for pictures and clips, and to leave no working files behind.
+    assert.match(rules, /ffmpeg/);
+    assert.match(rules, /no working files, test pages or thumbnails left behind/);
+    assert.match(rules, /How closely to follow a reference is the person's choice/);
     // A blank canvas is said to be one, and has no need of the kit; a chosen look is named as where to start.
     assert.match(rules, /A blank canvas is blank/);
     assert.ok(!/Call `design_kit` before/.test(rules));
