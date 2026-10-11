@@ -182,3 +182,34 @@ test("retention: old conversation, old versions of wording and removed files go;
     const { documents } = await json<{ documents: { draft: { headline: string } }[] }>(await get(t, who, `${p}/content`));
     assert.equal(documents[0]?.draft.headline, "version 6");
 });
+
+test("e-mails are drawn in Atelier's own style, with its logo, and nothing a person wrote can break out of them", async () => {
+    const { mailHtml } = await import("../src/services/mailHtml.ts");
+    const html = mailHtml({
+        title: 'Okoro & Sons: <script>alert("x")</script>',
+        body: "name: Maren <b>Holt</b>\nmessage: see https://example.com/a?b=1.\n\nSecond paragraph.",
+        action: { href: "https://atelier.example/o/x", label: "Open it in Atelier" },
+        foot: "To stop these e-mails…",
+        origin: "https://atelier.example",
+    });
+    assert.match(html, /<img src="https:\/\/atelier\.example\/mail-logo\.png" width="36" height="36"/);
+    // The app's paper, ink and seal, and its dark colours for programs that ask for them.
+    for (const colour of ["#f5f1e8", "#17150f", "#dc4326", "prefers-color-scheme: dark", "#100f0c"])
+        assert.ok(html.includes(colour), colour);
+    assert.ok(!html.includes("<script>") && !html.includes("<b>Holt"));
+    assert.match(html, /Okoro &amp; Sons: &lt;script&gt;/);
+    // An address written out is a link (without the full stop after it); blank lines make paragraphs.
+    assert.match(html, /<a href="https:\/\/example\.com\/a\?b=1" class="a-link"/);
+    assert.equal(html.match(/<p class="a-text"/g)?.length, 2);
+    assert.match(html, /<a href="https:\/\/atelier\.example\/o\/x" class="a-button-text"/);
+
+    // Every e-mail Atelier sends carries both: the styled one and plain words.
+    const { sent, mailer } = outbox();
+    const t = await makeApp();
+    const { Notifier } = await import("../src/services/notifier.ts");
+    const notifier = new Notifier(t.store, { mailer, publicOrigin: "https://atelier.example" });
+    await notifier.mail("new@example.com", "You were added", "Hello.\n\nSign in at https://atelier.example");
+    assert.equal(sent.length, 1);
+    assert.match((sent[0] as { html?: string }).html ?? "", /mail-logo\.png[\s\S]*You were added/);
+    assert.match(sent[0]?.text ?? "", /^Hello\./);
+});
