@@ -22,8 +22,15 @@ const PREVIEW_TOKEN_TTL_S = 2 * 60 * 60;
 // CSP `sandbox` directive gives them an opaque origin even when opened directly,
 // so their scripts cannot read the session, call the API with the user's
 // cookies, or touch the editor (ADR-0006).
+//
+// That opaque origin is "another website" to the browser, even for the page's own files, and
+// some things are only ever loaded with the other side's say-so: fonts, module scripts, and
+// anything a page's script fetches. So every preview file says any origin may read it.
+// Nothing is given away: the address already carries the token that lets anyone holding it
+// read the file, and no cookie is involved.
 const PREVIEW_HEADERS = {
     "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors 'self'",
+    "access-control-allow-origin": "*",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "cache-control": "no-store",

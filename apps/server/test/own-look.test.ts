@@ -186,7 +186,11 @@ test("a website's own look is shown beside the ready-made ones and can be gone b
     );
     assert.equal(design.looks.length, LOOKS.length + 1);
     const { url } = await json<{ url: string }>(await get(t, who, `${p}/preview-url`));
-    assert.equal((await t.app.request(`${url}fonts/playfair-display-normal.woff2`)).headers.get("content-type"), "font/woff2");
+    const font = await t.app.request(`${url}fonts/playfair-display-normal.woff2`);
+    assert.equal(font.headers.get("content-type"), "font/woff2");
+    // The preview is shown in a frame with an origin of its own, where a font loads only if its server allows it.
+    assert.equal(font.headers.get("access-control-allow-origin"), "*");
+    assert.match(font.headers.get("content-security-policy") ?? "", /^sandbox /);
 
     // A ready-made look is tried on; the website's own is still offered, shown as it would be, and comes back as it was.
     assert.equal((await send(t, who, "PUT", `${p}/look`, { look: "bold" })).status, 200);
