@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AskLevelSlider } from "../editor/Asking";
 import type { Org, Project, Session, Template } from "../lib/api";
 import { api, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo, useClickOutside, useDragScroll } from "../lib/hooks";
@@ -44,6 +45,8 @@ interface StudioProps {
     onToggleTheme: () => void;
 }
 
+const ASK_KEPT = "atelier.askLevel";
+
 export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme }: StudioProps) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
@@ -56,6 +59,15 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     // Starter templates: a finished small website to begin from, instead of an empty page.
     const [templates, setTemplates] = useState<Template[]>([]);
     const [template, setTemplate] = useState<string | null>(null);
+    // How much the assistant asks on the new website. What was chosen last is offered again.
+    const [askLevel, setAskLevelState] = useState(() => {
+        const kept = Number(window.localStorage.getItem(ASK_KEPT));
+        return Number.isInteger(kept) && kept >= 0 && kept <= 3 && window.localStorage.getItem(ASK_KEPT) !== null ? kept : 1;
+    });
+    const setAskLevel = (level: number) => {
+        setAskLevelState(level);
+        window.localStorage.setItem(ASK_KEPT, String(level));
+    };
     const loadTemplates = useCallback(() => a.templates().then(setTemplates, () => api.templates().then(setTemplates, () => {})), [a]);
     useEffect(() => {
         void loadTemplates();
@@ -146,7 +158,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
         }
         setBusy(true);
         try {
-            const project = await a.createProject(name.trim(), template);
+            const project = await a.createProject(name.trim(), template, askLevel);
             if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
             navigate(`/o/${org.slug}/p/${project.slug}`);
         } catch (err) {
@@ -322,6 +334,14 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 <button type="button" className="btn btn-sm designs-all" onClick={() => setChoosing(true)}>
                                     <LayoutTemplate /> See all {starts.length} designs and templates, larger
                                 </button>
+                            </div>
+                            <div className="brief-asking">
+                                <AskLevelSlider
+                                    level={askLevel}
+                                    onChange={setAskLevel}
+                                    full
+                                    note="For this new website. You can change it at any time under the message box in the editor."
+                                />
                             </div>
                             <p className="brief-start">
                                 {chosen

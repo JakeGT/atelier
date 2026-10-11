@@ -30,8 +30,11 @@ unanswered question would hold a workspace busy.
 
 ### How much it asks is a setting of the website
 
-`projects.ask_level`, four stops, set with a slider under the message box
-(`PUT …/asking`, anyone who can make requests):
+`projects.ask_level`, four stops. The slider is always in view (it was first a
+small button that opened it, and the owner could not find it): under the
+message box in the editor, in the website's settings, and in the new-website
+form on the studio page, where it sets the level the website is created with.
+(`PUT …/asking`, anyone who can make requests; `askLevel` on create.)
 
 | | Name | What the assistant is told |
 | --- | --- | --- |
@@ -53,5 +56,5 @@ the endpoint also refuses to show questions, whatever the model does.
 
 ## To confirm
 
-1. Whether the level should be per person rather than per website.
+1. Decided by the owner on 2026-10-11: the level stays per website.
 2. Whether a studio should set a default for its new websites.

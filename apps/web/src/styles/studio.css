@@ -2010,3 +2010,12 @@ button.where:hover {
     display: grid;
     gap: 6px;
 }
+
+.brief-asking {
+    margin-bottom: 10px;
+    padding: 4px clamp(16px, 2.2vw, 26px) 0;
+}
+
+.brief-asking .asking {
+    max-width: 640px;
+}

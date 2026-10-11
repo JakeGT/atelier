@@ -1735,33 +1735,73 @@
     font-size: 12.5px;
 }
 
-/* ---- how much it asks ---- */
+/* ---- how much it asks: the slider, always in view ---- */
 
 .asking {
-    width: min(340px, calc(100vw - 48px));
-    padding: 14px 16px;
+    min-width: 0;
+    margin: 4px 2px 6px;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+}
+
+.asking-full {
+    margin: 0;
+}
+
+.asking-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px 12px;
+    float: left;
+    width: 100%;
+    padding: 0;
+}
+
+.asking-head label {
+    cursor: pointer;
+}
+
+.asking-name {
+    font-size: 13px;
 }
 
 .asking input[type="range"] {
+    clear: both;
+    display: block;
     width: 100%;
-    margin: 6px 0 2px;
+    margin: 8px 0 2px;
     accent-color: var(--seal);
+    cursor: pointer;
 }
 
 .asking-ends {
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    font-size: 12px;
+    font-size: 11.5px;
 }
 
 .asking-now {
-    margin: 12px 0 6px;
-    font-size: 13.5px;
+    margin: 8px 0 2px;
+    font-size: 13px;
     line-height: 1.5;
 }
 
-.asking-note {
-    margin: 0;
-    font-size: 12px;
+.asking:disabled {
+    opacity: 0.55;
+}
+
+/* The buttons under the message box share its whole width. */
+.menu-wrap.ideas {
+    gap: 6px;
+}
+
+.menu-wrap.ideas > .btn,
+.menu-wrap.ideas > label {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: max-content;
 }

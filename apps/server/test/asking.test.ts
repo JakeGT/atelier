@@ -159,3 +159,16 @@ test("saying something else instead of answering carries on too; a setting of 'd
     await say({ prompt: "More" });
     assert.equal((await ask(t, [], 3)).status, 400);
 });
+
+test("a new website can be made with the level chosen for it", async () => {
+    const t = await makeApp();
+    const who = await signIn(t);
+    const made = await json<{ project: Project & { askLevel: number } }>(
+        await send(t, who, "POST", `${who.api}/projects`, { name: "Careful", askLevel: 3 }),
+    );
+    assert.equal(made.project.askLevel, 3);
+    const usual = await json<{ project: Project & { askLevel: number } }>(
+        await send(t, who, "POST", `${who.api}/projects`, { name: "Usual", askLevel: 12 }),
+    );
+    assert.equal(usual.project.askLevel, 1);
+});

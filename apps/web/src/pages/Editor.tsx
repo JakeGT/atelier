@@ -720,6 +720,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     org={org}
                     api={a}
                     onClose={() => setSettingsOpen(false)}
+                    askLevel={askLevel}
+                    onAskLevel={changeAsking}
                     onSaved={(next) => {
                         onProjectChanged(next);
                         setSettingsOpen(false);

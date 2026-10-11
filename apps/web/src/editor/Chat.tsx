@@ -7,7 +7,7 @@ import { useClickOutside } from "../lib/hooks";
 import { IDEAS } from "../lib/ideas";
 import { Dots } from "../ui/kit";
 import { reportProblem } from "../ui/Report";
-import { AskLevelControl, QuestionCard } from "./Asking";
+import { AskLevelSlider, QuestionCard } from "./Asking";
 import { UploadButton } from "./Media";
 import { Prose } from "./Prose";
 
@@ -262,7 +262,6 @@ export function Chat(props: ChatProps) {
                             <Lightbulb /> Ideas for what to ask
                         </button>
                         <UploadButton label="Add pictures or files" onAdded={props.onFileAdded} />
-                        {props.onAskLevel && <AskLevelControl level={props.askLevel ?? 1} onChange={props.onAskLevel} />}
                         {ideasOpen && (
                             <div className="menu menu-left menu-up" role="menu">
                                 <p className="menu-label eyebrow">Choose one, then change it or send it</p>
@@ -283,6 +282,9 @@ export function Chat(props: ChatProps) {
                             </div>
                         )}
                     </div>
+                )}
+                {props.onAskLevel && !locked && (
+                    <AskLevelSlider level={props.askLevel ?? 1} onChange={props.onAskLevel} disabled={!ready} />
                 )}
                 <p className="composer-hint mono muted">
                     {busy
