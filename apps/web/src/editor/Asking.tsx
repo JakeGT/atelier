@@ -1,35 +1,88 @@
 import { ChevronDown, MessageCircleQuestion, SlidersHorizontal } from "lucide-react";
+import type { CSSProperties } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AssistantQuestions } from "../lib/api";
 
 // How much the assistant asks before it acts: one end decides everything itself,
 // the other assumes nothing. What each stop means is said in words, always.
-export const ASK_LEVELS: { short: string; name: string; about: string }[] = [
+// `short` completes "Asks you: …"; `brief` follows the setting's name on one line; `about` is the full account.
+export const ASK_LEVELS: { short: string; name: string; brief: string; about: string }[] = [
     {
         short: "never",
         name: "Decides everything itself",
+        brief: "it never stops to ask, and tells you afterwards what it assumed",
         about: "Never stops to ask. It makes its best guess, uses placeholders for facts it does not have, and tells you what it assumed.",
     },
     {
         short: "only when it matters",
         name: "Asks only when it matters",
+        brief: "it decides ordinary things, and asks when a wrong guess would cost you",
         about: "Decides ordinary things itself. Asks when a request could mean two things, or before something hard to put back.",
     },
     {
         short: "before big choices",
         name: "Checks before big choices",
+        brief: "it asks who it is for, which pages and the look before it builds",
         about: "Before building anything substantial it asks who it is for, which pages, the tone and the look. Small details it decides itself.",
     },
     {
         short: "about everything",
         name: "Assumes nothing",
+        brief: "it asks about everything you have not said, and shows its plan first",
         about: "Asks about everything you have not said, never invents a fact, and tells you its plan before it starts.",
     },
 ];
 
-// The slider itself, always in view: under the message box, and in the website's settings.
-// `full`: always say what the chosen stop means (settings); otherwise it is said while the
-// slider is being used, to keep the conversation panel uncluttered.
+// The slider, drawn by Atelier rather than the browser so it looks the same everywhere: a line
+// with a stop for each choice and a handle that glides between them. Underneath it is an
+// ordinary range input, so dragging, clicking, the arrow keys and screen readers all work.
+// `labels`: name every stop under the line ("all", where there is room across), or only the two ends.
+function Track({ id, level, onChange, labels }: { id: string; level: number; onChange: (level: number) => void; labels: "all" | "ends" }) {
+    const last = ASK_LEVELS.length - 1;
+    const now = ASK_LEVELS[level] ?? ASK_LEVELS[1];
+    return (
+        <div className={`ask-track ask-track-${labels}`} style={{ "--at": level / last } as CSSProperties}>
+            <div className="ask-line" aria-hidden="true">
+                <span className="ask-fill" />
+                {ASK_LEVELS.map((l, i) => (
+                    <span key={l.name} className={`ask-stop ${i <= level ? "passed" : ""}`} style={{ "--i": i / last } as CSSProperties} />
+                ))}
+                <span className="ask-handle" />
+            </div>
+            <input
+                id={id}
+                type="range"
+                min={0}
+                max={last}
+                step={1}
+                value={level}
+                onChange={(e) => onChange(Number(e.target.value))}
+                aria-label="How much your assistant asks you before it acts"
+                aria-valuetext={now?.name}
+            />
+            <div className="ask-names">
+                {ASK_LEVELS.map((l, i) => (
+                    <button
+                        key={l.name}
+                        type="button"
+                        // The slider itself takes the keyboard; these are for pointing at.
+                        tabIndex={-1}
+                        className={`${i === level ? "on" : ""} ${i === 0 ? "first" : i === last ? "last" : "middle"}`}
+                        style={{ "--i": i / last } as CSSProperties}
+                        onClick={() => onChange(i)}
+                    >
+                        {l.name}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// How much the assistant asks, in three settings of the same control:
+// `row` (the new-website form): its name and what the chosen stop means on one line, the slider across the whole width;
+// `full` (the website's settings): boxed, with the explanation always shown;
+// neither (under the message box): a button that names the setting and opens the slider in place.
 export function AskLevelSlider({
     level,
     onChange,
@@ -42,7 +95,6 @@ export function AskLevelSlider({
     onChange: (level: number) => void;
     disabled?: boolean;
     full?: boolean;
-    // Laid out as one line across the whole width (the new-website form).
     row?: boolean;
     // Said after what the stop means, in place of the usual line about when it takes effect.
     note?: string;
@@ -50,40 +102,22 @@ export function AskLevelSlider({
     const [open, setOpen] = useState(false);
     const id = useId();
     const now = ASK_LEVELS[level] ?? ASK_LEVELS[1];
-    // One line across the whole width: what it is, the slider between its two ends, and under it
-    // what the chosen stop means. For a form that has room across and little to spare downwards.
     if (row) {
         return (
             <fieldset className="asking-row" disabled={disabled}>
-                <label htmlFor={id} className="asking-row-label">
-                    How much your assistant asks you
-                </label>
-                <span className="asking-row-end muted">Decides everything itself</span>
-                <input
-                    id={id}
-                    type="range"
-                    min={0}
-                    max={ASK_LEVELS.length - 1}
-                    step={1}
-                    value={level}
-                    onChange={(e) => onChange(Number(e.target.value))}
-                    aria-valuetext={now?.name}
-                    list={`${id}-stops`}
-                />
-                <datalist id={`${id}-stops`}>
-                    {ASK_LEVELS.map((l, i) => (
-                        <option key={l.name} value={i} />
-                    ))}
-                </datalist>
-                <span className="asking-row-end muted">Assumes nothing</span>
-                <p className="asking-row-now" aria-live="polite">
-                    <strong>{now?.name}.</strong> {now?.about}
+                <p className="asking-row-head">
+                    <label htmlFor={id}>How much your assistant asks you</label>
+                    <span className="asking-row-now" aria-live="polite">
+                        <span className="asking-row-dot" aria-hidden="true">
+                            ·
+                        </span>
+                        {now?.brief}
+                    </span>
                 </p>
+                <Track id={id} level={level} onChange={onChange} labels="all" />
             </fieldset>
         );
     }
-    // Under the message box: a button that says what it is and what is chosen. Pressing it
-    // opens the slider in place, smoothly; nothing moves on hover.
     if (!full) {
         return (
             <div className={`asking-fold ${open ? "open" : ""}`}>
@@ -103,27 +137,7 @@ export function AskLevelSlider({
                 <div className="asking-fold-panel" id={`${id}-panel`} inert={!open}>
                     <div>
                         <fieldset className="asking-fold-inner" disabled={disabled}>
-                            <input
-                                id={id}
-                                type="range"
-                                min={0}
-                                max={ASK_LEVELS.length - 1}
-                                step={1}
-                                value={level}
-                                onChange={(e) => onChange(Number(e.target.value))}
-                                aria-label="How much your assistant asks you before it acts"
-                                aria-valuetext={now?.name}
-                                list={`${id}-stops`}
-                            />
-                            <datalist id={`${id}-stops`}>
-                                {ASK_LEVELS.map((l, i) => (
-                                    <option key={l.name} value={i} />
-                                ))}
-                            </datalist>
-                            <div className="asking-ends muted">
-                                <span>Decides everything itself</span>
-                                <span>Assumes nothing</span>
-                            </div>
+                            <Track id={id} level={level} onChange={onChange} labels="ends" />
                             <p className="asking-now" aria-live="polite">
                                 <strong>{now?.name}.</strong> {now?.about}{" "}
                                 <span className="muted">{note ?? "For this website, from your next request."}</span>
@@ -135,39 +149,18 @@ export function AskLevelSlider({
         );
     }
     return (
-        <fieldset className={`asking ${full ? "asking-full" : ""}`} disabled={disabled}>
+        <fieldset className="asking asking-full" disabled={disabled}>
             <legend className="asking-head">
                 <label htmlFor={id} className="eyebrow">
                     How much your assistant asks you
                 </label>
                 <strong className="asking-name">{now?.name}</strong>
             </legend>
-            <input
-                id={id}
-                type="range"
-                min={0}
-                max={ASK_LEVELS.length - 1}
-                step={1}
-                value={level}
-                onChange={(e) => onChange(Number(e.target.value))}
-                aria-valuetext={now?.name}
-                list={`${id}-stops`}
-            />
-            <datalist id={`${id}-stops`}>
-                {ASK_LEVELS.map((l, i) => (
-                    <option key={l.name} value={i} />
-                ))}
-            </datalist>
-            <div className="asking-ends muted">
-                <span>Decides everything itself</span>
-                <span>Assumes nothing</span>
-            </div>
-            {full && (
-                <p className="asking-now" aria-live="polite">
-                    {now?.about}{" "}
-                    <span className="muted">{note ?? "For this website, from your next request; shared by everyone working on it."}</span>
-                </p>
-            )}
+            <Track id={id} level={level} onChange={onChange} labels="ends" />
+            <p className="asking-now" aria-live="polite">
+                {now?.about}{" "}
+                <span className="muted">{note ?? "For this website, from your next request; shared by everyone working on it."}</span>
+            </p>
         </fieldset>
     );
 }

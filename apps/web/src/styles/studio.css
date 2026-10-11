@@ -2061,52 +2061,48 @@ button.where:hover {
 }
 
 .brief-asking {
-    margin-top: 12px;
-    padding: 12px clamp(16px, 2.2vw, 26px);
+    margin-top: 14px;
+    padding: 16px clamp(16px, 2.2vw, 26px) 14px;
     border-top: 1px solid var(--line);
 }
 
-/* The slider across the whole width: its name, then the two ends with the slider between them. */
+/* The slider across the whole width: its name and what the chosen stop means, then the line. */
 .asking-row {
     display: grid;
-    grid-template-columns: auto auto minmax(120px, 1fr) auto;
-    align-items: center;
-    gap: 4px 12px;
+    gap: 10px;
     min-width: 0;
     margin: 0;
     padding: 0;
     border: 0;
 }
 
-.asking-row-label {
-    margin-right: 8px;
+.asking-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    min-width: 0;
+    margin: 0;
+}
+
+.asking-row-head label {
+    flex: none;
     font-size: 14.5px;
     font-weight: 600;
     cursor: pointer;
 }
 
-.asking-row-end {
-    font-size: 12.5px;
-    white-space: nowrap;
+.asking-row-dot {
+    margin: 0 0.35em;
 }
 
-.asking-row input[type="range"] {
-    width: 100%;
-    margin: 0;
-    accent-color: var(--seal);
-    cursor: pointer;
-}
-
+/* Said in the manner of the line above the designs: the name, then a quieter remark. */
 .asking-row-now {
-    grid-column: 1 / -1;
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.45;
+    min-width: 0;
+    overflow: hidden;
     color: var(--ink-3);
-}
-
-.asking-row-now strong {
-    color: var(--ink);
+    font-size: 14.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .brief-foot {
@@ -2133,22 +2129,23 @@ button.where:hover {
 }
 
 @media (max-width: 760px) {
-    /* The name, the slider across the whole width, then its two ends under it. */
-    .asking-row {
-        grid-template-columns: 1fr 1fr;
+    /* Narrow: what the stop means may run to two lines, and only the ends are named. */
+    .asking-row-head {
+        display: block;
     }
-    .asking-row-label,
-    .asking-row input[type="range"] {
-        grid-column: 1 / -1;
+    .asking-row-now {
+        display: block;
+        margin-top: 2px;
+        white-space: normal;
     }
-    .asking-row input[type="range"] {
-        grid-row: 2;
+    .asking-row-dot {
+        display: none;
     }
-    .asking-row-end {
-        grid-row: 3;
+    .asking-row-now::first-letter {
+        text-transform: uppercase;
     }
-    .asking-row-end:last-of-type {
-        text-align: right;
+    .asking-row .ask-names .middle {
+        display: none;
     }
     .starter-about {
         display: none;
