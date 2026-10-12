@@ -189,3 +189,69 @@ test("a long name makes an address that does not end in a hyphen", async () => {
     const { org } = await json<{ org: { slug: string } }>(await send(t, maren, "POST", "/api/v1/orgs", { name: `${"b".repeat(39)} cde` }));
     assert.equal(org.slug, "b".repeat(39));
 });
+
+test("a list of more than 500 entries is refused with the reason, not cut short", async () => {
+    const t = await makeApp();
+    const maren = await signIn(t);
+    const site = await website(t, maren);
+    const base = `${maren.api}/projects/${site.id}/content/page/home`;
+    await send(t, maren, "PUT", base, { menu: [] });
+    await send(t, maren, "PUT", `${base}/fields`, {
+        fields: [{ key: "menu", label: "Menu", type: "items", itemFields: [{ key: "name", label: "Name", type: "text" }] }],
+    });
+    const entries = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `Dish ${i}` }));
+    assert.equal((await send(t, maren, "PUT", base, { menu: entries(500) })).status, 200);
+    const refused = await send(t, maren, "PUT", base, { menu: entries(501) });
+    assert.equal(refused.status, 400);
+    assert.match(
+        (await json<{ error: string }>(refused)).error,
+        /“Menu” has 501 entries and a list can hold up to 500, so nothing was saved/,
+    );
+    // The assistant is told the same, and what was there stays.
+    const asAgent = await t.app.request("/api/agent/content/page/home", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${agentToken(maren, site)}`, "content-type": "application/json" },
+        body: JSON.stringify({ menu: entries(600) }),
+    });
+    assert.equal(asAgent.status, 400);
+    const kept = await t.store.content.get(maren.org.id, site.id, "page", "home");
+    assert.equal((kept?.draft?.menu as unknown[] | undefined)?.length, 500);
+});
+
+test("what the app notices about itself: the same thing counts on one report, the operator hears of it once, large saves are tracked", async () => {
+    const t = await makeApp();
+    const maren = await signIn(t);
+    const site = await website(t, maren);
+    const notice = (body: unknown) => send(t, maren, "POST", "/api/v1/feedback/noticed", body);
+    assert.equal((await notice({ kind: "praise", text: "lovely" })).status, 400);
+    const crash = {
+        kind: "crash",
+        text: "TypeError: x is undefined\n at Editor",
+        detail: "at Editor (Editor-AbCd1234.js:1:2)",
+        page: "/o/a/p/b",
+    };
+    assert.equal((await notice(crash)).status, 201);
+    assert.equal((await notice({ ...crash, page: "/o/a/p/c" })).status, 201);
+    assert.equal((await notice({ kind: "freeze", text: "The page stopped answering for 12 seconds" })).status, 201);
+    // A different length of time is the same freeze.
+    assert.equal((await notice({ kind: "freeze", text: "The page stopped answering for 31 seconds" })).status, 201);
+    const open = await t.store.feedback.list({ status: "open" });
+    assert.deepEqual(open.map((r) => [r.source, r.kind, r.seen]).sort(), [
+        ["app", "crash", 2],
+        ["app", "freeze", 2],
+    ]);
+    assert.equal(open.find((r) => r.kind === "crash")?.context.page, "/o/a/p/c");
+    // Once dealt with, the next time is a new report.
+    await t.store.feedback.setStatus(open.find((r) => r.kind === "crash")?.id ?? "", "done");
+    await notice(crash);
+    assert.equal((await t.store.feedback.list({ status: "open" })).filter((r) => r.kind === "crash")[0]?.seen, 1);
+
+    // A save of a megabyte or more is saved all the same, and noted.
+    const base = `${maren.api}/projects/${site.id}/content/page/home`;
+    const big = await send(t, maren, "PUT", base, { story: "x".repeat(1_200_000) });
+    assert.equal(big.status, 200);
+    await new Promise((r) => setTimeout(r, 20));
+    const noted = (await t.store.feedback.list({ status: "open" })).find((r) => r.kind === "large-save");
+    assert.equal(noted?.context.website, "Site");
+    assert.match(noted?.context.size ?? "", /^1\.2 MB/);
+});

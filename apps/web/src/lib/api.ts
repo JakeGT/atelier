@@ -311,12 +311,16 @@ export interface SitePage {
 // A report about Atelier itself: from a person, or from the assistant about the system it works in.
 export interface FeedbackReport {
     id: string;
-    source: "person" | "assistant";
+    // "app": Atelier noticed it itself.
+    source: "person" | "assistant" | "app";
     kind: string;
     text: string;
     context: Record<string, string>;
     status: "open" | "done";
     createdAt: string;
+    // For what Atelier noticed itself: how many times, and when last.
+    seen: number;
+    lastSeenAt: string | null;
 }
 
 // What the assistant has stopped to ask the person.
@@ -462,6 +466,9 @@ export class ApiError extends Error {
 }
 
 let csrfToken: string | null = null;
+// For what the app reports about itself (lib/watch.ts), which is sent without going through here.
+export const currentCsrf = (): string | null => csrfToken;
+export const currentBuild = (): string => myBuild;
 
 // ---- noticing a deploy ---------------------------------------------------------------
 // A tab left open across a deploy keeps running the old bundle. The server names the

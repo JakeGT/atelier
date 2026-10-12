@@ -12,6 +12,9 @@ export interface RunState {
     error: string | null;
     // The version the run was saved as (null when it changed no files).
     checkpoint: string | null;
+    // Set when the files were changed but could not be saved as a version: the reply
+    // stands, and whatever is saved next takes these changes with it.
+    unsaved?: boolean;
     // While it runs: what it has done so far, when it last did something, when it
     // will be stopped for taking too long, and whether that can still be put back.
     steps: AgentToolEvent[];
@@ -44,6 +47,7 @@ export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status"
 export interface JobOutcome {
     result: AgentResult;
     checkpoint: string | null;
+    unsaved?: boolean;
     status?: "done" | "stopped" | "timed_out";
 }
 
@@ -102,7 +106,8 @@ export class RunTracker {
         // fails the run like any other, and cannot leave the workspace marked busy for good.
         void (async () => job({ control, step }))()
             .then(
-                ({ result, checkpoint, status }) => Object.assign(run, { status: status ?? "done", result, checkpoint }),
+                ({ result, checkpoint, status, unsaved }) =>
+                    Object.assign(run, { status: status ?? "done", result, checkpoint, ...(unsaved ? { unsaved } : {}) }),
                 (err: unknown) => {
                     // Whatever was thrown, the run says why it failed, and so does the log.
                     const error = err instanceof Error ? err.message : String(err);

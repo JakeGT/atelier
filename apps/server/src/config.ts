@@ -54,6 +54,9 @@ const envSchema = z.object({
     // Where agent workspaces run: "container" (production: per-project runtime
     // containers via the provisioner) or "local" (dev/tests: in-process).
     RUNTIME_MODE: z.enum(["local", "container"]).default("local"),
+    // With RUNTIME_MODE=container the server refuses to serve as the owner of the database's
+    // tables. This lets it, for trying Atelier out with one database login; never for real studios.
+    DATABASE_OWNER_OK: z.string().optional(),
     PROVISIONER_URL: z.string().url().default("http://atelier-provisioner:8091"),
     PROVISIONER_SECRET: z.string().optional(),
     PROVISIONER_SECRET_FILE: z.string().optional(),
@@ -224,6 +227,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         providerUpstreams,
         workspaceIdleMinutes: e.WORKSPACE_IDLE_MINUTES,
         runtimeMode: e.RUNTIME_MODE,
+        databaseOwnerOk: bool("DATABASE_OWNER_OK", e.DATABASE_OWNER_OK, false),
         provisionerUrl: e.PROVISIONER_URL,
         provisionerSecret,
         deployerUrl: e.DEPLOYER_URL ?? null,

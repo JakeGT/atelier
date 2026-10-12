@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { RateLimiter } from "../security.ts";
 import { verifyAgentToken } from "../services/agentToken.ts";
 import type { Notifier } from "../services/notifier.ts";
@@ -16,7 +16,63 @@ const KIND_NAMES: Record<string, string> = {
     rules: "The rules were unclear or contradicted each other",
     missing: "Something it needed was missing",
     other: "Something else",
+    crash: "A screen stopped working",
+    error: "An error nothing caught",
+    freeze: "The page froze",
+    "large-save": "An unusually large save",
 };
+const NOTICED_KINDS = ["crash", "error", "freeze"] as const;
+const NOTICED_TITLES: Record<(typeof NOTICED_KINDS)[number], string> = {
+    crash: "A screen stopped working for someone",
+    error: "An error in the app that nothing caught",
+    freeze: "The app froze for someone",
+};
+// What happened, apart from who it happened to and when: the kind and the first line of it,
+// with the parts that differ from one build or one visit to the next taken out.
+const signatureOf = (kind: string, what: string): string =>
+    createHash("sha256")
+        .update(
+            `${kind}\n${(what.split("\n")[0] ?? "")
+                .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "<id>")
+                .replace(/-[A-Za-z0-9_-]{8}\.js/g, ".js")
+                .replace(/\d+(\.\d+)?/g, "<n>")}`,
+        )
+        .digest("hex")
+        .slice(0, 32);
+
+// Saves are not limited in size (the owner's decision, 2026-10-12): they are watched instead.
+// One at or past a megabyte is noted here, one report for each website and size, counting.
+const LARGE_SAVE = 1_000_000;
+export async function noteLargeSave(
+    store: Store,
+    save: { bytes: number; tenantId: string; projectId: string; kind: string; slug: string; by: "a person" | "the assistant" },
+): Promise<void> {
+    if (!(save.bytes >= LARGE_SAVE)) return;
+    const size = [50, 20, 10, 5, 2, 1].find((mb) => save.bytes >= mb * 1_000_000) ?? 1;
+    const [org, project] = await Promise.all([
+        store.organizations.findById(save.tenantId),
+        store.projects.findById(save.tenantId, save.projectId),
+    ]);
+    await store.feedback.noticed(
+        {
+            id: randomUUID(),
+            source: "app",
+            kind: "large-save",
+            text: `Wording of ${size} MB or more was saved to one piece of a website. Nothing was refused: saves have no size limit, and this is here so that a limit can be decided on if they become a problem.`,
+            context: {
+                ...(org ? { studio: org.name } : {}),
+                ...(project ? { website: project.name } : {}),
+                page: `${save.kind}/${save.slug}`,
+                from: save.by,
+                size: `${(save.bytes / 1_000_000).toFixed(1)} MB (the latest)`,
+            },
+            tenantId: save.tenantId,
+            projectId: save.projectId,
+            userId: null,
+        },
+        signatureOf("large-save", `${save.projectId} ${size}MB`),
+    );
+}
 
 // Open reports as a document: for reading in one go, and for handing to whoever improves Atelier next.
 export function reportsDocument(reports: FeedbackReport[], now = new Date()): string {
@@ -26,7 +82,9 @@ export function reportsDocument(reports: FeedbackReport[], now = new Date()): st
             : `## ${title} (${list.length})\n\n${list
                   .map((r) => {
                       const where = [r.context.studio, r.context.website, r.context.page].filter(Boolean).join(" · ");
-                      return `### ${KIND_NAMES[r.kind] ?? r.kind}, ${r.createdAt.slice(0, 10)}\n${where ? `_${where}_\n` : ""}\n${r.text}\n`;
+                      const times = r.seen > 1 ? `, ${r.seen} times, last ${(r.lastSeenAt ?? r.createdAt).slice(0, 10)}` : "";
+                      const detail = r.context.detail ? `\n\`\`\`\n${r.context.detail}\n\`\`\`\n` : "";
+                      return `### ${KIND_NAMES[r.kind] ?? r.kind}, ${r.createdAt.slice(0, 10)}${times}\n${where ? `_${where}_\n` : ""}\n${r.text}\n${detail}`;
                   })
                   .join("\n")}`;
     return `# Atelier: open reports, ${now.toISOString().slice(0, 10)}\n\n${
@@ -38,6 +96,10 @@ export function reportsDocument(reports: FeedbackReport[], now = new Date()): st
             section(
                 "From the assistant",
                 reports.filter((r) => r.source === "assistant"),
+            ),
+            section(
+                "Noticed by Atelier itself",
+                reports.filter((r) => r.source === "app"),
             ),
         ]
             .filter(Boolean)
@@ -109,6 +171,55 @@ export function feedbackRoutes(api: Api): void {
             `${said.slice(0, 600)}\n\n${[report.context.studio, report.context.website, report.context.page].filter(Boolean).join(" · ")}`,
         );
         return c.json({ ok: true }, 201);
+    });
+
+    // What the app noticed about itself in someone's browser: a screen that stopped working, an
+    // error nothing caught, a page that froze. Sent without the person doing anything (they are
+    // told on the screen where there is one), so it carries what happened and where, and nothing
+    // they typed. The same thing again counts on the report already open.
+    const perPersonNoticed = new RateLimiter(30, 60 * 60_000);
+    route("post", "/api/v1/feedback/noticed", "signed-in", async (c) => {
+        const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+        const kind = NOTICED_KINDS.find((k) => k === body?.kind);
+        const what = text(body?.text, 500);
+        if (!kind || what.length < 3) return c.json({ error: "say what happened" }, 400);
+        const user = c.get("user");
+        if (!perPersonNoticed.allow(user.id)) return c.json({ ok: true, kept: false }, 202);
+        const orgs = await store.organizations.listForUser(user.id);
+        const org = orgs.find((o) => o.slug === text(body?.org, 80)) ?? null;
+        const project = org ? await store.projects.findBySlug(org.id, text(body?.project, 80)).catch(() => null) : null;
+        const signature = signatureOf(kind, what);
+        const report = await store.feedback.noticed(
+            {
+                id: randomUUID(),
+                source: "app",
+                kind,
+                text: what,
+                context: {
+                    from: `${user.name} <${user.email}>`,
+                    ...(org ? { studio: org.name } : {}),
+                    ...(project ? { website: project.name } : {}),
+                    page: text(body?.page, 300),
+                    browser: text(c.req.header("user-agent"), 300),
+                    screen: text(body?.screen, 40),
+                    build: text(c.req.header("x-atelier-build"), 80) || text(body?.build, 80),
+                    detail: text(body?.detail, 6000),
+                },
+                tenantId: org?.id ?? null,
+                projectId: project?.id ?? null,
+                userId: user.id,
+            },
+            signature,
+        );
+        // Whoever runs Atelier is told the first time each thing is seen, not every time.
+        if (report.seen === 1)
+            void notifier.tellOperatorOnce(
+                "feedback.app",
+                signature,
+                NOTICED_TITLES[kind],
+                `${what}\n\n${[report.context.studio, report.context.website, report.context.page].filter(Boolean).join(" · ")}\n\n${report.context.detail ?? ""}`,
+            );
+        return c.json({ ok: true, kept: true }, 201);
     });
 
     // The assistant, about the system it works in: never about the person or their website's content.

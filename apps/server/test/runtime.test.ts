@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { RunTracker, wholeRun } from "../src/services/runs.ts";
-import { ContainerRuntime, LocalRuntime, runtimeSecret } from "../src/services/runtime.ts";
+import { ContainerRuntime, LocalRuntime, runtimeSecret, startAgentRun } from "../src/services/runtime.ts";
+import type { Workspace } from "../src/services/workspace.ts";
 
 const KEY = "k".repeat(40);
 
@@ -218,4 +219,29 @@ test("a job that throws at once fails its run and leaves the workspace free", as
 test("a run reported with a start time that cannot be read is still made whole", () => {
     const run = wholeRun({ id: "r", status: "running", startedAt: "not a date" });
     assert.ok(!Number.isNaN(new Date(run.deadlineAt).getTime()));
+});
+
+test("a request whose version cannot be saved keeps its reply, and says the changes are not saved yet", async () => {
+    const tracker = new RunTracker();
+    let tries = 0;
+    const ws = {
+        dir: "/nowhere",
+        init: async () => {},
+        checkpoint: async () => {
+            tries += 1;
+            throw new Error("fatal: unable to write new index file");
+        },
+    } as unknown as Workspace;
+    const agent = { run: async () => ({ text: "The header is green now.", toolEvents: [] }) } as unknown as Parameters<
+        typeof startAgentRun
+    >[2];
+    const run = startAgentRun(tracker, ws, agent, { prompt: "Make the header green" } as Parameters<typeof startAgentRun>[3]);
+    assert.notEqual(run, "busy");
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const after = run === "busy" ? null : tracker.get(run.id);
+    assert.equal(tries, 2);
+    assert.deepEqual(
+        [after?.status, after?.result?.text, after?.checkpoint, after?.unsaved],
+        ["done", "The header is green now.", null, true],
+    );
 });

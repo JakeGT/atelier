@@ -98,17 +98,32 @@ export function runtimeSecret(secretsKey: string, projectId: string): string {
 // in-container daemon and LocalRuntime so both behave identically.
 export function startAgentRun(tracker: RunTracker, ws: Workspace, agent: AgentRuntime, req: RunRequest): RunState | "busy" {
     const title = req.prompt.replace(/\s+/g, " ").slice(0, 80);
+    // Saving the version must not cost the reply: the work is done and its files are in place.
+    // It is tried twice; if it still fails the run says so, and the next version saved takes
+    // these changes with it.
+    const saved = async (name: string): Promise<{ checkpoint: string | null; unsaved?: boolean }> => {
+        for (const attempt of [1, 2]) {
+            try {
+                return { checkpoint: await ws.checkpoint(name) };
+            } catch (err) {
+                console.error(
+                    `could not save "${name}" as a version (attempt ${attempt}): ${err instanceof Error ? err.message : String(err)}`,
+                );
+                if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
+            }
+        }
+        return { checkpoint: null, unsaved: true };
+    };
     return tracker.start(async ({ control, step }) => {
         await ws.init();
         try {
             const result = await agent.run({ workspaceDir: ws.dir, ...req, control, onStep: step });
-            return { result, checkpoint: await ws.checkpoint(title) };
+            return { result, ...(await saved(title)) };
         } catch (err) {
             if (!(err instanceof RunInterrupted)) throw err;
             // Stopped, or out of time: keep what it had done, as a version of its own,
             // so it can be looked at, carried on from, or gone back from.
-            const checkpoint = await ws.checkpoint(`${title} (unfinished)`);
-            return { result: err.partial, checkpoint, status: err.reason };
+            return { result: err.partial, ...(await saved(`${title} (unfinished)`)), status: err.reason };
         }
     });
 }

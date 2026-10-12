@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { type ContentField, contentFieldSchema, FIELD_TYPES } from "@atelier/shared";
 import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { readTar } from "../runtime/tar.ts";
 import { type AgentTokenClaims, verifyAgentToken } from "../services/agentToken.ts";
 import { cleanQuestions } from "../services/asking.ts";
 import { type PageCoverage, pageCoverage } from "../services/coverage.ts";
 import { sanitizeRich } from "../services/fill.ts";
+import { noteLargeSave } from "./feedback.ts";
 import { type Api, agentProject, PROJECT, param } from "./kit.ts";
 
 const KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -21,9 +23,25 @@ export function contentRoutes(api: Api): void {
     // That is tidiness, not the safeguard: a value saved before its field was described is kept as
     // sent. Whatever is stored, a page is only ever filled through the same cleaning (fill.ts), and
     // the editor cleans what it shows.
+    // A list of entries is refused past this many, with the reason: a list that long is far more
+    // likely a mistake (the same entries sent again and again) than a page, and saving the first
+    // 500 without a word would hide it.
+    const MOST_ENTRIES = 500;
     const prepared = async (tenantId: string, projectId: string, kind: string, slug: string, draft: Record<string, unknown>) => {
         const fields = (await store.content.get(tenantId, projectId, kind, slug))?.fields ?? [];
         const byKey = new Map(fields.map((f) => [f.key, f]));
+        for (const [k, v] of Object.entries(draft)) {
+            const field = byKey.get(k);
+            if (field?.type === "items" && Array.isArray(v) && v.length > MOST_ENTRIES)
+                throw new HTTPException(400, {
+                    res: Response.json(
+                        {
+                            error: `“${field.label}” has ${v.length} entries and a list can hold up to ${MOST_ENTRIES}, so nothing was saved. Check that the same entries have not been added more than once; if it really is that long, split it into more than one list.`,
+                        },
+                        { status: 400 },
+                    ),
+                });
+        }
         return Object.fromEntries(
             Object.entries(draft).map(([k, v]) => {
                 const field = byKey.get(k);
@@ -32,18 +50,16 @@ export function contentRoutes(api: Api): void {
                     const rich = new Set((field.itemFields ?? []).filter((f) => f.type === "rich").map((f) => f.key));
                     return [
                         k,
-                        v
-                            .slice(0, 500)
-                            .map((entry) =>
-                                isObject(entry)
-                                    ? Object.fromEntries(
-                                          Object.entries(entry).map(([ik, iv]) => [
-                                              ik,
-                                              rich.has(ik) && typeof iv === "string" ? sanitizeRich(iv) : iv,
-                                          ]),
-                                      )
-                                    : entry,
-                            ),
+                        v.map((entry) =>
+                            isObject(entry)
+                                ? Object.fromEntries(
+                                      Object.entries(entry).map(([ik, iv]) => [
+                                          ik,
+                                          rich.has(ik) && typeof iv === "string" ? sanitizeRich(iv) : iv,
+                                      ]),
+                                  )
+                                : entry,
+                        ),
                     ];
                 }
                 return [k, v];
@@ -117,6 +133,14 @@ export function contentRoutes(api: Api): void {
             draft: await prepared(c.get("org").id, c.get("project").id, kind, slug, body),
             updatedBy: c.get("user").id,
         });
+        void noteLargeSave(store, {
+            bytes: JSON.stringify(body).length,
+            tenantId: c.get("org").id,
+            projectId: c.get("project").id,
+            kind,
+            slug,
+            by: "a person",
+        }).catch((err: unknown) => console.warn("could not note a large save:", err));
         return c.json({ document });
     });
 
@@ -314,6 +338,14 @@ export function contentRoutes(api: Api): void {
             draft: await prepared(claims.tenantId, claims.projectId, kind, slug, draft),
             updatedBy: null,
         });
+        void noteLargeSave(store, {
+            bytes: JSON.stringify(body).length,
+            tenantId: claims.tenantId,
+            projectId: claims.projectId,
+            kind,
+            slug,
+            by: "the assistant",
+        }).catch((err: unknown) => console.warn("could not note a large save:", err));
         return c.json({ document: doc });
     });
 }

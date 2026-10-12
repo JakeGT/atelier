@@ -900,10 +900,22 @@ export class MemoryStore implements Store {
     };
 
     private readonly reports: FeedbackReport[] = [];
+    private readonly signatures = new Map<string, string>();
     feedback: FeedbackStore = {
         add: async (report) => {
-            const made: FeedbackReport = { ...report, status: "open", createdAt: now(), closedAt: null };
+            const made: FeedbackReport = { ...report, status: "open", createdAt: now(), closedAt: null, seen: 1, lastSeenAt: null };
             this.reports.unshift(made);
+            return { ...made };
+        },
+        noticed: async (report, signature) => {
+            const open = this.reports.find((r) => r.status === "open" && this.signatures.get(r.id) === signature);
+            if (open) {
+                Object.assign(open, { seen: open.seen + 1, lastSeenAt: now(), context: { ...open.context, ...report.context } });
+                return { ...open };
+            }
+            const made: FeedbackReport = { ...report, status: "open", createdAt: now(), closedAt: null, seen: 1, lastSeenAt: now() };
+            this.reports.unshift(made);
+            this.signatures.set(made.id, signature);
             return { ...made };
         },
         list: async ({ status, limit = 500 } = {}) =>

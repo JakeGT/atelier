@@ -1413,7 +1413,7 @@ export class PostgresStore implements Store {
 
         interface ReportRow {
             id: string;
-            source: "person" | "assistant";
+            source: "person" | "assistant" | "app";
             kind: string;
             text: string;
             context: Record<string, string>;
@@ -1423,6 +1423,8 @@ export class PostgresStore implements Store {
             status: "open" | "done";
             created_at: Ts;
             closed_at: Ts | null;
+            seen: number;
+            last_seen_at: Ts | null;
         }
         const rowToReport = (r: ReportRow): FeedbackReport => ({
             id: r.id,
@@ -1436,6 +1438,8 @@ export class PostgresStore implements Store {
             status: r.status,
             createdAt: isoNow(r.created_at),
             closedAt: r.closed_at ? isoNow(r.closed_at) : null,
+            seen: r.seen ?? 1,
+            lastSeenAt: r.last_seen_at ? isoNow(r.last_seen_at) : null,
         });
         // Not tenant-scoped (like the audit log): written from anywhere, read by operator routes only.
         this.feedback = {
@@ -1443,6 +1447,15 @@ export class PostgresStore implements Store {
                 const rows = await this.sql<ReportRow[]>`
                     INSERT INTO feedback_reports (id, source, kind, text, context, tenant_id, project_id, user_id)
                     VALUES (${r.id}, ${r.source}, ${r.kind}, ${r.text}, ${json(r.context)}, ${r.tenantId}, ${r.projectId}, ${r.userId})
+                    RETURNING *`;
+                return rowToReport(firstRow(rows));
+            },
+            noticed: async (r, signature) => {
+                const rows = await this.sql<ReportRow[]>`
+                    INSERT INTO feedback_reports (id, source, kind, text, context, tenant_id, project_id, user_id, signature, last_seen_at)
+                    VALUES (${r.id}, ${r.source}, ${r.kind}, ${r.text}, ${json(r.context)}, ${r.tenantId}, ${r.projectId}, ${r.userId}, ${signature}, now())
+                    ON CONFLICT (signature) WHERE status = 'open' AND signature IS NOT NULL
+                    DO UPDATE SET seen = feedback_reports.seen + 1, last_seen_at = now(), context = feedback_reports.context || EXCLUDED.context
                     RETURNING *`;
                 return rowToReport(firstRow(rows));
             },

@@ -61,6 +61,15 @@ if (config.databaseUrl) {
             pg = new PostgresStore(config.databaseUrl);
         }
         if (await connectedAsOwner(pg.sql)) {
+            // Where real studios live, that is not served from: one studio's rows would be kept
+            // from another's by a single setting, and the record of what was done could be rewritten.
+            if (config.runtimeMode === "container" && !config.databaseOwnerOk) {
+                console.error(
+                    "The server is connected to the database as the owner of its tables, and will not serve like that. Set DATABASE_URL to the atelier_runtime login and MIGRATION_DATABASE_URL to the owner (docs/14), or, only to try Atelier out, set DATABASE_OWNER_OK=true.",
+                );
+                await pg.close().catch(() => {});
+                process.exit(1);
+            }
             console.warn(
                 "The server is connected as the table owner: FORCE ROW LEVEL SECURITY is the only tenant boundary and the audit log is not append-only. Set DATABASE_URL to the atelier_runtime login and MIGRATION_DATABASE_URL to the owner (docs/14).",
             );

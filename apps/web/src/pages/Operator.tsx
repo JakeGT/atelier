@@ -82,7 +82,12 @@ const REPORT_KINDS: Record<string, string> = {
     rules: "The rules were unclear",
     missing: "Something it needed was missing",
     other: "Something else",
+    crash: "A screen stopped working",
+    error: "An error nothing caught",
+    freeze: "The page froze",
+    "large-save": "An unusually large save",
 };
+const REPORT_FROM: Record<string, string> = { person: "From a person", assistant: "From the assistant", app: "Noticed by Atelier" };
 
 // What people, and the assistant, have said about Atelier itself. Read, act on, mark as dealt with.
 function Reports() {
@@ -124,8 +129,9 @@ function Reports() {
     return (
         <section className="reports">
             <p className="muted settings-about">
-                What people have reported from the account menu, and what the assistant has said got in its way while working. Reports from
-                the assistant are about Atelier's tools and rules, not about anyone's website.
+                What people have reported from the account menu, what the assistant has said got in its way while working, and what Atelier
+                has noticed itself: a screen that stopped working, a page that froze, an unusually large save. Reports from the assistant
+                are about Atelier's tools and rules, not about anyone's website. The same thing noticed again is counted on the one report.
             </p>
             <div className="reports-bar">
                 <div className="tabs" role="tablist">
@@ -167,10 +173,18 @@ function Reports() {
                     {reports.map((r) => (
                         <li key={r.id} className="report-item">
                             <div className="report-head">
-                                <span className={`chip ${r.source === "assistant" ? "" : "chip-draft"}`}>
-                                    {r.source === "assistant" ? "From the assistant" : "From a person"}
+                                <span className={`chip ${r.source === "person" ? "chip-draft" : ""}`}>
+                                    {REPORT_FROM[r.source] ?? r.source}
                                 </span>
                                 <strong>{REPORT_KINDS[r.kind] ?? r.kind}</strong>
+                                {r.seen > 1 && (
+                                    <span
+                                        className="chip"
+                                        title={r.lastSeenAt ? `Last ${new Date(r.lastSeenAt).toLocaleString()}` : undefined}
+                                    >
+                                        {r.seen} times, last {timeAgo(r.lastSeenAt ?? r.createdAt)}
+                                    </span>
+                                )}
                                 <span className="muted" title={new Date(r.createdAt).toLocaleString()}>
                                     {timeAgo(r.createdAt)}
                                 </span>
@@ -185,10 +199,18 @@ function Reports() {
                                     r.context.model,
                                     r.context.screen,
                                     r.context.browser,
+                                    r.context.size,
+                                    r.context.build,
                                 ]
                                     .filter(Boolean)
                                     .join(" · ")}
                             </p>
+                            {r.context.detail && (
+                                <details className="report-detail">
+                                    <summary>More about what happened</summary>
+                                    <pre>{r.context.detail}</pre>
+                                </details>
+                            )}
                             <button
                                 type="button"
                                 className="btn btn-sm"

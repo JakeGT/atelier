@@ -150,3 +150,32 @@ test("sign-ins that have run out are removed, as the serving role", { skip }, as
     assert.equal(await store.loginSessions.get(`idle-${suffix}`), null);
     assert.equal(await store.loginSessions.get(`old-${suffix}`), null);
 });
+
+test("what Atelier notices itself: the same thing counts on the open report, and is a new one once that is dealt with", {
+    skip,
+}, async () => {
+    const signature = `sig-${suffix}`;
+    const report = () => ({
+        id: randomUUID(),
+        source: "app" as const,
+        kind: "freeze",
+        text: "The page froze",
+        context: { page: "/studio" },
+        tenantId: null,
+        projectId: null,
+        userId: null,
+    });
+    const first = await store.feedback.noticed(report(), signature);
+    assert.equal(first.seen, 1);
+    const again = await store.feedback.noticed({ ...report(), context: { page: "/admin" } }, signature);
+    assert.deepEqual([again.id, again.seen, again.context.page], [first.id, 2, "/admin"]);
+    assert.ok(again.lastSeenAt);
+    await store.feedback.setStatus(first.id, "done");
+    const next = await store.feedback.noticed(report(), signature);
+    assert.notEqual(next.id, first.id);
+    assert.equal(next.seen, 1);
+    // A report from a person is unaffected: it has no signature, and there can be many.
+    const person = { ...report(), source: "person" as const, kind: "problem" };
+    assert.equal((await store.feedback.add(person)).seen, 1);
+    assert.equal((await store.feedback.add({ ...person, id: randomUUID() })).seen, 1);
+});

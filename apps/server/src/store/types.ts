@@ -414,7 +414,8 @@ export interface OperatorVisitStore {
 // A report about Atelier itself, for whoever runs it.
 export interface FeedbackReport {
     id: string;
-    source: "person" | "assistant";
+    // "app": Atelier noticed it itself (a screen that stopped working, a page that froze).
+    source: "person" | "assistant" | "app";
     kind: string;
     text: string;
     context: Record<string, string>;
@@ -424,9 +425,18 @@ export interface FeedbackReport {
     status: "open" | "done";
     createdAt: string;
     closedAt: string | null;
+    // For what Atelier noticed itself: how many times, and when last.
+    seen: number;
+    lastSeenAt: string | null;
 }
 export interface FeedbackStore {
-    add(report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt">): Promise<FeedbackReport>;
+    add(report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt" | "seen" | "lastSeenAt">): Promise<FeedbackReport>;
+    // Something Atelier noticed itself. While a report with this signature is open, that one
+    // counts once more (and takes these details, the latest); otherwise a new one is made.
+    noticed(
+        report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt" | "seen" | "lastSeenAt">,
+        signature: string,
+    ): Promise<FeedbackReport>;
     list(filter?: { status?: "open" | "done"; limit?: number }): Promise<FeedbackReport[]>;
     setStatus(id: string, status: "open" | "done"): Promise<FeedbackReport | null>;
 }

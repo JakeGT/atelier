@@ -257,16 +257,24 @@ export function workspaceRoutes(api: Api): void {
         presence.clearRun(projectId, run.id);
         presence.touch(projectId);
         // The assistant changed the website: its card gets a new picture.
-        if (run.checkpoint) api.covers.changed(tenantId, projectId);
+        if (run.checkpoint || run.unsaved) api.covers.changed(tenantId, projectId);
+        // The changes are on the website but not in its history yet: the person is told, with the reply.
+        const UNSAVED =
+            "These changes are on your website, but they could not be saved as a version just now. They will be saved with your next request.";
         if (run.status === "done" && run.result) {
-            await store.messages.add({ ...base, role: "assistant", text: run.result.text, tools: run.result.toolEvents });
+            const text = run.unsaved ? `${run.result.text}\n\n${UNSAVED}` : run.result.text;
+            await store.messages.add({ ...base, role: "assistant", text, tools: run.result.toolEvents });
         } else if (run.status === "stopped" || run.status === "timed_out") {
             // Not an error: what was done is kept as a version, and it can be carried on.
             const minutes = Math.max(
                 1,
                 Math.round((new Date(run.finishedAt ?? run.startedAt).getTime() - new Date(run.startedAt).getTime()) / 60_000),
             );
-            const kept = run.checkpoint ? " What it had done is saved as a version." : " It had not changed anything yet.";
+            const kept = run.unsaved
+                ? " What it had done is on your website, but it could not be saved as a version just now. It will be saved with your next request."
+                : run.checkpoint
+                  ? " What it had done is saved as a version."
+                  : " It had not changed anything yet.";
             const text =
                 run.status === "stopped"
                     ? `You stopped this request.${kept}`

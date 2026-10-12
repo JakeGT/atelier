@@ -440,6 +440,14 @@ current host. What needs the VPS is P6, which is last.
   proxy could be passed with private addresses written as IPv6; a link in a website's files could
   make its page server read outside them; start-up refuses a half-made configuration instead of
   carrying on. Not deployed: it carries a migration and stricter start-up checks.
+- E5.17 Atelier reports on itself (the owner's decisions on the flagged findings, 2026-10-12, on
+  `triagent-findings`): a screen that stops working, an error nothing catches and a page that
+  freezes (one it comes back from, with what was running; one it does not, by a watcher beside
+  the page) are reported to the operator console with no action from the person, the same thing
+  counting on one report (migration 0026). Saves stay unlimited in size and one of a megabyte or
+  more is noted there. A list of more than 500 entries is refused with the reason instead of
+  being cut. A reply is kept when saving its version fails. In container mode the server will
+  not serve as the owner of the database's tables.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown
