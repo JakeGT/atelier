@@ -51,7 +51,7 @@ export function Operator({ session, tab, theme, onToggleTheme }: Props) {
                             role="tab"
                             aria-selected={tab === t}
                             className={tab === t ? "on" : ""}
-                            onClick={() => navigate(t === "studios" ? "/admin" : `/admin/${t}`)}
+                            onClick={() => navigate(t === "studios" ? "/admin" : `/admin/${t}`, { quiet: true })}
                         >
                             {t === "studios" ? "Studios" : t === "reports" ? "Reports" : "Activity"}
                         </button>

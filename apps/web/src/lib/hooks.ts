@@ -11,23 +11,46 @@ const notify = () => {
 // Going from one page to another is eased: the page that is leaving fades back as the next
 // one arrives (styles/base.css, "moving between pages"). The browser does the blending; where
 // it cannot, or the person has asked their device for less movement, the page simply changes.
-type Transitioning = Document & { startViewTransition?: (update: () => void) => unknown };
+type Transition = { finished: Promise<unknown>; ready: Promise<unknown>; updateCallbackDone: Promise<unknown> };
+type Transitioning = Document & { startViewTransition?: (update: () => void) => Transition };
+// Whether one is being shown now. A second is never started on top of it: the page would be
+// held still for both, and the first would fail with "Transition was skipped".
+let easing = false;
 function eased(update: () => void): void {
     const doc = document as Transitioning;
-    if (!doc.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (easing || !doc.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         update();
         return;
     }
-    // The new page must be on screen by the time this returns, for the browser to picture it.
-    doc.startViewTransition(() => flushSync(update));
+    easing = true;
+    const done = () => {
+        easing = false;
+    };
+    try {
+        // The new page must be on screen by the time this returns, for the browser to picture it.
+        const transition = doc.startViewTransition(() => flushSync(update));
+        // A transition that is skipped or cut short is not an error: the page has changed all the same.
+        transition.ready.catch(() => {});
+        transition.updateCallbackDone.catch(() => {});
+        transition.finished.then(done, done);
+    } catch {
+        done();
+        update();
+    }
 }
 window.addEventListener("popstate", () => eased(notify));
 
-export function navigate(path: string, opts: { replace?: boolean } = {}): void {
+// `quiet`: a change within the page being looked at (one of its tabs), which is not a move to
+// another page and is not eased. Being sent on somewhere (`replace`) is not eased either.
+export function navigate(path: string, opts: { replace?: boolean; quiet?: boolean } = {}): void {
     if (path === window.location.pathname + window.location.search) return;
-    // The address changes at once (whatever asked can rely on it); what is shown follows, eased.
+    // The address changes at once (whatever asked can rely on it); what is shown follows.
     if (opts.replace) window.history.replaceState(null, "", path);
     else window.history.pushState(null, "", path);
+    if (opts.replace || opts.quiet) {
+        notify();
+        return;
+    }
     eased(() => {
         window.scrollTo(0, 0);
         notify();
