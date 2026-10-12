@@ -12,6 +12,7 @@ import { OrgSettings, type SettingsTab } from "./pages/OrgSettings";
 import { Studio } from "./pages/Studio";
 import { Welcome } from "./pages/Welcome";
 import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
+import { ReportHost } from "./ui/Report";
 
 // Routes:
 //   /                      landing (public; adapts when signed in)
@@ -41,6 +42,7 @@ function match(path: string): Route {
     if (path === "/welcome") return { name: "welcome" };
     if (path === "/admin" || path === "/admin/") return { name: "operator", tab: "studios" };
     if (path === "/admin/activity") return { name: "operator", tab: "activity" };
+    if (path === "/admin/reports") return { name: "operator", tab: "reports" };
     let m = path.match(new RegExp(`^/o/${SLUG}/?$`));
     if (m?.[1]) return { name: "org", org: m[1] };
     m = path.match(new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`));
@@ -192,6 +194,7 @@ export function App() {
     return (
         <ToastProvider>
             {page}
+            <ReportHost />
             <UpdateNotice />
         </ToastProvider>
     );

@@ -26,6 +26,8 @@ import type {
     ContentStore,
     DeploymentStore,
     DomainStore,
+    FeedbackReport,
+    FeedbackStore,
     FormStore,
     FormSubmission,
     InvitationStore,
@@ -371,6 +373,7 @@ export class PostgresStore implements Store {
     questions: AgentQuestionStore;
     notifications: NotificationStore;
     audit: AuditStore;
+    feedback: FeedbackStore;
     loginSessions: LoginSessionStore;
 
     constructor(databaseUrl: string) {
@@ -1334,6 +1337,57 @@ export class PostgresStore implements Store {
                 }),
             purge: async (tenantId, id) => {
                 await this.withTenant(tenantId, (tx) => tx`DELETE FROM media_assets WHERE id = ${id} AND deleted_at IS NOT NULL`);
+            },
+        };
+
+        interface ReportRow {
+            id: string;
+            source: "person" | "assistant";
+            kind: string;
+            text: string;
+            context: Record<string, string>;
+            tenant_id: string | null;
+            project_id: string | null;
+            user_id: string | null;
+            status: "open" | "done";
+            created_at: Ts;
+            closed_at: Ts | null;
+        }
+        const rowToReport = (r: ReportRow): FeedbackReport => ({
+            id: r.id,
+            source: r.source,
+            kind: r.kind,
+            text: r.text,
+            context: r.context ?? {},
+            tenantId: r.tenant_id,
+            projectId: r.project_id,
+            userId: r.user_id,
+            status: r.status,
+            createdAt: isoNow(r.created_at),
+            closedAt: r.closed_at ? isoNow(r.closed_at) : null,
+        });
+        // Not tenant-scoped (like the audit log): written from anywhere, read by operator routes only.
+        this.feedback = {
+            add: async (r) => {
+                const rows = await this.sql<ReportRow[]>`
+                    INSERT INTO feedback_reports (id, source, kind, text, context, tenant_id, project_id, user_id)
+                    VALUES (${r.id}, ${r.source}, ${r.kind}, ${r.text}, ${json(r.context)}, ${r.tenantId}, ${r.projectId}, ${r.userId})
+                    RETURNING *`;
+                return rowToReport(firstRow(rows));
+            },
+            list: async ({ status, limit = 500 } = {}) => {
+                const rows = status
+                    ? await this.sql<
+                          ReportRow[]
+                      >`SELECT * FROM feedback_reports WHERE status = ${status} ORDER BY created_at DESC LIMIT ${limit}`
+                    : await this.sql<ReportRow[]>`SELECT * FROM feedback_reports ORDER BY created_at DESC LIMIT ${limit}`;
+                return rows.map(rowToReport);
+            },
+            setStatus: async (id, status) => {
+                const rows = await this.sql<ReportRow[]>`
+                    UPDATE feedback_reports SET status = ${status}, closed_at = ${status === "done" ? this.sql`now()` : null}
+                    WHERE id = ${id} RETURNING *`;
+                return rows[0] ? rowToReport(rows[0]) : null;
             },
         };
 

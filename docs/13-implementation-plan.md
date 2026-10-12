@@ -414,6 +414,8 @@ current host. What needs the VPS is P6, which is last.
   `motion-gsap`): written by the assistant, speed and feel from the look.
 - E5.9 The assistant asks, and the person chooses how much (ADR-0019, asked
   for and built 2026-10-11 on `assistant-questions`).
+- E5.10 Reports about Atelier from people and from the assistant (ADR-0020,
+  asked for and built 2026-10-11 on `feedback-reports`).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

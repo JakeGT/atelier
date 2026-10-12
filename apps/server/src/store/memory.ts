@@ -24,6 +24,8 @@ import type {
     ContentStore,
     DeploymentStore,
     DomainStore,
+    FeedbackReport,
+    FeedbackStore,
     FormStore,
     FormSubmission,
     InvitationStore,
@@ -842,6 +844,27 @@ export class MemoryStore implements Store {
             ),
         purge: async (tenantId, id) => {
             if (this.mediaMap.get(id)?.tenantId === tenantId) this.mediaMap.delete(id);
+        },
+    };
+
+    private readonly reports: FeedbackReport[] = [];
+    feedback: FeedbackStore = {
+        add: async (report) => {
+            const made: FeedbackReport = { ...report, status: "open", createdAt: now(), closedAt: null };
+            this.reports.unshift(made);
+            return { ...made };
+        },
+        list: async ({ status, limit = 500 } = {}) =>
+            this.reports
+                .filter((r) => !status || r.status === status)
+                .slice(0, limit)
+                .map((r) => ({ ...r })),
+        setStatus: async (id, status) => {
+            const r = this.reports.find((x) => x.id === id);
+            if (!r) return null;
+            r.status = status;
+            r.closedAt = status === "done" ? now() : null;
+            return { ...r };
         },
     };
 

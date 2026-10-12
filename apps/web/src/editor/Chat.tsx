@@ -1,4 +1,4 @@
-import { ArrowUp, Clock, Lightbulb, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, Clock, Lightbulb, MessageSquareWarning, Play, RotateCcw, Square } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clock, stepDone, stepList, summary } from "../lib/activity";
@@ -6,6 +6,7 @@ import type { AssistantQuestions, Pulse, Run, ThreadMessage } from "../lib/api";
 import { useClickOutside } from "../lib/hooks";
 import { IDEAS } from "../lib/ideas";
 import { Dots } from "../ui/kit";
+import { reportProblem } from "../ui/Report";
 import { AskLevelControl, QuestionCard } from "./Asking";
 import { UploadButton } from "./Media";
 import { Prose } from "./Prose";
@@ -149,7 +150,16 @@ export function Chat(props: ChatProps) {
                                         <p>{m.text}</p>
                                     </>
                                 ) : m.role === "error" ? (
-                                    <p>{m.text}</p>
+                                    <>
+                                        <p>{m.text}</p>
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm"
+                                            onClick={() => reportProblem(`The assistant said: “${m.text}”`)}
+                                        >
+                                            <MessageSquareWarning /> Report this problem
+                                        </button>
+                                    </>
                                 ) : m.role === "note" ? (
                                     <>
                                         <p>{m.text}</p>

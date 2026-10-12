@@ -379,6 +379,26 @@ export interface DomainStore {
 }
 
 // Append-only. Not tenant-scoped: entries outlive what they describe.
+// A report about Atelier itself, for whoever runs it.
+export interface FeedbackReport {
+    id: string;
+    source: "person" | "assistant";
+    kind: string;
+    text: string;
+    context: Record<string, string>;
+    tenantId: string | null;
+    projectId: string | null;
+    userId: string | null;
+    status: "open" | "done";
+    createdAt: string;
+    closedAt: string | null;
+}
+export interface FeedbackStore {
+    add(report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt">): Promise<FeedbackReport>;
+    list(filter?: { status?: "open" | "done"; limit?: number }): Promise<FeedbackReport[]>;
+    setStatus(id: string, status: "open" | "done"): Promise<FeedbackReport | null>;
+}
+
 export interface AuditStore {
     record(entry: {
         tenantId: string | null;
@@ -428,6 +448,7 @@ export interface Store {
     questions: AgentQuestionStore;
     notifications: NotificationStore;
     audit: AuditStore;
+    feedback: FeedbackStore;
     loginSessions: LoginSessionStore;
     close(): Promise<void>;
 }
