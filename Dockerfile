@@ -52,6 +52,8 @@ COPY apps/server/assets apps/server/assets
 
 # ---- server (control plane) ----------------------------------------------------------------------------
 FROM app AS server
+# ffmpeg: a still picture is taken from each uploaded video (services/media.ts).
+RUN apk add --no-cache ffmpeg
 ENV HOST=0.0.0.0 PORT=8080 WEB_DIST_DIR=/app/web RUNTIME_MODE=container
 COPY --from=web /src/apps/web/dist /app/web
 USER node

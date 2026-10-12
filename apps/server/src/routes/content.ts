@@ -162,6 +162,51 @@ export function contentRoutes(api: Api): void {
         }
     });
 
+    // One history of a website: what the assistant changed (versions of its files),
+    // what was changed in its wording (and by whom), and when it was published,
+    // newest first. Each kind is undone in its own way; this is the single place to
+    // see them in the order they happened.
+    route("get", `${PROJECT}/history`, "project.read", async (c) => {
+        const org = c.get("org");
+        const project = c.get("project");
+        const [versions, revisions, releases, documents] = await Promise.all([
+            project.archivedAt ? [] : api.runtime.listCheckpoints(project.id).catch(() => []),
+            store.content.recentRevisions(org.id, project.id, 150),
+            store.releases.listByProject(org.id, project.id).catch(() => []),
+            store.content.list(org.id, project.id),
+        ]);
+        const names = new Map<string, string>();
+        for (const id of new Set(revisions.map((r) => r.updatedBy).filter((x): x is string => x !== null))) {
+            names.set(id, (await store.users.findById(id))?.name ?? "Someone");
+        }
+        const current = new Map(documents.map((d) => [d.id, d.rev]));
+        const entries = [
+            ...versions.map((v, i) => ({ type: "version" as const, at: v.date, title: v.message, sha: v.sha, current: i === 0 })),
+            ...revisions.map((r) => ({
+                type: "wording" as const,
+                at: r.createdAt,
+                kind: r.kind,
+                slug: r.slug,
+                rev: r.rev,
+                // null: the assistant.
+                by: r.updatedBy ? (names.get(r.updatedBy) ?? "Someone") : null,
+                current: current.get(r.documentId) === r.rev,
+            })),
+            ...releases
+                .filter((r) => r.deployedAt !== null)
+                .map((r) => ({
+                    type: "published" as const,
+                    at: r.deployedAt ?? r.createdAt,
+                    number: r.number,
+                    live: r.state === "live",
+                    putBack: r.rollbackOf !== null,
+                })),
+        ]
+            .sort((x, y) => y.at.localeCompare(x.at))
+            .slice(0, 200);
+        return c.json({ entries });
+    });
+
     // What the live release ships (the build input).
     route("get", `${PROJECT}/snapshot`, "content.read", async (c) =>
         c.json({ documents: await store.content.snapshot(c.get("org").id, c.get("project").id) }),

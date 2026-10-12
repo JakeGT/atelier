@@ -128,6 +128,8 @@ export class ReleaseService {
                 width: asset.width,
                 height: asset.height,
                 variants: asset.variants.map((v) => ({ name: v.name, width: v.width })),
+                focal: asset.focal,
+                poster: asset.poster,
             });
         }
         return { media, mediaInfo };

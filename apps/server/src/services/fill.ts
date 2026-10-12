@@ -12,6 +12,10 @@ import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parse, parseFragment,
 //   <img data-content-image="page/home#photo" src="…">   a file from the media library
 //   <ul data-content-list="page/home#services"><li><h3 data-item="name">…</h3><p data-item="summary">…</p></li></ul>
 //       a list of items with several parts: also data-item-rich, data-item-image, and data-item-href on a link
+//   <a data-content-href="page/home#cta_link" href="…">   where a link leads (alongside data-content for its words)
+//   <section data-content-if="page/home#show_offer">…</section>   shown unless the yes/no field is "no"
+//   <time data-content="page/home#opens" data-content-date="long">…</time>   a date, written out in the page's language
+//   <video data-content-video="page/home#film" controls></video>   a clip from the media library, with its poster
 //
 // A real HTML parser does the work. A value is inserted as text (or, for rich
 // text, through an allow-list), so nothing a field contains can add markup or
@@ -51,12 +55,19 @@ export interface MediaInfo {
     width: number | null;
     height: number | null;
     variants: { name: string; width: number }[];
+    // Where the subject of the picture is, as percentages from the left and the top:
+    // a picture cropped by the page's styles keeps this part in view.
+    focal?: { x: number; y: number } | null;
+    // For a video: the library file that is its still picture.
+    poster?: string | null;
 }
 export interface FillOptions {
     // Looks a library file up by name; absent means images are placed without sizes or alt text.
     media?: (name: string) => MediaInfo | undefined;
     // From this page to the website's top folder: "" for /index.html, "../" for /blog/post.html.
     base?: string;
+    // The page's language (from <html lang>), for writing dates out.
+    lang?: string;
 }
 const MEDIA_PATH = /^media\/([a-z0-9][a-z0-9-]{0,60}\.[a-z0-9]{2,5})$/;
 
@@ -148,6 +159,15 @@ function fillImage(el: Element, value: unknown, options: FillOptions): void {
     const info = options.media?.(name);
     if (!info) return;
     setAttr(el, "alt", info.alt);
+    if (info.focal) {
+        // Added to whatever the element already says about its own style.
+        const style = (attr(el, "style") ?? "").replace(/\s*object-position\s*:[^;]*;?/gi, "").trim();
+        setAttr(
+            el,
+            "style",
+            `${style}${style && !style.endsWith(";") ? ";" : ""}object-position:${Math.round(info.focal.x)}% ${Math.round(info.focal.y)}%`,
+        );
+    }
     if (info.width && info.height) {
         setAttr(el, "width", String(info.width));
         setAttr(el, "height", String(info.height));
@@ -159,12 +179,48 @@ function fillImage(el: Element, value: unknown, options: FillOptions): void {
     }
 }
 
+// A clip from the library, with its still picture.
+function fillVideo(el: Element, value: unknown, options: FillOptions): void {
+    const name = typeof value === "string" ? MEDIA_PATH.exec(value)?.[1] : undefined;
+    if (!name || el.tagName !== "video") return;
+    const base = options.base ?? "";
+    setAttr(el, "src", `${base}media/${name}`);
+    const poster = options.media?.(name)?.poster;
+    if (poster) setAttr(el, "poster", `${base}media/${poster}`);
+    // The file is given on the element itself; <source> children would compete with it.
+    el.childNodes = el.childNodes.filter((c) => !isElement(c) || c.tagName !== "source");
+}
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+// A value as the words a page shows. A date is written out when the element asks
+// for it (data-content-date="long" | "short" | "numeric"), in the page's language.
+function shown(el: Element, value: string | number, options: FillOptions): string {
+    const style = attr(el, "data-content-date");
+    const m = typeof value === "string" ? ISO_DATE.exec(value) : null;
+    if (style === undefined || !m) return String(value);
+    const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (Number.isNaN(date.getTime())) return String(value);
+    if (el.tagName === "time") setAttr(el, "datetime", String(value));
+    const format: Intl.DateTimeFormatOptions =
+        style === "numeric"
+            ? { dateStyle: "short" }
+            : style === "short"
+              ? { day: "numeric", month: "short", year: "numeric" }
+              : { day: "numeric", month: "long", year: "numeric" };
+    try {
+        return new Intl.DateTimeFormat(options.lang || "en-GB", { ...format, timeZone: "UTC" }).format(date);
+    } catch {
+        return new Intl.DateTimeFormat("en-GB", { ...format, timeZone: "UTC" }).format(date);
+    }
+}
+
 function fillElement(el: Element, lookup: Lookup, options: FillOptions): void {
     const plain = attr(el, "data-content");
     const rich = attr(el, "data-content-rich");
     const list = attr(el, "data-content-list");
     const image = attr(el, "data-content-image");
-    const ref = parseRef(plain ?? rich ?? list ?? image ?? "");
+    const video = attr(el, "data-content-video");
+    const ref = parseRef(plain ?? rich ?? list ?? image ?? video ?? "");
     if (!ref) return;
     const value = lookup(ref);
     if (value === undefined || value === null) return;
@@ -172,9 +228,13 @@ function fillElement(el: Element, lookup: Lookup, options: FillOptions): void {
         fillImage(el, value, options);
         return;
     }
+    if (video !== undefined) {
+        fillVideo(el, value, options);
+        return;
+    }
 
     if (plain !== undefined) {
-        if (typeof value === "string" || typeof value === "number") setChildren(el, [text(String(value))]);
+        if (typeof value === "string" || typeof value === "number") setChildren(el, [text(shown(el, value, options))]);
     } else if (rich !== undefined) {
         if (typeof value === "string") setChildren(el, cleanRich(parseFragment(value).childNodes));
     } else if (Array.isArray(value)) {
@@ -243,7 +303,7 @@ function fillItem(node: Element, entry: Record<string, unknown>, options: FillOp
     const plain = named("data-item");
     if (plain) {
         const v = plain.value;
-        setChildren(node, [text(typeof v === "string" || typeof v === "number" ? String(v) : "")]);
+        setChildren(node, [text(typeof v === "string" || typeof v === "number" ? shown(node, v, options) : "")]);
         return true;
     }
     const rich = named("data-item-rich");
@@ -255,13 +315,25 @@ function fillItem(node: Element, entry: Record<string, unknown>, options: FillOp
     return true;
 }
 
-const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image"];
+const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image", "data-content-video"];
 
 function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
-    for (const child of node.childNodes) {
+    // A copy: an element may be taken out of the page as it is walked.
+    for (const child of [...node.childNodes]) {
         if (!isElement(child)) continue;
         // Never reach into scripts, styles or templates.
         if (child.tagName === "script" || child.tagName === "style" || child.tagName === "template") continue;
+        // A part of the page a yes/no field switches off is left out of it altogether.
+        const condition = parseRef(attr(child, "data-content-if") ?? "");
+        if (condition && lookup(condition) === false) {
+            node.childNodes = node.childNodes.filter((c) => c !== child);
+            continue;
+        }
+        // Where a link leads.
+        const link = parseRef(attr(child, "data-content-href") ?? "");
+        const to = link ? lookup(link) : undefined;
+        if (child.tagName === "a" && typeof to === "string" && to.trim() && SAFE_HREF.test(to.trim()) && !/^\s*javascript:/i.test(to))
+            setAttr(child, "href", to.trim());
         const bound = child.attrs.some((a) => BINDINGS.includes(a.name));
         if (bound) fillElement(child, lookup, options);
         // A filled element's contents are final; anything else may hold bound elements further in.
@@ -276,14 +348,16 @@ export const isBound = (html: string): boolean => html.includes("data-content");
 export function fillHtml(html: string, lookup: Lookup, options: FillOptions = {}): string {
     if (!isBound(html)) return html;
     const document = parse(html);
-    walk(document, lookup, options);
+    const root = document.childNodes.find((n): n is Element => isElement(n) && n.tagName === "html");
+    walk(document, lookup, { ...options, lang: options.lang ?? (root ? attr(root, "lang") : undefined) });
     return serialize(document);
 }
 
 // The fields a page binds, in order, for the editor ("what on this page can be edited").
-export function boundRefs(html: string): { ref: string; type: "text" | "rich" | "list" | "image" }[] {
+export type BoundType = "text" | "rich" | "list" | "image" | "video" | "link" | "yesno";
+export function boundRefs(html: string): { ref: string; type: BoundType }[] {
     if (!isBound(html)) return [];
-    const out: { ref: string; type: "text" | "rich" | "list" | "image" }[] = [];
+    const out: { ref: string; type: BoundType }[] = [];
     const visit = (node: ParentNode) => {
         for (const child of node.childNodes) {
             if (!isElement(child)) continue;
@@ -292,6 +366,9 @@ export function boundRefs(html: string): { ref: string; type: "text" | "rich" | 
                 ["data-content-rich", "rich"],
                 ["data-content-list", "list"],
                 ["data-content-image", "image"],
+                ["data-content-video", "video"],
+                ["data-content-href", "link"],
+                ["data-content-if", "yesno"],
             ] as const) {
                 const v = attr(child, name);
                 if (v && parseRef(v)) out.push({ ref: v, type });

@@ -147,6 +147,8 @@ export interface ContentStore {
     snapshot(tenantId: string, projectId: string): Promise<ContentDocument[]>;
     revisions(tenantId: string, documentId: string): Promise<ContentRevision[]>;
     revision(tenantId: string, documentId: string, rev: number): Promise<ContentRevision | null>;
+    // The latest changes to a website's wording, newest first, with which document each was to.
+    recentRevisions(tenantId: string, projectId: string, limit: number): Promise<(ContentRevision & { kind: string; slug: string })[]>;
     // Retention: removes earlier versions older than `before`, always keeping each
     // document's newest `keep` (and so its current one). Returns how many went.
     pruneRevisions(tenantId: string, before: Date, keep: number): Promise<number>;
@@ -238,7 +240,12 @@ export interface MediaStore {
     // What the library shows; `withRemoved` adds files taken out of it but not yet purged.
     list(tenantId: string, projectId: string, withRemoved?: boolean): Promise<MediaAsset[]>;
     get(tenantId: string, projectId: string, id: string): Promise<MediaAsset | null>;
-    describe(tenantId: string, projectId: string, id: string, patch: { alt: string; decorative: boolean }): Promise<MediaAsset | null>;
+    describe(
+        tenantId: string,
+        projectId: string,
+        id: string,
+        patch: { alt: string; decorative: boolean; focal?: MediaAsset["focal"] },
+    ): Promise<MediaAsset | null>;
     // Takes it out of the library; the file is purged later.
     remove(tenantId: string, projectId: string, id: string): Promise<MediaAsset | null>;
     // Removed before `before`, across the tenant's websites: ready to purge.

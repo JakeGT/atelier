@@ -437,6 +437,12 @@ export class MemoryStore implements Store {
             [...this.contentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId),
         snapshot: async (tenantId, projectId) =>
             [...this.contentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId && d.published !== null),
+        recentRevisions: async (tenantId, projectId, limit) =>
+            [...this.contentMap.values()]
+                .filter((d) => d.tenantId === tenantId && d.projectId === projectId)
+                .flatMap((d) => (this.revisionMap.get(d.id) ?? []).map((r) => ({ ...r, kind: d.kind, slug: d.slug })))
+                .sort((x, y) => y.createdAt.localeCompare(x.createdAt) || y.rev - x.rev)
+                .slice(0, limit),
         revisions: async (tenantId, documentId) => {
             const doc = this.contentMap.get(documentId);
             if (!doc || doc.tenantId !== tenantId) return [];
@@ -697,7 +703,7 @@ export class MemoryStore implements Store {
         describe: async (tenantId, projectId, id, patch) => {
             const m = this.mediaMap.get(id);
             if (!m || m.tenantId !== tenantId || m.projectId !== projectId) return null;
-            const next = { ...m, ...patch };
+            const next = { ...m, alt: patch.alt, decorative: patch.decorative, focal: patch.focal === undefined ? m.focal : patch.focal };
             this.mediaMap.set(id, next);
             return next;
         },

@@ -406,8 +406,9 @@ current host. What needs the VPS is P6, which is last.
 **Steps a–h are built** (a on `p4-operator-templates`; b–e on
 `p5-content-studio`; f–h on `p5-media`, 2026-10-10), with the differences
 listed in ADR-0014's two "As built" sections. Lists of items with several fields and limits
-checked at publish followed on `p5-finish`. Still to do: number, date and
-yes/no fields, a focal point for images, poster images for video.
+checked at publish followed on `p5-finish`; link, number, date, yes/no and
+video fields, drag to reorder, focal points, video stills and one combined
+history on `content-finish`.
 
 | Step | What it delivers | Depends on |
 | --- | --- | --- |

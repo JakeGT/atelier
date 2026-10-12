@@ -98,9 +98,9 @@ export type Project = z.infer<typeof projectSchema>;
 // ---- P1 entities (content store + release workflow) ----
 
 // How one field of a content document is shown and edited (ADR-0014).
-export const FIELD_TYPES = ["text", "long", "rich", "list", "image", "items"] as const;
+export const FIELD_TYPES = ["text", "long", "rich", "list", "image", "items", "link", "number", "date", "yesno", "video"] as const;
 // The parts of one item in a list of items ("a service": its name, summary, photograph).
-export const ITEM_FIELD_TYPES = ["text", "long", "rich", "image", "link"] as const;
+export const ITEM_FIELD_TYPES = ["text", "long", "rich", "image", "link", "number", "date"] as const;
 const fieldBase = {
     key: z.string().regex(/^[A-Za-z][\w-]{0,63}$/),
     // In the person's words: "Headline", not "heroTitle".
@@ -115,8 +115,9 @@ export const itemFieldSchema = z.object({ ...fieldBase, type: z.enum(ITEM_FIELD_
 export const contentFieldSchema = z.object({
     ...fieldBase,
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
-    // image: a file from the media library ("media/<name>"). items: a list whose entries
-    // each have several parts, described by `itemFields`.
+    // image, video: a file from the media library ("media/<name>"). items: a list whose
+    // entries each have several parts, described by `itemFields`. link: where something
+    // leads. number. date: "2026-10-10". yesno: true or false, to show or hide a part of a page.
     type: z.enum(FIELD_TYPES),
     itemFields: z.array(itemFieldSchema).min(1).max(12).optional(),
 });
@@ -158,6 +159,10 @@ export const mediaAssetSchema = z.object({
     // Everything stored for it, variants included.
     bytes: z.number().int(),
     variants: z.array(z.object({ name: z.string(), width: z.number().int(), bytes: z.number().int() })),
+    // Where the subject of a picture is, as percentages from the left and top; null = the middle.
+    focal: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }).nullable(),
+    // A video's still picture: another file stored with it.
+    poster: z.string().nullable(),
     uploadedBy: z.string().uuid().nullable(),
     createdAt: z.string().datetime(),
     deletedAt: z.string().datetime().nullable(),

@@ -46,6 +46,9 @@ function useLibrary(scope: Scope | null) {
 export function Thumb({ asset }: { asset: MediaAsset }) {
     const scope = useMedia();
     if (asset.kind === "image" && scope) return <img src={scope.a.mediaUrl(scope.projectId, asset)} alt={asset.alt} loading="lazy" />;
+    // A video is shown by its still picture, when it has one.
+    if (asset.kind === "video" && asset.poster && scope)
+        return <img src={scope.a.mediaUrl(scope.projectId, asset)} alt="" loading="lazy" />;
     const Icon = asset.kind === "video" ? Film : asset.kind === "audio" ? Music : FileText;
     return (
         <span className="media-icon">
@@ -63,15 +66,20 @@ function Describe({
     busy,
     onDone,
     onClose,
+    picture,
 }: {
     title: string;
     preview: ReactNode;
     initial: { alt: string; decorative: boolean };
     action: string;
     busy: boolean;
-    onDone: (about: { alt: string; decorative: boolean }) => void;
+    onDone: (about: { alt: string; decorative: boolean; focal?: { x: number; y: number } | null }) => void;
     onClose: () => void;
+    // For a picture already in the library: its address, and where its subject is. The
+    // person can click the picture to say where the important part is.
+    picture?: { src: string; focal: { x: number; y: number } | null };
 }) {
+    const [focal, setFocal] = useState(picture?.focal ?? null);
     const [alt, setAlt] = useState(initial.alt);
     const [decorative, setDecorative] = useState(initial.decorative);
     const ready = decorative || alt.trim().length > 0;
@@ -79,7 +87,36 @@ function Describe({
         <Dialog onClose={onClose}>
             <h2 className="display">{title}</h2>
             <div className="media-describe">
-                <div className="media-describe-preview">{preview}</div>
+                {picture ? (
+                    <div className="focal">
+                        {/* biome-ignore lint/a11y/useKeyWithClickEvents: placing a point on a picture is a pointing action; the default (the middle) needs none */}
+                        {/* biome-ignore lint/a11y/noStaticElementInteractions: as above */}
+                        <div
+                            className="focal-picture"
+                            onClick={(e) => {
+                                const r = e.currentTarget.getBoundingClientRect();
+                                setFocal({
+                                    x: Math.round(((e.clientX - r.left) / r.width) * 100),
+                                    y: Math.round(((e.clientY - r.top) / r.height) * 100),
+                                });
+                            }}
+                        >
+                            <img src={picture.src} alt="" draggable={false} />
+                            <i style={{ left: `${focal?.x ?? 50}%`, top: `${focal?.y ?? 50}%` }} aria-hidden="true" />
+                        </div>
+                        <p className="field-help">
+                            <strong>Click the most important part of the picture.</strong> Where a page shows only part of this picture (a
+                            wide banner, a round portrait), that part stays in view.{" "}
+                            {focal && (
+                                <button type="button" className="link" onClick={() => setFocal(null)}>
+                                    Put it back in the middle
+                                </button>
+                            )}
+                        </p>
+                    </div>
+                ) : (
+                    <div className="media-describe-preview">{preview}</div>
+                )}
                 <div className="field">
                     <label htmlFor="media-alt" className="eyebrow">
                         What does this picture show?
@@ -110,7 +147,7 @@ function Describe({
                     type="button"
                     className="btn btn-primary"
                     disabled={!ready || busy}
-                    onClick={() => onDone({ alt: alt.trim(), decorative })}
+                    onClick={() => onDone({ alt: alt.trim(), decorative, ...(picture ? { focal } : {}) })}
                 >
                     {busy ? <Dots /> : action}
                 </button>
@@ -307,7 +344,7 @@ export function MediaLibrary() {
                                 <span className="media-actions">
                                     {asset.kind === "image" && (
                                         <button type="button" className="btn btn-sm" onClick={() => setDescribing(asset)}>
-                                            <PencilLine /> Change description
+                                            <PencilLine /> Description and focus
                                         </button>
                                     )}
                                     <button type="button" className="btn btn-sm" onClick={() => void remove(asset, false)} disabled={busy}>
@@ -326,10 +363,14 @@ export function MediaLibrary() {
 
             {describing && (
                 <Describe
-                    title="Describe this picture"
+                    title="About this picture"
                     preview={<Thumb asset={describing} />}
+                    picture={{
+                        src: a.mediaUrl(projectId, { name: describing.name, variants: describing.variants.slice(-1) }),
+                        focal: describing.focal,
+                    }}
                     initial={{ alt: describing.alt, decorative: describing.decorative }}
-                    action="Save description"
+                    action="Save"
                     busy={busy}
                     onClose={() => setDescribing(null)}
                     onDone={async (about) => {
@@ -369,17 +410,28 @@ export function MediaLibrary() {
 }
 
 // Choosing a picture for a field: one from the library, or a new upload.
-export function MediaPicker({ current, onPick, onClose }: { current: string; onPick: (path: string) => void; onClose: () => void }) {
+export function MediaPicker({
+    current,
+    onPick,
+    onClose,
+    kind = "image",
+}: {
+    current: string;
+    onPick: (path: string) => void;
+    onClose: () => void;
+    kind?: "image" | "video";
+}) {
+    const word = kind === "video" ? "video" : "picture";
     const scope = useMedia();
     const { library, load } = useLibrary(scope);
     const uploads = useUploads(scope, (asset) => {
         void load();
-        if (asset.kind === "image") onPick(asset.path);
+        if (asset.kind === kind) onPick(asset.path);
     });
-    const pictures = (library?.assets ?? []).filter((x) => x.kind === "image");
+    const pictures = (library?.assets ?? []).filter((x) => x.kind === kind);
     return (
         <Dialog onClose={onClose} wide>
-            <h2 className="display">Choose a picture</h2>
+            <h2 className="display">Choose a {word}</h2>
             {uploads.control}
             {!library ? (
                 <Dots />
@@ -388,7 +440,7 @@ export function MediaPicker({ current, onPick, onClose }: { current: string; onP
             ) : (
                 <>
                     {pictures.length === 0 ? (
-                        <p className="muted">There are no pictures in this website's library yet. Upload one to use it here.</p>
+                        <p className="muted">There are no {word}s in this website's library yet. Upload one to use it here.</p>
                     ) : (
                         <ul className="media-grid media-pick">
                             {pictures.map((asset) => (
@@ -410,7 +462,7 @@ export function MediaPicker({ current, onPick, onClose }: { current: string; onP
                         </button>
                         {scope?.canEdit && (
                             <button type="button" className="btn btn-primary" onClick={uploads.choose} disabled={uploads.busy}>
-                                <ImagePlus /> Upload a new picture
+                                <ImagePlus /> Upload a new {word}
                             </button>
                         )}
                     </div>
@@ -421,7 +473,18 @@ export function MediaPicker({ current, onPick, onClose }: { current: string; onP
 }
 
 // A picture field in the wording form: what is chosen now, and a way to change it.
-export function PictureField({ value, onChange, readOnly }: { value: string; onChange: (path: string) => void; readOnly: boolean }) {
+export function PictureField({
+    value,
+    onChange,
+    readOnly,
+    kind = "image",
+}: {
+    value: string;
+    onChange: (path: string) => void;
+    readOnly: boolean;
+    kind?: "image" | "video";
+}) {
+    const word = kind === "video" ? "video" : "picture";
     const scope = useMedia();
     const { library } = useLibrary(scope);
     const [choosing, setChoosing] = useState(false);
@@ -432,19 +495,23 @@ export function PictureField({ value, onChange, readOnly }: { value: string; onC
                 {asset ? (
                     <Thumb asset={asset} />
                 ) : (
-                    <span className="muted">{value ? "This picture is no longer in the library" : "No picture chosen"}</span>
+                    <span className="muted">{value ? `This ${word} is no longer in the library` : `No ${word} chosen`}</span>
                 )}
             </div>
             <div>
-                {asset && <p className="media-alt">{asset.decorative ? "Decoration only" : asset.alt || "No description yet"}</p>}
+                {asset && kind === "image" && (
+                    <p className="media-alt">{asset.decorative ? "Decoration only" : asset.alt || "No description yet"}</p>
+                )}
+                {asset && kind === "video" && <p className="media-alt">{asset.name}</p>}
                 {!readOnly && scope && (
                     <button type="button" className="btn btn-sm" onClick={() => setChoosing(true)}>
-                        <ImagePlus /> {value ? "Choose a different picture" : "Choose a picture"}
+                        <ImagePlus /> {value ? `Choose a different ${word}` : `Choose a ${word}`}
                     </button>
                 )}
             </div>
             {choosing && (
                 <MediaPicker
+                    kind={kind}
                     current={value}
                     onClose={() => setChoosing(false)}
                     onPick={(path) => {

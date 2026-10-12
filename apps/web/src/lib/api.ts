@@ -156,6 +156,13 @@ export interface Checkpoint {
     date: string;
 }
 
+// One thing that happened to a website, for its history: the assistant changed its
+// files (a version), its wording was changed, or it was published.
+export type HistoryEntry =
+    | { type: "version"; at: string; title: string; sha: string; current: boolean }
+    | { type: "wording"; at: string; kind: string; slug: string; rev: number; by: string | null; current: boolean }
+    | { type: "published"; at: string; number: number; live: boolean; putBack: boolean };
+
 export interface AgentToolEvent {
     name: string;
     state: string;
@@ -255,6 +262,10 @@ export interface MediaAsset {
     decorative: boolean;
     bytes: number;
     variants: { name: string; width: number }[];
+    // Where the subject of a picture is (percent from the left and top), if it has been set.
+    focal: { x: number; y: number } | null;
+    // A video's still picture.
+    poster: string | null;
     createdAt: string;
 }
 export interface MediaLibrary {
@@ -272,7 +283,9 @@ export interface ContentField {
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
     // image: a file from the media library, held as its path ("media/<name>").
     // items: a list whose entries each have several parts, described by `itemFields`.
-    type: "text" | "long" | "rich" | "list" | "image" | "items";
+    // link: where something leads. number. date: "2026-10-10". yesno: shows or hides a part of a page.
+    // video: a clip from the media library.
+    type: "text" | "long" | "rich" | "list" | "image" | "items" | "link" | "number" | "date" | "yesno" | "video";
     help?: string;
     // Checked when the website is published.
     required?: boolean;
@@ -284,7 +297,7 @@ export interface ContentField {
 export interface ItemField {
     key: string;
     label: string;
-    type: "text" | "long" | "rich" | "image" | "link";
+    type: "text" | "long" | "rich" | "image" | "link" | "number" | "date";
     help?: string;
     required?: boolean;
     max?: number;
@@ -549,14 +562,18 @@ export function orgApi(org: string) {
                 .then((r) => parse<{ asset: MediaAsset }>(r))
                 .then((b) => b.asset);
         },
-        describeMedia: (projectId: string, id: string, about: { alt: string; decorative: boolean }) =>
-            patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${id}`, about).then((b) => b.asset),
+        describeMedia: (
+            projectId: string,
+            id: string,
+            about: { alt: string; decorative: boolean; focal?: { x: number; y: number } | null },
+        ) => patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${id}`, about).then((b) => b.asset),
         removeMedia: (projectId: string, id: string, anyway = false) =>
             del<{ ok: true }>(`${p(projectId)}/media/${id}${anyway ? "?anyway=1" : ""}`),
         // The smallest copy of an image there is, for showing it in the library.
-        mediaUrl: (projectId: string, asset: Pick<MediaAsset, "name" | "variants">) =>
-            `${p(projectId)}/media/file/${asset.variants[0]?.name ?? asset.name}`,
+        mediaUrl: (projectId: string, asset: Pick<MediaAsset, "name" | "variants"> & { poster?: string | null }) =>
+            `${p(projectId)}/media/file/${asset.poster ?? asset.variants[0]?.name ?? asset.name}`,
 
+        history: (projectId: string) => get<{ entries: HistoryEntry[] }>(`${p(projectId)}/history`).then((b) => b.entries),
         contentHistory: (projectId: string, kind: string, slug: string) =>
             get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${kind}/${slug}/revisions`).then((b) => b.revisions),
         restoreContent: (projectId: string, kind: string, slug: string, rev: number) =>

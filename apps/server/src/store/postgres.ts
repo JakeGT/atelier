@@ -745,6 +745,14 @@ export class PostgresStore implements Store {
                         WHERE project_id = ${projectId} AND published IS NOT NULL ORDER BY kind, slug`;
                     return rows.map(rowToContent);
                 }),
+            recentRevisions: async (tenantId, projectId, limit) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<(RevisionRow & { kind: string; slug: string })[]>`
+                        SELECT r.document_id, r.rev, r.draft, r.updated_by, r.created_at, d.kind, d.slug
+                        FROM content_revisions r JOIN content_documents d ON d.id = r.document_id
+                        WHERE r.project_id = ${projectId} ORDER BY r.created_at DESC, r.rev DESC LIMIT ${limit}`;
+                    return rows.map((r) => ({ ...rowToRevision(r), kind: r.kind, slug: r.slug }));
+                }),
             revisions: async (tenantId, documentId) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<RevisionRow[]>`
@@ -1033,7 +1041,7 @@ export class PostgresStore implements Store {
         };
 
         const MEDIA_COLS =
-            "id, project_id, tenant_id, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by, created_at, deleted_at";
+            "id, project_id, tenant_id, name, kind, mime, width, height, alt, decorative, bytes, variants, focal_x, focal_y, poster, uploaded_by, created_at, deleted_at";
         interface MediaRow {
             id: string;
             project_id: string;
@@ -1047,6 +1055,9 @@ export class PostgresStore implements Store {
             decorative: boolean;
             bytes: string | number | null;
             variants: MediaAsset["variants"];
+            focal_x: number | null;
+            focal_y: number | null;
+            poster: string | null;
             uploaded_by: string | null;
             created_at: Ts;
             deleted_at: Ts | null;
@@ -1064,6 +1075,8 @@ export class PostgresStore implements Store {
             decorative: r.decorative,
             bytes: Number(r.bytes ?? 0),
             variants: r.variants ?? [],
+            focal: r.focal_x !== null && r.focal_y !== null ? { x: Number(r.focal_x), y: Number(r.focal_y) } : null,
+            poster: r.poster,
             uploadedBy: r.uploaded_by,
             createdAt: isoNow(r.created_at),
             deletedAt: r.deleted_at ? isoNow(r.deleted_at) : null,
@@ -1072,9 +1085,9 @@ export class PostgresStore implements Store {
             create: async (a) =>
                 this.withTenant(a.tenantId, async (tx) => {
                     const rows = await tx<MediaRow[]>`
-                        INSERT INTO media_assets (id, project_id, tenant_id, key, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by)
+                        INSERT INTO media_assets (id, project_id, tenant_id, key, name, kind, mime, width, height, alt, decorative, bytes, variants, poster, uploaded_by)
                         VALUES (${a.id}, ${a.projectId}, ${a.tenantId}, ${`${a.tenantId}/${a.projectId}/${a.name}`}, ${a.name}, ${a.kind}, ${a.mime},
-                                ${a.width}, ${a.height}, ${a.alt}, ${a.decorative}, ${a.bytes}, ${json(a.variants as unknown as Json)}, ${a.uploadedBy})
+                                ${a.width}, ${a.height}, ${a.alt}, ${a.decorative}, ${a.bytes}, ${json(a.variants as unknown as Json)}, ${a.poster}, ${a.uploadedBy})
                         RETURNING ${tx.unsafe(MEDIA_COLS)}`;
                     return rowToMedia(firstRow(rows));
                 }),
@@ -1096,7 +1109,9 @@ export class PostgresStore implements Store {
             describe: async (tenantId, projectId, id, patch) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<MediaRow[]>`
-                        UPDATE media_assets SET alt = ${patch.alt}, decorative = ${patch.decorative}
+                        UPDATE media_assets SET alt = ${patch.alt}, decorative = ${patch.decorative},
+                            focal_x = ${patch.focal === undefined ? tx`focal_x` : (patch.focal?.x ?? null)},
+                            focal_y = ${patch.focal === undefined ? tx`focal_y` : (patch.focal?.y ?? null)}
                         WHERE id = ${id} AND project_id = ${projectId} RETURNING ${tx.unsafe(MEDIA_COLS)}`;
                     const r = rows[0];
                     return r ? rowToMedia(r) : null;
