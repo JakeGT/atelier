@@ -120,3 +120,24 @@ without use.
   page as it loads.
 - No comparison of before and after.
 - The pictures are not shown to the person.
+
+## Update, 2026-10-10 (evening): bars that showed nothing
+
+On a real website the assistant said twice that it had fixed empty chart bars
+and had not. Two causes, neither visible to it:
+
+1. **Its own CSS:** the bar's fill was a `<span>` with a width and a height,
+   which browsers ignore on an inline element. `page_look` now reports anything
+   that has a colour and takes up no space, and says why ("it is an inline
+   element, so its width and height are ignored; give it display:block").
+2. **Ours:** every entry of a bound list is a copy of the first entry's markup,
+   so four bars written with four widths all came out at the first one's. There
+   was no way to give an entry its own length. There is now: a number part with
+   `data-item-percent` on the bar (`data-content-percent` outside a list) sets
+   its width from 0 to 100. `content_check` reports a list whose entries are
+   written differently in the page (`entriesWillAllLookTheSame`), and the house
+   rules say that anything that differs between entries must be a value of its own.
+
+Tried on a copy of that website with the real assistant and the same complaint:
+it made the fill a block, gave each bar its own number, and the four bars
+measured 98%, 41%, 95% and 3% of their track.
