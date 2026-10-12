@@ -21,8 +21,12 @@ export function projectRoutes(api: Api): void {
         const role = c.get("role");
         const mine = role === "editor" || role === "viewer" ? await store.projectMembers.forUser(c.get("org").id, c.get("user").id) : [];
         const own = new Map(mine.map((m) => [m.projectId, m.role]));
+        const unread = await store.forms.unreadByProject(c.get("org").id);
         return c.json({
-            projects: all.filter((p) => (p.archivedAt !== null) === archived).map((p) => ({ ...p, myRole: own.get(p.id) ?? role })),
+            projects: all
+                .filter((p) => (p.archivedAt !== null) === archived)
+                // With each: the person's role on it, and how many messages from visitors nobody has looked at.
+                .map((p) => ({ ...p, myRole: own.get(p.id) ?? role, unreadMessages: unread[p.id] ?? 0 })),
         });
     });
 
@@ -220,9 +224,10 @@ export function projectRoutes(api: Api): void {
     route("get", `${PROJECT}/overview`, "project.read", async (c) => {
         const org = c.get("org");
         const p = c.get("project");
-        const [live, docs, head] = await Promise.all([
+        const [live, docs, unreadMessages, head] = await Promise.all([
             store.releases.findLive(org.id, p.id),
             store.content.list(org.id, p.id),
+            store.forms.unread(org.id, p.id),
             p.archivedAt ? null : runtime.head(p.id).catch(() => null),
         ]);
         const changedDocuments = docs.filter((d) => JSON.stringify(d.draft) !== JSON.stringify(d.published)).length;
@@ -235,6 +240,8 @@ export function projectRoutes(api: Api): void {
             changedDocuments,
             codeChanged,
             hasChanges: codeChanged || changedDocuments > 0,
+            // Messages from visitors nobody has looked at yet.
+            unreadMessages,
         });
     });
 }

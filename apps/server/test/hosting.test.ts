@@ -541,3 +541,138 @@ test("a published website's form sends to Atelier, and what a visitor writes rea
         [["contact", "Grace", false]],
     );
 });
+
+// The internet, as far as a published website goes: its address serves what the (fake) host was
+// last given once the host has "finished", and Atelier's own public address reaches the app.
+async function setupWithInternet() {
+    const cf = fakeCloudflare();
+    const pages = new CloudflarePages({ accountId: "acct", apiToken: "cf-token", fetch: cf.impl });
+    const deployer = deployerApp({ pages, secret: DEPLOYER_SECRET, prefix: "atl-" });
+    const viaDeployer = ((input: string | URL | Request, init?: RequestInit) => deployer.request(String(input), init)) as typeof fetch;
+    const hosting = new DeployerHosting({ url: "http://deployer", secret: DEPLOYER_SECRET, fetch: viaDeployer });
+    // What the address serves: nothing yet ("building"), the version before ("stale"), or what was published.
+    const net = { state: "building" as "building" | "stale" | "serving", atelierUp: true, staleLabel: "r0" };
+    const app: { t?: TestApp } = {};
+    const siteFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.origin === "http://localhost:8080")
+            return net.atelierUp && app.t ? app.t.app.request(url.pathname, init) : new Response("down", { status: 502 });
+        const site = url.host.split(".").at(-3) ?? "";
+        const dep = cf.projects.get(site)?.deployments.at(-1);
+        if (net.state === "building" || !dep) return new Response("not yet", { status: 522 });
+        const path = url.pathname === "/" ? "/index.html" : url.pathname;
+        const body = assets(cf, dep.manifest[path]);
+        if (body === null) return new Response("not found", { status: 404 });
+        const label = net.state === "stale" ? net.staleLabel : (/X-Atelier-Release: (\S+)/.exec(dep.headers)?.[1] ?? "");
+        return new Response(body, { status: 200, headers: label ? { "x-atelier-release": label } : {} });
+    }) as typeof fetch;
+    const t = await makeApp({}, undefined, { hosting, siteFetch, shareWaitMs: 30 });
+    app.t = t;
+    const owner = await signIn(t);
+    return { t, owner, cf, net };
+}
+const assets = (cf: ReturnType<typeof fakeCloudflare>, hash?: string): string | null =>
+    hash === undefined ? null : (cf.assets.get(hash)?.body.toString("utf8") ?? null);
+
+interface Live {
+    url: string | null;
+    ready: boolean;
+    waiting: string | null;
+    forms: { form: string; page: string; working: boolean; problem: string | null }[];
+    unconnected: string[];
+}
+
+test("a published website's address is only called ready once it serves what was just published", async () => {
+    const { t, owner, net } = await setupWithInternet();
+    const project = await newProject(t, owner);
+    const p = `${owner.api}/projects/${project.id}`;
+    const live = async () => json<Live>(await t.app.request(`${p}/live`, { headers: owner.read }));
+    // Not published: nothing to wait for, and no address.
+    assert.deepEqual(await live(), { url: null, ready: false, waiting: null, forms: [], unconnected: [] });
+
+    await build(t, owner, project, "first version");
+    assert.equal((await publish(t, owner, project)).status, 200);
+    // The host has it but is not serving it yet.
+    const building = await live();
+    assert.deepEqual([building.ready, building.waiting], [false, "The address is not answering yet."]);
+    assert.match(building.url ?? "", /^https:\/\/atl-okoro-ceramics-[0-9a-f]{10}\.pages\.dev$/);
+    net.state = "serving";
+    assert.deepEqual([(await live()).ready, (await live()).waiting], [true, null]);
+
+    // Published again: the address answers, but with the version before, until the host catches up.
+    await build(t, owner, project, "second version");
+    assert.equal((await publish(t, owner, project)).status, 200);
+    net.state = "stale";
+    net.staleLabel = "r1";
+    assert.deepEqual([(await live()).ready, (await live()).waiting], [false, "The address is still showing the version before this one."]);
+    net.state = "serving";
+    assert.equal((await live()).ready, true);
+    // Each published version says which it is.
+    assert.match(headersFile(null, null, "r2"), /X-Atelier-Release: r2/);
+    assert.ok(!headersFile(null, null).includes("X-Atelier-Release"));
+
+    // A link to show someone: asking for it waits for it to open, and says if it has not yet.
+    net.state = "building";
+    const shared = await json<{ url: string; ready: boolean }>(await post(t, owner, `${p}/share`));
+    assert.equal(shared.ready, false);
+    const ready = async (url: string) => t.app.request(`${p}/share/ready?url=${encodeURIComponent(url)}`, { headers: owner.read });
+    assert.deepEqual(await json(await ready(shared.url)), { ready: false });
+    net.state = "serving";
+    assert.deepEqual(await json(await ready(shared.url)), { ready: true });
+    assert.equal((await json<{ ready: boolean }>(await post(t, owner, `${p}/share`))).ready, true);
+    // Only a link this website was given can be asked about.
+    assert.equal((await ready("https://example.com/")).status, 404);
+});
+
+test("after publishing, each form is checked on the live website, and a form that sends nowhere is pointed out", async () => {
+    const { t, owner, cf, net } = await setupWithInternet();
+    const project = await newProject(t, owner);
+    const p = `${owner.api}/projects/${project.id}`;
+    const live = async () => json<Live>(await t.app.request(`${p}/live`, { headers: owner.read }));
+    await build(
+        t,
+        owner,
+        project,
+        'Contact</h1><form data-form="contact"><input name="email"></form><form class="newsletter"><input name="email"></form><form role="search"><input name="q"></form><form action="https://forms.example/x"><input name="a"></form><h1>',
+    );
+    assert.equal((await publish(t, owner, project)).status, 200);
+    net.state = "serving";
+    const ok = await live();
+    assert.equal(ok.ready, true);
+    assert.deepEqual(ok.forms, [{ form: "contact", page: "index.html", working: true, problem: null }]);
+    // The one with neither a name for Atelier nor an address of its own; a search box and another service's form are fine.
+    assert.deepEqual(ok.unconnected, ["index.html"]);
+    // The check itself left nothing behind and told nobody.
+    const messages = await json<{ messages: unknown[] }>(await t.app.request(`${p}/submissions`, { headers: owner.read }));
+    assert.equal(messages.messages.length, 0);
+
+    // Atelier cannot be reached at its public address: the form is on the page but nothing would arrive.
+    net.atelierUp = false;
+    assert.match((await live()).forms[0]?.problem ?? "", /Atelier could not be reached/);
+    net.atelierUp = true;
+
+    // The live page does not carry the form's address (as if it had been published without it).
+    const site = (await getProject(t, owner, project)).hostingRef ?? "";
+    const dep = cf.projects.get(site)?.deployments.at(-1) ?? assert.fail();
+    const hash = dep.manifest["/index.html"] ?? "";
+    const asset = cf.assets.get(hash) ?? assert.fail();
+    cf.assets.set(hash, { ...asset, body: Buffer.from(asset.body.toString("utf8").replace(/action="[^"]*"/, 'action=""')) });
+    const broken = (await live()).forms[0];
+    assert.deepEqual(
+        [broken?.working, broken?.problem],
+        [false, "The live page does not send this form to Atelier. Publishing again should connect it."],
+    );
+
+    // Only Atelier can mark a message as its own check: anyone else's is an ordinary message.
+    const action = /action="([^"]+)"/.exec(asset.body.toString("utf8"))?.[1] ?? "";
+    const forged = await t.app.request(new URL(action).pathname, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+        body: "_atelier_check=nope&message=hello",
+    });
+    assert.deepEqual(await json(forged), { ok: true });
+    assert.equal(
+        (await json<{ messages: unknown[] }>(await t.app.request(`${p}/submissions`, { headers: owner.read }))).messages.length,
+        1,
+    );
+});

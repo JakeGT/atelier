@@ -74,6 +74,8 @@ export async function makeApp(
         coverTaker?: CoverTaker;
         coverDelayMs?: number;
         mailer?: Mailer | null;
+        siteFetch?: typeof fetch;
+        shareWaitMs?: number;
     } = {},
 ) {
     const config = loadConfig({ AUTH_MODE: "off", COOKIE_SECURE: "false", PUBLIC_ORIGIN: "http://localhost:8080", ...env });

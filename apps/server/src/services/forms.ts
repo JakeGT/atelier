@@ -49,6 +49,28 @@ export function formNames(text: string): string[] {
     return [...names];
 }
 
+// The forms in one page: those named for Atelier (`data-form`), and how many send nowhere at all,
+// being neither named nor given an address of their own. A form that names its own address
+// (another service's) is the website's business and is not counted.
+export function formsInPage(html: string): { names: string[]; unconnected: number } {
+    const names = new Set<string>();
+    let unconnected = 0;
+    for (const m of html.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<form\b([^>]*)>/gi)) {
+        const tag = m[1] ?? "";
+        const name = /\bdata-form\s*=\s*["']?([^"'\s>]*)/i.exec(tag)?.[1];
+        if (name && FORM_NAME.test(name)) names.add(name);
+        // A search box is answered by the page itself.
+        else if (!/\baction\s*=\s*["']?[^"'\s>]/i.test(tag) && !/\brole\s*=\s*["']?search/i.test(tag)) unconnected++;
+    }
+    return { names: [...names], unconnected };
+}
+
+// What marks a message as Atelier's own check of a live form: it is received like any other and
+// then not kept. Only Atelier can make one, and only for the form it is checking.
+export function checkMark(token: string, secret: string): string {
+    return createHmac("sha256", `${secret}:check`).update(token).digest("base64url");
+}
+
 // Where each of a website's forms sends to.
 export function formActions(origin: string, secret: string, where: Omit<FormTarget, "form">, names: string[]): Record<string, string> {
     return Object.fromEntries(names.map((form) => [form, `${origin.replace(/\/+$/, "")}/f/${formToken({ ...where, form }, secret)}`]));

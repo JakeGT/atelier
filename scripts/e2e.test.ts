@@ -294,6 +294,39 @@ test("wording: a bound page is filled from saved content in the preview and on t
     assert.match(inside(ws.container, "cat /workspace/index.html").out, /written in the file/);
 });
 
+test("forms: a published page sends its form to Atelier, what a visitor writes arrives, and each version says which it is", async () => {
+    inside(
+        ws.container,
+        `printf '<form data-form="contact"><input name="email"><textarea name="message"></textarea></form>' > /workspace/contact.html`,
+    );
+    assert.ok(commit(ws.container).ok);
+    const published = await publish(ws.id);
+    assert.equal(published.status, 200, await published.clone().text());
+    const { release } = await json<{ release: { number: number } }>(published);
+    const state = await pagesState();
+    // The marker the editor waits for before it shows the address.
+    assert.match(state.sites[site]?.headers ?? "", new RegExp(`X-Atelier-Release: r${release.number}\\b`));
+    // The real deployer wrote where the form sends, and a field only a robot fills in.
+    const page = state.sites[site]?.files["/contact.html"] ?? "";
+    const action = /<form[^>]* action="([^"]+)"/.exec(page)?.[1] ?? "";
+    assert.match(action, /\/f\/[\w.-]+$/);
+    assert.match(page, /name="_gotcha"/);
+    // A visitor sends it.
+    const sent = await fetch(`${B}${new URL(action).pathname}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+        body: new URLSearchParams({ email: "visitor@example.com", message: "Hello from the live website" }).toString(),
+    });
+    assert.equal(sent.status, 200, await sent.clone().text());
+    const box = await json<{ messages: { form: string; preview: boolean; data: Record<string, string> }[]; unread: number }>(
+        await call("GET", `/projects/${ws.id}/submissions`),
+    );
+    assert.deepEqual(
+        [box.unread, box.messages[0]?.form, box.messages[0]?.preview, box.messages[0]?.data.message],
+        [1, "contact", false, "Hello from the live website"],
+    );
+});
+
 test("media: an uploaded file is served in the preview and published with the release that uses it", async () => {
     // The smallest PNG there is; the server works out what it is from these bytes.
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");

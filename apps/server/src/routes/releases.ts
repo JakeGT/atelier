@@ -3,7 +3,9 @@ import { type Api, type Ctx, PROJECT, param } from "./kit.ts";
 
 // Releases: the only path from draft to live (ADR-0007).
 export function releaseRoutes(api: Api): void {
-    const { route, store, stepUp, audit, releases, notifier } = api;
+    const { route, store, stepUp, audit, releases, notifier, live } = api;
+    // How long asking for a link waits for it to open before answering (the editor keeps asking after that).
+    const SHARE_WAIT_MS = api.shareWaitMs ?? 40_000;
 
     route("get", `${PROJECT}/releases`, "release.read", async (c) =>
         c.json({ releases: await store.releases.listByProject(c.get("org").id, c.get("project").id) }),
@@ -100,11 +102,29 @@ export function releaseRoutes(api: Api): void {
         try {
             const { url } = await releases.share(c.get("org").id, c.get("project").id);
             await audit(c, "release.share", `project:${c.get("project").id}`);
-            return c.json({ url }, 201);
+            // A link is only worth having once it opens: the host takes a little while to start serving it.
+            return c.json({ url, ready: await live.waitFor(url, SHARE_WAIT_MS) }, 201);
         } catch (err) {
             if (err instanceof ReleaseError) return c.json({ error: err.message }, err.status);
             throw err;
         }
+    });
+
+    // Whether a link to show someone opens yet. Only for a link this website was given.
+    route("get", `${PROJECT}/share/ready`, "release.read", async (c) => {
+        const url = c.req.query("url") ?? "";
+        const mine = (await store.deployments.listByProject(c.get("org").id, c.get("project").id)).some(
+            (d) => d.kind === "preview" && d.url === url,
+        );
+        if (!mine) return c.json({ error: "not found" }, 404);
+        return c.json({ ready: await live.answers(url) });
+    });
+
+    // The published website from the outside: whether its address answers yet with what was
+    // just published, and whether its forms reach Atelier.
+    route("get", `${PROJECT}/live`, "release.read", async (c) => {
+        const project = c.get("project");
+        return c.json(await live.status(project, await store.releases.findLive(c.get("org").id, project.id)));
     });
 
     route("post", `${PROJECT}/releases/:number/publish`, "release.publish", stepUp, releaseAction("publish"));

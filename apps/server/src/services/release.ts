@@ -4,6 +4,7 @@ import type { Store } from "../store/types.ts";
 import { contentProblems } from "./contentChecks.ts";
 import { formActions, formNames } from "./forms.ts";
 import { type DeployInput, type Hosting, HostingError, siteName } from "./hosting.ts";
+import { releaseLabel } from "./live.ts";
 import { filesOf, mimeOfName, storageKey } from "./media.ts";
 import type { MediaStorage } from "./mediaStorage.ts";
 import type { WorkspaceRuntime } from "./runtime.ts";
@@ -319,6 +320,7 @@ export class ReleaseService {
                 branch: "main",
                 canonicalHost: await this.canonicalHost(tenantId, projectId, site),
                 commit: release.codeSha,
+                label: releaseLabel(release),
                 content,
                 forms: this.formsFor(tenantId, projectId, archive, false),
                 ...(await this.mediaFor(tenantId, projectId, archive, content)),

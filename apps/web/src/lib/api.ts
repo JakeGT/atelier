@@ -96,6 +96,8 @@ export interface Project {
     agentModel: string | null;
     archivedAt: string | null;
     createdAt: string;
+    // In a list of websites: messages from visitors nobody has looked at yet.
+    unreadMessages?: number;
 }
 
 // What each role may do, mirroring the server's permission table for the buttons
@@ -420,6 +422,19 @@ export interface Overview {
     changedDocuments: number;
     codeChanged: boolean;
     hasChanges: boolean;
+    // Messages from visitors nobody has looked at yet.
+    unreadMessages?: number;
+}
+
+// The published website from the outside: whether its address answers yet with what was just
+// published, and whether each of its forms reaches Atelier.
+export interface LiveStatus {
+    url: string | null;
+    ready: boolean;
+    waiting: string | null;
+    forms: { form: string; page: string; working: boolean; problem: string | null }[];
+    // Pages with a form that sends nowhere.
+    unconnected: string[];
 }
 
 export interface PublicConfig {
@@ -733,7 +748,11 @@ export function orgApi(org: string) {
             return (await post<{ release: Release }>(`${p(projectId)}/releases/${release.number}/publish`)).release;
         },
         // A link that shows the website as it is now to anyone who has it, without publishing.
-        share: (projectId: string) => post<{ url: string }>(`${p(projectId)}/share`).then((b) => b.url),
+        // `ready`: whether the link opens yet (the host takes a little while to start serving it).
+        share: (projectId: string) => post<{ url: string; ready: boolean }>(`${p(projectId)}/share`),
+        shareReady: (projectId: string, url: string) =>
+            get<{ ready: boolean }>(`${p(projectId)}/share/ready?url=${encodeURIComponent(url)}`).then((b) => b.ready),
+        live: (projectId: string) => get<LiveStatus>(`${p(projectId)}/live`),
         // Takes the website offline; its files and history stay.
         unpublish: (projectId: string) => post<{ ok: boolean }>(`${p(projectId)}/unpublish`),
         rollback: (projectId: string, number: number) =>

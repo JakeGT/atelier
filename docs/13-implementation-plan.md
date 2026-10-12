@@ -427,6 +427,12 @@ current host. What needs the VPS is P6, which is last.
   measures near-misses of layout and shows one part close up (`layout-checks`); every request
   carries its conversation, the person can start a new one, and the assistant is told once what
   has changed in Atelier (ADR-0023, `assistant-memory`).
+- E5.15 Knowing a published website works (asked for and built 2026-10-12 on `live-checks`):
+  each published version carries a marker, and the address is shown only once it answers with
+  that version (the same for a link to show someone); each form on the live website is checked
+  after publishing and on the messages page, and a form that sends nowhere is pointed out to the
+  person and to the assistant; messages from visitors have a page of their own, with a count of
+  new ones on the website's bar and on its card.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

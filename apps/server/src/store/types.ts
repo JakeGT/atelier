@@ -184,7 +184,10 @@ export interface FormStore {
         preview: boolean;
     }): Promise<FormSubmission>;
     list(tenantId: string, projectId: string, limit?: number): Promise<FormSubmission[]>;
+    // Messages from visitors nobody has looked at. What was sent from the preview, as a trial, is not counted.
     unread(tenantId: string, projectId: string): Promise<number>;
+    // The same for every website in a studio that has any: website id -> how many.
+    unreadByProject(tenantId: string): Promise<Record<string, number>>;
     markRead(tenantId: string, projectId: string): Promise<void>;
     remove(tenantId: string, projectId: string, id: string): Promise<void>;
     // Retention: removes submissions older than `before`; returns how many.
