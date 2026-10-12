@@ -922,6 +922,7 @@ const ACTION: Record<string, string> = {
     "org.create": "Created the studio",
     "org.update": "Changed studio settings",
     "org.export": "Downloaded a copy of everything",
+    "project.look": "Changed a website's look",
     "template.save": "Saved a website as a template",
     "template.remove": "Removed a template",
     "release.share": "Made a link to show someone a website",

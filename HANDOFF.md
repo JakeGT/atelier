@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.14` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #15. Six PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
+> Last updated 2026-10-10. Status: **`p5.15` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #15. Seven PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.14` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.15` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -177,6 +177,13 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Template gallery:** "Choose a starting point" when making a website shows each template as a live, scaled-down copy (`ui/Gallery.tsx`, served from `/template-preview/<token>/`, sandboxed, no scripts), with "Look closer" at desktop and phone width.
 - **A studio's own templates:** "Save as a template…" on a website's card stores its files and wording (`studio_templates`, migration 0018). A website started from one gets the files, the wording with its labels, and the pictures it uses (copied from the source website's library while that exists).
 - **A link to show someone** (`POST …/share`, in the Publish dialog): a preview deployment at an unguessable, unlisted address. Nothing is published. Unpublishing or deleting the website removes these links too.
+
+## The design kit (branch `design-kit`, ADR-0016)
+
+- **Looks** (`design/looks.ts`, eight): a design language as CSS variables in a website's `theme.css`. **Layouts** (`design/layouts.ts`, fourteen sections): HTML using `assets/kit.css` classes, already editable.
+- Changing a look replaces `theme.css` as a new version (`PUT …/look`, `runtime.write`). The preview can show a website in another look (`preview+look:<id>` tokens).
+- New websites can start in a look (`template: "look:<id>"`). The editor has a **Design** button (Looks, Sections).
+- The assistant has `design_kit`, `design_section`, `design_use_look`, and rules to take every colour and font from the variables.
 
 ## Known gaps
 

@@ -43,6 +43,7 @@ type Kind =
     | "see"
     | "editable"
     | "files"
+    | "design"
     | "other";
 
 function kindOf(name: string): Kind {
@@ -51,6 +52,7 @@ function kindOf(name: string): Kind {
     if (name === "edit" || name === "patch" || name === "multiedit") return "edit";
     if (name === "glob" || name === "grep" || name === "list") return "look";
     if (name === "bash") return "check";
+    if (name.includes("design_")) return "design";
     if (name.includes("page_look")) return "see";
     if (name.includes("content_check")) return "editable";
     if (name.includes("media_list")) return "files";
@@ -79,6 +81,12 @@ export function stepDone(step: AgentToolEvent): string {
             return step.target
                 ? `Looked at ${plainFile(step.target.split("@")[0])} ${step.target.endsWith("@desktop") ? "on a desktop" : step.target.endsWith("@tablet") ? "on a tablet" : "on a phone"}`
                 : "Looked at the page";
+        case "design":
+            return step.name.includes("use_look")
+                ? "Changed the look"
+                : step.name.includes("section")
+                  ? "Fetched a ready-made section"
+                  : "Looked at the design kit";
         case "editable":
             return "Checked that everything can be edited";
         case "files":

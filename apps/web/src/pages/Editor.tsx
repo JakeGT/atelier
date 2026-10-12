@@ -11,6 +11,7 @@ import {
     History,
     LayoutList,
     MessageSquare,
+    Palette,
     PanelRight,
     Rocket,
     SlidersHorizontal,
@@ -18,6 +19,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Address } from "../editor/Address";
 import { Chat, type Message } from "../editor/Chat";
+import { DesignDialog } from "../editor/Design";
 import { type Device, Preview } from "../editor/Preview";
 import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
@@ -97,11 +99,12 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [device, setDevice] = useStored<Device>("atelier.device", "desktop");
     // "?ask=…": a request written for the person somewhere else in the app. It is put in
     // the message box, not sent, and taken out of the address.
-    const [asked] = useState(() => {
+    const [asked, setAsked] = useState(() => {
         const ask = new URLSearchParams(window.location.search).get("ask")?.slice(0, 2000) ?? "";
         if (ask) window.history.replaceState(null, "", window.location.pathname);
         return ask;
     });
+    const [designOpen, setDesignOpen] = useState(false);
     const [tab, setTab] = useState<Tab>("versions");
     // A file added beside the message box: show it in the panel's Pictures tab.
     const [filesKey, setFilesKey] = useState(0);
@@ -486,6 +489,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     >
                         <LayoutList /> <span className="bar-label">Content</span>
                     </button>
+                    <button
+                        type="button"
+                        className="btn btn-ghost bar-wide"
+                        onClick={() => setDesignOpen(true)}
+                        title="The website's look (colours, lettering, corners) and ready-made sections for its pages"
+                    >
+                        <Palette /> <span className="bar-label">Design</span>
+                    </button>
                     <button type="button" className="btn btn-ghost bar-wide" onClick={() => openAddress(false)}>
                         <Globe /> <span className="bar-label">Address</span>
                     </button>
@@ -524,6 +535,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                                 icon: <LayoutList />,
                                 onClick: () => navigate(`/o/${org.slug}/p/${project.slug}/content`),
                             },
+                            { label: "Design: looks and sections", icon: <Palette />, onClick: () => setDesignOpen(true) },
                             { label: "Address and domains", icon: <Globe />, onClick: () => openAddress(false) },
                             ...(mayManage
                                 ? [{ label: "Website settings", icon: <SlidersHorizontal />, onClick: () => setSettingsOpen(true) }]
@@ -633,6 +645,21 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     canEdit={mayEdit}
                     onSave={saveDocument}
                     onClose={() => setEditingRef(null)}
+                />
+            )}
+
+            {designOpen && (
+                <DesignDialog
+                    api={a}
+                    project={project}
+                    canEdit={mayEdit}
+                    // A trailing space each time, so asking for the same thing twice still fills the box.
+                    onAsk={(request) => setAsked((was) => (was === request ? `${request} ` : request))}
+                    onChanged={() => {
+                        void refresh();
+                        reloadPreview();
+                    }}
+                    onClose={() => setDesignOpen(false)}
                 />
             )}
 

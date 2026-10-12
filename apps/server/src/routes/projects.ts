@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { findLook, LOOK_PREFIX } from "../design/looks.ts";
 import { validInstructions } from "../services/instructions.ts";
 import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
@@ -104,7 +105,9 @@ export function projectRoutes(api: Api): void {
         const known = template?.startsWith(STUDIO_PREFIX)
             ? /^[0-9a-f-]{36}$/.test(template.slice(STUDIO_PREFIX.length)) &&
               (await store.studioTemplates.get(org.id, template.slice(STUDIO_PREFIX.length))) !== null
-            : templates.some((t) => t.id === template);
+            : template?.startsWith(LOOK_PREFIX)
+              ? findLook(template.slice(LOOK_PREFIX.length)) !== undefined
+              : templates.some((t) => t.id === template);
         if (template && !known) return c.json({ error: "that template isn't available" }, 400);
         const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template });
         await audit(c, "project.create", `project:${created.id}`, { slug, name, ...(template ? { template } : {}) });

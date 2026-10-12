@@ -1,8 +1,13 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { findLayout, LAYOUTS } from "../design/layouts.ts";
+import { findLook, KIT_FILE, LOOKS, lookOf, THEME_FILE, themeCss } from "../design/looks.ts";
 import { coverageReport } from "../services/coverage.ts";
+import { KIT_CSS } from "../services/designKit.ts";
 import { Browser, browserPath } from "./look.ts";
 import { inside, readPages, serveSite } from "./site.ts";
 
@@ -207,6 +212,58 @@ server.tool(
         } catch (err) {
             return json({ error: `The page could not be looked at: ${(err as Error).message}` });
         }
+    },
+);
+
+// ---- the design kit: looks and ready-made sections --------------------------------------
+
+const currentLook = async (): Promise<string | null> => lookOf(await readFile(join(workspace, THEME_FILE), "utf8").catch(() => ""));
+
+server.tool(
+    "design_kit",
+    "The website's design kit. Returns the look the website wears (a design language: its colours, type, corners, and how to design in it), the other looks there are, and the ready-made sections (layouts) you can place. Call this before you design or restyle anything. A website with the kit has theme.css (the look, as CSS variables) and kit.css (the sections' styles); pages link both and take every colour, font and corner from the variables.",
+    {},
+    async () => {
+        const id = await currentLook();
+        const look = findLook(id);
+        return json({
+            look: look ? { id: look.id, name: look.name, howToDesignInIt: look.guidance, variables: look.tokens } : null,
+            note: look
+                ? "Use only these variables for colour, type, corners and shadows (var(--accent) and so on). Never write a colour or a font name into a page or another stylesheet: the person can change the look at any time, and everything must follow."
+                : "This website does not have the kit yet. To give it one, call design_use_look with a look's id, link theme.css and kit.css from every page (theme.css first), and replace the pages' own colours and fonts with the variables.",
+            looks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
+            sections: LAYOUTS.map((l) => ({ id: l.id, name: l.name, description: l.description, usuallyGoes: l.place })),
+        });
+    },
+);
+
+server.tool(
+    "design_section",
+    "The HTML of one ready-made section from design_kit, to place in a page. It uses the kit's classes, so it wears the website's look, and its wording is already marked as editable. After placing it: replace PAGE in every reference with the page's name (page/PAGE#headline -> page/home#headline), rename a field if the page already has one of that name, rewrite the sample words for this website, and save the wording with content_upsert_draft and described fields. A list's first entry is the pattern for all of them: save one object per entry.",
+    { id: z.string() },
+    async ({ id }) => {
+        const layout = findLayout(id);
+        if (!layout) return json({ error: `There is no section called ${id}. Call design_kit to see the sections.` });
+        return json({
+            id: layout.id,
+            name: layout.name,
+            description: layout.description,
+            html: layout.html,
+            needs: "theme.css and kit.css linked from the page, theme.css first",
+        });
+    },
+);
+
+server.tool(
+    "design_use_look",
+    "Give the website a look, or change the one it wears: writes theme.css (the look's variables) and kit.css (the sections' styles) into the website. Use it when the person asks for a look by name, or to move a website that has its own colours and fonts onto the kit. Afterwards every page must link both files and use the variables; then look at the pages.",
+    { id: z.string() },
+    async ({ id }) => {
+        const look = findLook(id);
+        if (!look) return json({ error: `There is no look called ${id}. Call design_kit to see the looks.` });
+        await writeFile(join(workspace, THEME_FILE), themeCss(look));
+        await writeFile(join(workspace, KIT_FILE), KIT_CSS);
+        return json({ written: [THEME_FILE, KIT_FILE], look: look.name, howToDesignInIt: look.guidance, variables: look.tokens });
     },
 );
 

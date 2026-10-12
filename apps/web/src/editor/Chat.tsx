@@ -57,6 +57,11 @@ export function Chat(props: ChatProps) {
     // A request prepared elsewhere (the Content page's "Ask my assistant to connect it") arrives
     // written out in the box, for the person to read, change and send.
     const [input, setInput] = useState(props.draft ?? "");
+    // A request written elsewhere while the editor is open (Design: "add this section") replaces what is in the box.
+    const draft = props.draft;
+    useEffect(() => {
+        if (draft) setInput(draft);
+    }, [draft]);
     const scroller = useRef<HTMLDivElement>(null);
     const textarea = useRef<HTMLTextAreaElement>(null);
     const busy = run !== null;

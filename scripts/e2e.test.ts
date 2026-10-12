@@ -371,6 +371,27 @@ test("a link to show someone: a preview deployment through the real deployer, wi
     assert.equal((await pagesState()).sites[site]?.files["/index.html"], before);
 });
 
+test("design kit: a website starts in a look, and changing the look rewrites one file in the real workspace", async () => {
+    const { project } = await json<{ project: { id: string } }>(
+        await call("POST", "/projects", { name: "E2E Look", template: "look:editorial" }),
+    );
+    const { session } = await json<{ session: { status: string; workspaceId: string } }>(
+        await call("POST", `/projects/${project.id}/sessions`),
+    );
+    assert.equal(session.status, "ready");
+    const first = (file: string) => inside(session.workspaceId, `head -c 40 /workspace/${file}`).out;
+    assert.match(first("theme.css"), /^\/\* atelier-look: editorial /);
+    assert.match(inside(session.workspaceId, "ls /workspace").out, /index\.html[\s\S]*kit\.css[\s\S]*theme\.css/);
+    const page = inside(session.workspaceId, "cat /workspace/index.html").out;
+    assert.equal((await call("PUT", `/projects/${project.id}/look`, { look: "midnight" })).status, 200);
+    assert.match(first("theme.css"), /^\/\* atelier-look: midnight /);
+    assert.equal(inside(session.workspaceId, "cat /workspace/index.html").out, page);
+    assert.match(
+        inside(session.workspaceId, "cd /workspace && git log --format=%s").out,
+        /^Changed the look to Midnight\nStarted with the Editorial look$/,
+    );
+});
+
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
     const tokenOf = (name: string) =>
         inspect<Inspect>(name)

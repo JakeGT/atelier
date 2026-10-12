@@ -55,6 +55,8 @@ export interface WorkspaceRuntime {
     // Puts a starter template's files into an empty website as its first version.
     // Returns the version, or null if the website already had one.
     seed(projectId: string, files: { path: string; content: string }[], message: string): Promise<string | null>;
+    // Writes files into a website (replacing any of the same name) as a new version.
+    write(projectId: string, files: { path: string; content: string }[], message: string): Promise<string | null>;
     // One saved version's files as a tar archive (what publishing ships).
     exportTree(projectId: string, sha: string): Promise<Uint8Array>;
     // Stops the workspace; its files and history stay, and it starts again on next use.
@@ -174,6 +176,12 @@ export class LocalRuntime implements WorkspaceRuntime {
 
     async seed(projectId: string, files: { path: string; content: string }[], message: string) {
         const out = await this.tracker(projectId).exclusive(() => this.ws(projectId).seed(files, message));
+        if (out === "busy") throw new RuntimeBusyError();
+        return out;
+    }
+
+    async write(projectId: string, files: { path: string; content: string }[], message: string) {
+        const out = await this.tracker(projectId).exclusive(() => this.ws(projectId).write(files, message));
         if (out === "busy") throw new RuntimeBusyError();
         return out;
     }
@@ -384,6 +392,11 @@ export class ContainerRuntime implements WorkspaceRuntime {
     }
     async seed(projectId: string, files: { path: string; content: string }[], message: string) {
         return (await this.json<{ sha: string | null }>(projectId, "POST", "/seed", { files, message })).sha;
+    }
+    async write(projectId: string, files: { path: string; content: string }[], message: string) {
+        // A workspace on an earlier runtime does not know how to do this yet.
+        await this.bringUpToDate(projectId).catch((err: Error) => console.warn(`could not refresh workspace ${projectId}: ${err.message}`));
+        return (await this.json<{ sha: string | null }>(projectId, "POST", "/write", { files, message })).sha;
     }
     async exportTree(projectId: string, sha: string): Promise<Uint8Array> {
         let res: Response;

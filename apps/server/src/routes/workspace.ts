@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { findLook, LOOK_PREFIX, THEME_FILE, themeCss } from "../design/looks.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
+import { starter } from "../services/designKit.ts";
 import { baseOf, fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { agentInstructions } from "../services/instructions.ts";
 import { filesOf, MEDIA_NAME, mimeOfName, storageKey } from "../services/media.ts";
@@ -74,6 +76,25 @@ export function workspaceRoutes(api: Api): void {
                                 console.warn(`could not copy ${asset.name} into ${projectId}: ${(err as Error).message}`);
                             }
                         }
+                    }
+                }
+                await store.projects.clearTemplate(org.id, projectId);
+            } else if (project.template?.startsWith(LOOK_PREFIX)) {
+                // An empty page in a chosen look: the design kit, a first page, and its wording.
+                const look = findLook(project.template.slice(LOOK_PREFIX.length));
+                if (look) {
+                    const start = starter(look, project.name);
+                    await runtime.seed(projectId, start.files, `Started with the ${look.name} look`);
+                    for (const d of start.content) {
+                        await store.content.upsertDraft({
+                            tenantId: org.id,
+                            projectId,
+                            kind: d.kind,
+                            slug: d.slug,
+                            draft: d.draft,
+                            updatedBy: null,
+                        });
+                        await store.content.setFields(org.id, projectId, d.kind, d.slug, d.fields);
                     }
                 }
                 await store.projects.clearTemplate(org.id, projectId);
@@ -387,11 +408,16 @@ export function workspaceRoutes(api: Api): void {
 
     app.get("/preview/:token/*", async (c) => {
         const claims = verifyAgentToken(param(c, "token"), previewKey);
-        if (claims?.sessionId !== "preview") return c.json({ error: "preview link expired" }, 403, PREVIEW_HEADERS);
+        if (!claims?.sessionId.startsWith("preview")) return c.json({ error: "preview link expired" }, 403, PREVIEW_HEADERS);
+        // "What would this website look like in another look?": the same pages, with that look's theme.css.
+        const tryLook = findLook(claims.sessionId.startsWith("preview+look:") ? claims.sessionId.slice("preview+look:".length) : null);
         const prefix = `/preview/${param(c, "token")}/`;
         const rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        if (tryLook && rel === THEME_FILE) {
+            return new Response(themeCss(tryLook), { headers: { "content-type": "text/css; charset=utf-8", ...PREVIEW_HEADERS } });
+        }
         const file = await runtime.readFile(claims.projectId, rel).catch(() => null);
         if (!file) {
             // Not one of the website's own files: a file from its media library, perhaps.

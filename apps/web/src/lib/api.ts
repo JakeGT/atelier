@@ -131,6 +131,22 @@ export interface ModelList {
     unavailable: boolean;
 }
 
+// A look: a whole design language a website can wear. `previewUrl` shows it.
+export interface DesignLook {
+    id: string;
+    name: string;
+    description: string;
+    previewUrl: string;
+}
+// A ready-made section of a page.
+export interface DesignLayout {
+    id: string;
+    name: string;
+    description: string;
+    place: "top" | "body" | "bottom";
+    previewUrl: string;
+}
+
 export interface Template {
     id: string;
     name: string;
@@ -514,6 +530,11 @@ export function orgApi(org: string) {
         update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
             patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
+        // The design kit: looks and sections. `look`: show the sections wearing this look.
+        design: (look?: string) => get<{ looks: DesignLook[]; layouts: DesignLayout[] }>(`${o}/design${look ? `?look=${look}` : ""}`),
+        // This website's own look (null if it was not built with one), and itself in each look.
+        projectDesign: (projectId: string) => get<{ look: string | null; looks: DesignLook[] }>(`${p(projectId)}/design`),
+        setLook: (projectId: string, look: string) => put<{ ok: true; look: string }>(`${p(projectId)}/look`, { look }),
         // Every starting point for a new website here: Atelier's own and this studio's.
         templates: () => get<{ templates: Template[] }>(`${o}/templates`).then((b) => b.templates),
         saveTemplate: (projectId: string, name: string, description: string) =>
