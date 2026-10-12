@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.17` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #15. Nine PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
+> Last updated 2026-10-10. Status: **`p5.18` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #15. Ten PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.17` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.18` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -191,6 +191,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - **Seven more sections** (accordion, tabs, carousel, filterable list, tick-and-add-up, contact form, sign-up form), and the navigation folds into a Menu button on a phone.
 - **Forms:** `<form data-form="name">` with no action. Preview and publishing fill in `…/f/<signed token>` (`services/forms.ts`, `fill.ts` option `forms`). `routes/forms.ts` receives (public, limited, robot trap), stores (`form_submissions`, migration 0019), and notifies owners and admins. Read under **Content → Messages from visitors** (`editor/Messages.tsx`, `…/content/messages`), API `…/submissions`.
 - A website published before this must be published again for its forms to send.
+
+## Movement (branch `motion-gsap`, ADR-0018)
+
+- **GSAP** is a server dependency; `design_motion` (assistant tool) writes `gsap.min.js`, `ScrollTrigger.min.js` and the kit's `assets/motion.js` into a website. Attributes: `data-k-reveal`, `data-k-stagger`, `data-k-count`, `data-k-parallax`, `data-k-motion="auto"`.
+- Each look has `--motion-duration`, `--motion-ease`, `--motion-distance`. The assistant's page check looks with movement off.
+- People ask in words (Design → Movement). **GSAP's licence forbids tools for building animations visually without code: do not add animation controls to the interface on top of GSAP** (ADR-0018).
 
 ## Known gaps
 

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Project } from "@atelier/shared";
 import { LAYOUTS, SAMPLE_CONTENT, samplePage } from "../src/design/layouts.ts";
-import { LOOKS, lookOf, themeCss } from "../src/design/looks.ts";
+import { LOOKS, lookOf, MOTION_FILES, themeCss } from "../src/design/looks.ts";
 import { coverageReport } from "../src/services/coverage.ts";
-import { KIT_CSS } from "../src/services/designKit.ts";
+import { KIT_CSS, MOTION_CONTENT, MOTION_TAGS } from "../src/services/designKit.ts";
 import { fillHtml, lookupFrom } from "../src/services/fill.ts";
 import { json, makeApp, signIn, type TestApp } from "./helpers.ts";
 
@@ -135,4 +135,24 @@ test("a website built without the kit cannot be switched directly, and says what
     const res = await send(t, who, "PUT", `${p}/look`, { look: "bold" });
     assert.equal(res.status, 409);
     assert.match((await json<{ error: string }>(res)).error, /ask your assistant to restyle it/);
+});
+
+test("movement: GSAP comes from its package, the layer loads nothing, and every look says how it moves", () => {
+    assert.deepEqual(Object.keys(MOTION_CONTENT), [...MOTION_FILES]);
+    assert.match(MOTION_CONTENT["gsap.min.js"], /GSAP 3\.\d+/);
+    assert.match(MOTION_CONTENT["ScrollTrigger.min.js"], /ScrollTrigger 3\.\d+/);
+    const layer = MOTION_CONTENT["motion.js"];
+    assert.ok(!/https?:\/\/|import\s|require\(/.test(layer), "motion.js loads nothing from anywhere");
+    // Nobody who asked for less movement gets any, and nothing is hidden by a stylesheet.
+    assert.match(layer, /prefers-reduced-motion: reduce/);
+    assert.ok(!/data-k-(reveal|stagger|moving)/.test(KIT_CSS));
+    assert.equal((MOTION_TAGS.match(/<script src="[\w.]+" defer><\/script>/g) ?? []).length, 3);
+    for (const look of LOOKS) {
+        assert.ok(Number(look.tokens["--motion-duration"]) > 0 && Number(look.tokens["--motion-duration"]) <= 1.2, look.id);
+        assert.match(look.tokens["--motion-ease"] ?? "", /^[a-z]+\d?\.(out|inOut)$/, look.id);
+        assert.ok(Number(look.tokens["--motion-distance"]) > 0, look.id);
+    }
+    const page = samplePage("t", LAYOUTS, true);
+    assert.match(page, /<html lang="en" data-k-motion="auto">/);
+    assert.ok(page.indexOf("kit.js") < page.indexOf("gsap.min.js") && page.indexOf("gsap.min.js") < page.indexOf("motion.js"));
 });

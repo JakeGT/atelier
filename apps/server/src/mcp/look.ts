@@ -217,6 +217,13 @@ export class Browser {
                     { width: screen.width, height: screen.height, deviceScaleFactor: 1, mobile: screen.mobile },
                     sessionId,
                 );
+                // The page as it ends up: movement is switched off, as for a visitor who asked their device
+                // for less of it. Otherwise things waiting to be scrolled to would look missing.
+                await this.send(
+                    "Emulation.setEmulatedMedia",
+                    { features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
+                    sessionId,
+                );
                 const loaded = new Promise<void>((resolve) => {
                     const done = (method: string, _p: Record<string, unknown>, sid?: string) => {
                         if (sid === sessionId && method === "Page.loadEventFired") {
@@ -259,7 +266,7 @@ export class Browser {
                                 if (ox > 8 && oy > 8) overlaps.push(say(a.el) + " and " + say(b.el) + " overlap by " + ox + "x" + oy + "px");
                             }
                             const cut = key.filter((b) => /^(H\\d|P|LI|BUTTON|A)$/.test(b.el.tagName) && b.el.scrollWidth > b.el.clientWidth + 4 && getComputedStyle(b.el).overflowX !== "visible").slice(0, 5).map((b) => say(b.el) + " is cut off: it needs " + b.el.scrollWidth + "px and has " + b.el.clientWidth + "px");
-                            const edge = key.filter((b) => /^(H\\d|P|LI|BUTTON)$/.test(b.el.tagName) && b.el.textContent.trim() && (b.x < 4 || b.x + b.w > w - 4) && b.w < w + 2).slice(0, 5).map((b) => say(b.el) + " touches the edge of the screen");
+                            const edge = key.filter((b) => /^(H\\d|P|LI|BUTTON)$/.test(b.el.tagName) && b.el.textContent.trim() && (b.x < 4 || b.x + b.w > w - 4) && b.w < w + 2 && !b.el.closest("[data-k-track]")).slice(0, 5).map((b) => say(b.el) + " touches the edge of the screen");
                             // Drawn but not visible: an element given a colour and a size that ends up with no area.
                             // The usual cause is a width or height on an inline element (a span), which browsers ignore.
                             const painted = (el) => { const s = getComputedStyle(el); return (s.backgroundColor && s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent") || s.backgroundImage !== "none"; };

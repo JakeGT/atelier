@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { LAYOUTS, SAMPLE_CONTENT, SHOWCASE, samplePage } from "../design/layouts.ts";
-import { findLook, KIT_FILE, KIT_SCRIPT, type Look, THEME_FILE, themeCss } from "../design/looks.ts";
+import { findLook, KIT_FILE, KIT_SCRIPT, type Look, MOTION_FILES, THEME_FILE, themeCss } from "../design/looks.ts";
 import { fillHtml, lookupFrom } from "./fill.ts";
 
 // The design kit a website carries: theme.css (its look) and kit.css (the shared
@@ -9,6 +11,17 @@ import { fillHtml, lookupFrom } from "./fill.ts";
 
 export const KIT_CSS = readFileSync(new URL("../../assets/kit.css", import.meta.url), "utf8");
 export const KIT_JS = readFileSync(new URL("../../assets/kit.js", import.meta.url), "utf8");
+// GSAP is a dependency of the server, read from its package: the files a website gets are
+// exactly the published ones, at the version in the lockfile.
+const gsapFile = (name: string): string =>
+    readFileSync(join(dirname(createRequire(import.meta.url).resolve("gsap/package.json")), "dist", name), "utf8");
+export const MOTION_CONTENT: Record<(typeof MOTION_FILES)[number], string> = {
+    "gsap.min.js": gsapFile("gsap.min.js"),
+    "ScrollTrigger.min.js": gsapFile("ScrollTrigger.min.js"),
+    "motion.js": readFileSync(new URL("../../assets/motion.js", import.meta.url), "utf8"),
+};
+// The script tags a page with movement carries, in order, after kit.js.
+export const MOTION_TAGS = MOTION_FILES.map((f) => `<script src="${f}" defer></script>`).join("\n");
 
 const b64 = (text: string): string => Buffer.from(text, "utf8").toString("base64");
 
@@ -82,6 +95,7 @@ export function sampleFile(lookId: string, layoutId: string | null, rel: string)
     if (rel === THEME_FILE) return { body: themeCss(look), type: "text/css; charset=utf-8" };
     if (rel === KIT_FILE) return { body: KIT_CSS, type: "text/css; charset=utf-8" };
     if (rel === KIT_SCRIPT) return { body: KIT_JS, type: "text/javascript; charset=utf-8" };
+    if (rel in MOTION_CONTENT) return { body: MOTION_CONTENT[rel as keyof typeof MOTION_CONTENT], type: "text/javascript; charset=utf-8" };
     if (rel !== "index.html") return null;
     const sections = layoutId ? LAYOUTS.filter((l) => l.id === layoutId) : LAYOUTS.filter((l) => SHOWCASE.includes(l.id));
     if (sections.length === 0) return null;

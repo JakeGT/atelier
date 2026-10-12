@@ -5,9 +5,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { findLayout, LAYOUTS } from "../design/layouts.ts";
-import { findLook, KIT_FILE, KIT_SCRIPT, LOOKS, lookOf, THEME_FILE, themeCss } from "../design/looks.ts";
+import { findLook, KIT_FILE, KIT_SCRIPT, LOOKS, lookOf, MOTION_FILES, THEME_FILE, themeCss } from "../design/looks.ts";
 import { coverageReport } from "../services/coverage.ts";
-import { KIT_CSS, KIT_JS } from "../services/designKit.ts";
+import { KIT_CSS, KIT_JS, MOTION_CONTENT, MOTION_TAGS } from "../services/designKit.ts";
 import { Browser, browserPath } from "./look.ts";
 import { inside, readPages, serveSite } from "./site.ts";
 
@@ -231,6 +231,8 @@ server.tool(
             note: look
                 ? "Use only these variables for colour, type, corners and shadows (var(--accent) and so on). Never write a colour or a font name into a page or another stylesheet: the person can change the look at any time, and everything must follow."
                 : "This website does not have the kit yet. To give it one, call design_use_look with a look's id, link theme.css and kit.css from every page (theme.css first), and replace the pages' own colours and fonts with the variables.",
+            movement:
+                "For animation of any kind, call design_motion: it puts GSAP and the kit's movement layer in the website and tells you how to use them.",
             looks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
             sections: LAYOUTS.map((l) => ({
                 id: l.id,
@@ -271,6 +273,41 @@ server.tool(
                   }
                 : {}),
         });
+    },
+);
+
+const MOTION_HELP = {
+    onEveryPage: `After kit.js in the head, in this order:\n${MOTION_TAGS}`,
+    theQuickWay:
+        'Put data-k-motion="auto" on <html>: the kit\'s sections then move without being marked (headings and pictures arrive as they are scrolled to, cards and list entries one after another, bars grow).',
+    attributes: {
+        "data-k-reveal":
+            "on anything: it arrives as it is scrolled to. Values: up (the default), down, left, right, in (fade only), scale.",
+        "data-k-stagger": "on a container: its children arrive one after another. Same values.",
+        "data-k-count": 'on a number ("1,200", "£35", "98%"): it counts up to what is written. The words stay in the page.',
+        "data-k-parallax": "on a picture or a decoration: it drifts as the page scrolls. The value is how far, in percent (10 to 30).",
+        "data-k-delay": "seconds to wait first, with any of the above.",
+    },
+    speedAndFeel:
+        "How long, how far and which ease come from the look (--motion-duration, --motion-ease, --motion-distance in theme.css). Do not set them per element: a change of look must change the movement too.",
+    yourOwnScenes: [
+        "For anything more (a pinned scene, a timeline, something drawn along a path), write GSAP yourself in a file of the website's own (scenes.js), loaded after motion.js. gsap and ScrollTrigger are globals; register nothing else, and load nothing from another address.",
+        'Wrap all of it in gsap.matchMedia().add("(prefers-reduced-motion: no-preference)", () => { … }) so a visitor who asked for less movement gets none.',
+        "Never hide anything in CSS for script to show later, and never write a page's words with script: everything must be readable with scripts off. Use gsap.from(), which starts from the hidden state and ends at the page as written.",
+        "Do not animate an element motion.js already moves (it marks them data-k-moving).",
+        "Movement supports the words; it is not the point. A few things arriving well beats everything moving.",
+    ],
+    looking:
+        'page_look shows pages with movement switched off, so you see the whole page as it ends up. If something "cannot be seen" there, your own script has hidden it from visitors who asked for less movement: fix that.',
+};
+
+server.tool(
+    "design_motion",
+    "Give the website movement: writes GSAP (gsap.min.js, ScrollTrigger.min.js) and the kit's movement layer (motion.js) into the website and tells you how to use them. Call it when the person asks for animation, movement, things fading or sliding in, parallax, numbers counting up, or a scroll scene; and before writing any GSAP yourself. Safe to call again: it brings the files up to date.",
+    {},
+    async () => {
+        for (const file of MOTION_FILES) await writeFile(join(workspace, file), MOTION_CONTENT[file]);
+        return json({ written: MOTION_FILES, ...MOTION_HELP });
     },
 );
 

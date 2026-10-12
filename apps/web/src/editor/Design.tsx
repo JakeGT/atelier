@@ -1,7 +1,39 @@
-import { ArrowLeft, Check, LayoutPanelTop, Monitor, Palette, Smartphone } from "lucide-react";
+import { ArrowLeft, Check, LayoutPanelTop, Monitor, Palette, Smartphone, Wind } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { DesignLayout, DesignLook, OrgApi, Project } from "../lib/api";
 import { Dialog, Dots, useToast } from "../ui/kit";
+
+// Movement is asked for in words: the assistant writes it. Each of these is a request, worded so it is done well.
+const MOVEMENT: { name: string; about: string; request: string }[] = [
+    {
+        name: "Gentle movement throughout",
+        about: "Headings, pictures and cards arrive softly as they are scrolled to, on every page.",
+        request:
+            "Add gentle movement to every page: headings, pictures and cards arriving as a visitor scrolls to them, lists one entry after another. Keep it quiet and in keeping with the website's look.",
+    },
+    {
+        name: "Numbers that count up",
+        about: "Figures (prices, years, how many) count up to their value when they come into view.",
+        request: "Make the figures on this website count up to their value when a visitor scrolls to them.",
+    },
+    {
+        name: "Pictures that drift",
+        about: "Large pictures move a little slower than the page as it scrolls, for a sense of depth.",
+        request: "Make the large pictures drift slightly as the page scrolls, for a sense of depth. Keep it subtle.",
+    },
+    {
+        name: "An opening for the home page",
+        about: "The top of the home page builds itself when the website opens: headline, then words, then buttons and picture.",
+        request:
+            "Give the top of the home page an opening: when the website opens, the headline arrives first, then the words under it, then the buttons and the picture. It should take about a second and feel like the website's look.",
+    },
+    {
+        name: "Take the movement away",
+        about: "The website goes back to being still.",
+        request:
+            "Remove all movement and animation from this website, and the files that were added for it. Keep everything else exactly as it is.",
+    },
+];
 
 // The website's design: the look it wears (a whole design language, changed in
 // one step) and the ready-made sections its pages can be built from. Every
@@ -36,7 +68,7 @@ export function DesignDialog({
     onClose: () => void;
 }) {
     const toast = useToast();
-    const [tab, setTab] = useState<"looks" | "sections">("looks");
+    const [tab, setTab] = useState<"looks" | "sections" | "movement">("looks");
     const [current, setCurrent] = useState<string | null>(null);
     const [looks, setLooks] = useState<DesignLook[] | null>(null);
     const [layouts, setLayouts] = useState<DesignLayout[] | null>(null);
@@ -169,6 +201,15 @@ export function DesignDialog({
                 >
                     <LayoutPanelTop /> Sections
                 </button>
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "movement"}
+                    className={tab === "movement" ? "on" : ""}
+                    onClick={() => setTab("movement")}
+                >
+                    <Wind /> Movement
+                </button>
             </div>
 
             {tab === "looks" ? (
@@ -222,6 +263,35 @@ export function DesignDialog({
                         </ul>
                     </>
                 )
+            ) : tab === "movement" ? (
+                <>
+                    <p className="muted design-about">
+                        Your assistant can make the website move: things arriving as a visitor scrolls, numbers counting up, pictures
+                        drifting, or a scene made for one page. How fast and how far follows the website's look. Visitors who have asked
+                        their device for less movement see the page still. Choosing one puts the request in the message box, to change or
+                        send as it is.
+                    </p>
+                    <ul className="movement">
+                        {MOVEMENT.map((m) => (
+                            <li key={m.name}>
+                                <strong>{m.name}</strong>
+                                <span className="muted">{m.about}</span>
+                                {canEdit && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-sm btn-primary"
+                                        onClick={() => {
+                                            onAsk(m.request);
+                                            onClose();
+                                        }}
+                                    >
+                                        Ask my assistant to do this
+                                    </button>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </>
             ) : layouts === null ? (
                 <Dots />
             ) : (
