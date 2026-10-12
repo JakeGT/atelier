@@ -78,6 +78,13 @@ export class Notifier {
         }
     }
 
+    // A plain e-mail to an address that may not belong to anyone here yet (an invitation).
+    // Never throws; does nothing when e-mail is not set up.
+    async mail(to: string, subject: string, text: string): Promise<void> {
+        if (!this.mailer) return;
+        await this.mailer.send({ to, subject, text }).catch((err: Error) => console.warn(`could not e-mail ${to}: ${err.message}`));
+    }
+
     // A studio's owners and admins: the people who can do something about it.
     async tellStudio(tenantId: string, notice: Omit<NoticeInput, "tenantId">, alsoTell: string[] = []): Promise<void> {
         const members = await this.store.memberships.list(tenantId).catch(() => []);

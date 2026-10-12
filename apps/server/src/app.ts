@@ -11,7 +11,7 @@ import { health } from "./routes/health.ts";
 import type { ModelCatalog } from "./services/catalog.ts";
 import type { Hosting } from "./services/hosting.ts";
 import type { MediaStorage } from "./services/mediaStorage.ts";
-import type { Mailer } from "./services/notifier.ts";
+import { type Mailer, Notifier } from "./services/notifier.ts";
 import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
@@ -91,8 +91,13 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
 
     app.route("/", health);
     app.route("/", configRoutes(deps.config));
-    app.route("/", authRoutes(deps.config, deps.oidc, deps.sessions, deps.store));
-    const api = apiRoutes(deps);
+    const notifier = new Notifier(deps.store, {
+        mailer: deps.mailer ?? null,
+        publicOrigin: deps.config.publicOrigin,
+        operatorEmail: deps.config.operatorEmail,
+    });
+    app.route("/", authRoutes(deps.config, deps.oidc, deps.sessions, deps.store, notifier));
+    const api = apiRoutes({ ...deps, notifier });
     app.route("/", api.app);
 
     if (dist && shell) {

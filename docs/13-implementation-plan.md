@@ -193,9 +193,9 @@ images.
 
 - **gVisor spike:** the current host is Docker Desktop, which has no `runsc`. The
   provisioner hook exists; the spike moves to the VPS migration (ADR-0012).
-- **Per-project role overrides** (`project_members`): no one has needed a role
-  that differs per website yet. Organisation roles cover the plan's acceptance
-  criteria. Revisit with the agency use case.
+- **Per-project role overrides** (`project_members`): deferred here, built on
+  `studio-people` (2026-10-10): an editor or viewer can have a different role
+  on one website.
 - **Build ceilings:** there are no builds until P3.
 - **Plan-then-build mode and the media library** (competitive backlog items
   pencilled into P2): moved to P3/P4, as neither is needed for multi-tenancy.
@@ -390,8 +390,9 @@ current host. What needs the VPS is P6, which is last.
   below.
 - E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
-  **Built (`p5-media`):** a daily job with the periods in docs/12 §5. **Not
-  built:** deleting a whole studio, monthly aggregates of usage.
+  **Built:** a daily job with the periods in docs/12 §5 (`p5-media`);
+  deleting a whole studio, a download of everything in it, and usage by month
+  (`studio-people`).
 - E5.3 Alerting (build/publish failure, stall, spend over ceiling). **Built
   (`p5-media`):** notifications in the app and by e-mail (docs/12 §6).
 - E5.5 The assistant checks and sees its own work (ADR-0015, asked for and

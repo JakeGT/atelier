@@ -103,6 +103,13 @@ export function loadProject(store: Store) {
         const project = /^[0-9a-f-]{36}$/.test(projectId) ? await store.projects.findById(c.get("org").id, projectId) : null;
         if (!project) return c.json({ error: "not found" }, 404);
         c.set("project", project);
+        // On this website the person may have a different role from the one they have in
+        // the studio. Owners and admins always keep theirs.
+        const role = c.get("role");
+        if (role === "editor" || role === "viewer") {
+            const mine = (await store.projectMembers.forUser(project.tenantId, c.get("user").id)).find((m) => m.projectId === project.id);
+            if (mine) c.set("role", mine.role);
+        }
         await next();
     };
 }

@@ -53,10 +53,42 @@ export async function ensurePersonalStudio(store: Store, user: Pick<User, "id" |
 }
 
 // Studios the person has been added to (by e-mail) become memberships. Returns how many.
-export async function acceptInvitations(store: Store, user: Pick<User, "id" | "email">): Promise<number> {
+export async function acceptInvitations(
+    store: Store,
+    user: Pick<User, "id" | "email"> & { name?: string },
+    // Told when someone joins: the new member, and the studio's owners and admins.
+    notifier?: {
+        tell: (
+            userIds: string[],
+            notice: { tenantId: string | null; kind: string; title: string; body: string; link: string | null; dedupe: string | null },
+        ) => Promise<void>;
+    },
+): Promise<number> {
     const joined = await store.invitations.acceptAll(user.id, user.email);
     for (const tenantId of joined) {
         await store.audit.record({ tenantId, actorId: user.id, action: "invitation.accept", target: `user:${user.id}`, detail: null });
+        if (!notifier) continue;
+        const org = await store.organizations.findById(tenantId);
+        if (!org) continue;
+        await notifier.tell([user.id], {
+            tenantId,
+            kind: "studio.joined",
+            title: `You now belong to ${org.name}`,
+            body: `You were added to the studio ${org.name}. Its websites are there for you to open.`,
+            link: `/o/${org.slug}`,
+            dedupe: `joined:${tenantId}`,
+        });
+        const others = (await store.memberships.list(tenantId))
+            .filter((m) => (m.role === "owner" || m.role === "admin") && m.userId !== user.id)
+            .map((m) => m.userId);
+        await notifier.tell(others, {
+            tenantId,
+            kind: "studio.member",
+            title: `${user.name ?? user.email} joined ${org.name}`,
+            body: `${user.name ?? user.email} (${user.email}) accepted the invitation and can now open the studio's websites.`,
+            link: `/o/${org.slug}/settings`,
+            dedupe: `member:${tenantId}:${user.id}`,
+        });
     }
     return joined.length;
 }

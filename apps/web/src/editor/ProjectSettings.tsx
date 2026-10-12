@@ -1,8 +1,8 @@
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { FormEvent } from "react";
-import { useState } from "react";
-import type { Org, OrgApi, Project } from "../lib/api";
-import { can } from "../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import type { Org, OrgApi, Project, ProjectMember } from "../lib/api";
+import { can, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate } from "../lib/hooks";
 import { Dialog, Dots, useToast } from "../ui/kit";
 import { ModelPicker } from "../ui/ModelPicker";
@@ -109,6 +109,8 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
                     />
                 </div>
 
+                {can.manage(org.role) && !archived && <People api={api} project={project} />}
+
                 <p className="field-help settings-note">
                     {archived
                         ? "This website is archived: it is hidden and cannot be changed. Restore it to work on it again."
@@ -143,5 +145,84 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
                 </div>
             </form>
         </Dialog>
+    );
+}
+
+// Who can do what on this website. Everyone in the studio is listed; an editor or
+// a viewer can be given a different role here than they have in the studio.
+function People({ api, project }: { api: OrgApi; project: Project }) {
+    const toast = useToast();
+    const [members, setMembers] = useState<ProjectMember[] | null>(null);
+    const load = useCallback(() => api.projectMembers(project.id).then(setMembers, () => setMembers([])), [api, project.id]);
+    useEffect(() => {
+        void load();
+    }, [load]);
+    const word: Record<string, string> = { owner: "Owner", admin: "Admin", editor: "Editor", viewer: "Viewer" };
+    const can: Record<string, string> = {
+        owner: "everything",
+        admin: "edit, publish and manage",
+        editor: "edit, but not publish",
+        viewer: "look, but not change anything",
+    };
+
+    async function change(m: ProjectMember, value: string) {
+        try {
+            await api.setProjectRole(project.id, m.userId, value === "studio" ? null : (value as "admin" | "editor" | "viewer"));
+            toast(
+                value === "studio"
+                    ? `${m.name} has their studio role here again.`
+                    : `${m.name} is now ${value === "editor" || value === "admin" ? "an" : "a"} ${value} on this website.`,
+            );
+        } catch (err) {
+            if (err instanceof ReauthRequired) {
+                toast("Please confirm your sign-in, then try that again.", "error");
+                setTimeout(reauthenticate, 1400);
+            } else toast((err as Error).message, "error");
+        }
+        await load();
+    }
+
+    return (
+        <div className="field-line">
+            <span className="eyebrow">Who can do what on this website</span>
+            {members === null ? (
+                <Dots />
+            ) : (
+                <ul className="people">
+                    {members.map((m) => (
+                        <li key={m.userId}>
+                            <span className="people-name">
+                                <strong>{m.name}</strong>
+                                <span className="muted">Can {can[m.role]}</span>
+                            </span>
+                            {m.fixed ? (
+                                <span className="chip chip-plain" title="Owners and admins have the same role on every website">
+                                    {word[m.role]} everywhere
+                                </span>
+                            ) : (
+                                <select
+                                    value={m.differs ? m.role : "studio"}
+                                    onChange={(e) => void change(m, e.target.value)}
+                                    aria-label={`Role of ${m.name} on this website`}
+                                >
+                                    <option value="studio">Same as in the studio ({word[m.studioRole]})</option>
+                                    {(["viewer", "editor", "admin"] as const)
+                                        .filter((r) => r !== m.studioRole)
+                                        .map((r) => (
+                                            <option key={r} value={r}>
+                                                {word[r]} on this website
+                                            </option>
+                                        ))}
+                                </select>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+            <span className="field-help">
+                People are added to the studio in its settings. Here you can give an editor or a viewer a different role on this one
+                website.
+            </span>
+        </div>
     );
 }

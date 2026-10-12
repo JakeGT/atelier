@@ -884,3 +884,45 @@ test("retention queries: old messages and old versions of wording go; the newest
     assert.equal((await store.content.revisions(b.tenantId, other?.id ?? "")).length, 5);
     assert.equal((await store.messages.list(b.tenantId, b.projectId)).length, 1);
 });
+
+test("per-website roles, usage by month, and deleting a studio, against the database itself", { skip }, async () => {
+    const a = await studio("del-a");
+    const b = await studio("del-b");
+    await store.memberships.add({ tenantId: a.tenantId, userId: a.userId, role: "viewer" });
+
+    // A role on one website belongs to that studio alone.
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, "editor");
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, "admin");
+    assert.deepEqual(await store.projectMembers.list(a.tenantId, a.projectId), [{ userId: a.userId, role: "admin" }]);
+    assert.deepEqual(await store.projectMembers.forUser(a.tenantId, a.userId), [{ projectId: a.projectId, role: "admin" }]);
+    assert.deepEqual(await store.projectMembers.list(b.tenantId, a.projectId), []);
+    await assert.rejects(store.projectMembers.set(b.tenantId, a.projectId, a.userId, "editor"));
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, null);
+    assert.deepEqual(await store.projectMembers.forUser(a.tenantId, a.userId), []);
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, "editor");
+
+    await store.usage.record({ tenantId: a.tenantId, projectId: a.projectId, kind: "agent.runs", units: 2, sourceId: `m-${suffix}-1` });
+    await store.usage.record({ tenantId: a.tenantId, projectId: a.projectId, kind: "agent.runs", units: 3, sourceId: `m-${suffix}-2` });
+    assert.deepEqual(await store.usage.monthly(a.tenantId, new Date(0)), [
+        { month: new Date().toISOString().slice(0, 7), kind: "agent.runs", units: 5 },
+    ]);
+    assert.deepEqual(await store.usage.monthly(b.tenantId, new Date(0)), []);
+
+    // Deleting a studio takes everything recorded under it, and nothing of anyone else's.
+    await store.organizations.delete(a.tenantId);
+    assert.equal(await store.organizations.findById(a.tenantId), null);
+    assert.equal(await store.projects.findById(a.tenantId, a.projectId), null);
+    for (const table of ["projects", "content_documents", "content_revisions", "memberships", "project_members"]) {
+        const [row] = await owner.sql
+            .unsafe(`SELECT count(*)::int AS n FROM ${table} WHERE tenant_id = '${a.tenantId}'`)
+            .catch(() => [{ n: -1 }]);
+        // The owner role cannot read these tables (FORCE RLS); the serving role, as that studio, sees none.
+        assert.ok(row?.n === 0 || row?.n === -1, `${table}: ${row?.n}`);
+    }
+    assert.equal((await store.content.list(a.tenantId, a.projectId)).length, 0);
+    assert.equal((await store.memberships.list(a.tenantId)).length, 0);
+    assert.ok(!(await store.organizations.listAll()).some((s) => s.id === a.tenantId));
+    assert.ok(await store.organizations.findById(b.tenantId));
+    assert.ok(await store.projects.findById(b.tenantId, b.projectId));
+    assert.ok(await store.users.findById(a.userId), "the person outlives the studio");
+});

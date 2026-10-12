@@ -64,8 +64,10 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     // An archived website is frozen for everyone; otherwise the role decides.
     const archived = project.archivedAt !== null;
-    const mayEdit = can.edit(org.role) && !archived;
-    const canPublish = can.publish(org.role) && !archived;
+    // The person's role on this website, which can differ from their role in the studio.
+    const role = project.myRole ?? org.role;
+    const mayEdit = can.edit(role) && !archived;
+    const canPublish = can.publish(role) && !archived;
     const mayManage = can.manage(org.role);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -534,7 +536,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     locked={
                         archived
                             ? "This website is archived. Restore it from its settings to keep working on it."
-                            : !can.edit(org.role)
+                            : !can.edit(role)
                               ? "You're a viewer in this studio, so you can look but not change things."
                               : null
                     }

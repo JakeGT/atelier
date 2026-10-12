@@ -56,7 +56,29 @@ export interface AuditEntry {
     detail: Record<string, unknown> | null;
 }
 
+// A member of the studio as they stand on one website.
+export interface ProjectMember {
+    userId: string;
+    name: string;
+    email: string;
+    studioRole: Role;
+    // Their role on this website; `differs` when it is not their role in the studio.
+    role: Role;
+    differs: boolean;
+    // Owners and admins have the same role everywhere.
+    fixed: boolean;
+}
+export interface MonthUsage {
+    month: string;
+    requests: number;
+    minutes: number;
+    tokensIn: number;
+    tokensOut: number;
+}
+
 export interface Project {
+    // This person's role on this website (it can differ from their role in the studio).
+    myRole?: Role;
     id: string;
     tenantId: string;
     slug: string;
@@ -486,6 +508,15 @@ export function orgApi(org: string) {
         update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
             patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
+        monthlyUsage: () => get<{ months: MonthUsage[] }>(`${o}/usage/monthly`).then((b) => b.months),
+        // A link, good for five minutes, that downloads everything in the studio.
+        exportStudio: () => post<{ url: string }>(`${o}/export`).then((b) => b.url),
+        // For good. `confirm` is the studio's name, typed out.
+        deleteStudio: (confirm: string) => send("DELETE", o, { confirm }).then((r) => parse<{ ok: true }>(r)),
+        projectMembers: (projectId: string) => get<{ members: ProjectMember[] }>(`${p(projectId)}/members`).then((b) => b.members),
+        // `role` null: back to their role in the studio.
+        setProjectRole: (projectId: string, userId: string, role: "admin" | "editor" | "viewer" | null) =>
+            put<{ ok: true }>(`${p(projectId)}/members/${userId}`, { role }),
         providers: () => get<{ providers: ProviderInfo[] }>(`${o}/providers`).then((b) => b.providers),
         connectProvider: (id: string, apiKey: string) => put<{ ok: boolean; verified: boolean }>(`${o}/providers/${id}`, { apiKey }),
         disconnectProvider: (id: string) => del<{ ok: boolean }>(`${o}/providers/${id}`),

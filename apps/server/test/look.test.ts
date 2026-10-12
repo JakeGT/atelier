@@ -29,8 +29,11 @@ test("the website's pages are listed, home first; paths cannot leave the workspa
     assert.equal(inside(dir, "/etc/passwd"), join(dir, "etc/passwd"));
 });
 
-const path = browserPath();
-const skip = path ? false : "no Chromium here (set CHROMIUM_PATH to run)";
+// Only where a browser has been named: one that merely happens to be installed (a CI
+// runner's) may not start under the test's conditions. The end-to-end suite runs the
+// real one inside a real workspace container.
+const path = process.env.CHROMIUM_PATH ? browserPath() : null;
+const skip = path ? false : "set CHROMIUM_PATH to run the browser tests";
 const browser = path ? new Browser(path) : null;
 after(() => browser?.close());
 

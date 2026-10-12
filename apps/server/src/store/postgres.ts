@@ -32,6 +32,8 @@ import type {
     Notice,
     NotificationStore,
     OrganizationStore,
+    ProjectMemberStore,
+    ProjectRole,
     ProjectStore,
     ProviderKeyStore,
     ReleaseStore,
@@ -355,6 +357,7 @@ export class PostgresStore implements Store {
     deployments: DeploymentStore;
     domains: DomainStore;
     media: MediaStore;
+    projectMembers: ProjectMemberStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
@@ -457,6 +460,13 @@ export class PostgresStore implements Store {
                     if (patch.status) await tx`UPDATE control.tenants SET status = ${patch.status} WHERE id = ${id}`;
                     return rowToOrg(firstRow(rows));
                 }),
+            delete: async (id) => {
+                await this.withTenant(id, async (tx) => {
+                    // Everything under the studio goes with it (ON DELETE CASCADE).
+                    await tx`DELETE FROM organizations WHERE id = ${id}`;
+                    await tx`DELETE FROM control.tenants WHERE id = ${id}`;
+                });
+            },
             // The operator's view. `control.tenants` lists every studio (it is not
             // tenant-scoped); each studio's own figures are then read inside its tenant.
             listAll: async () => {
@@ -623,6 +633,13 @@ export class PostgresStore implements Store {
                         SELECT project_id, kind, COALESCE(SUM(units), 0) AS units FROM usage_events
                         WHERE occurred_at >= ${since} GROUP BY project_id, kind`;
                     return rows.map((r) => ({ projectId: r.project_id, kind: r.kind, units: Number(r.units) }));
+                }),
+            monthly: async (tenantId, since) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ month: string; kind: string; units: string }[]>`
+                        SELECT to_char(date_trunc('month', occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month, kind, COALESCE(SUM(units), 0) AS units
+                        FROM usage_events WHERE occurred_at >= ${since} GROUP BY 1, 2 ORDER BY 1 DESC`;
+                    return rows.map((r) => ({ month: r.month, kind: r.kind, units: Number(r.units) }));
                 }),
             total: async (tenantId, kinds, since) =>
                 this.withTenant(tenantId, async (tx) => {
@@ -1038,6 +1055,30 @@ export class PostgresStore implements Store {
                 await this.sql`UPDATE users SET email_notifications = ${on} WHERE id = ${userId}`;
             },
             admins: async () => (await this.sql<{ id: string }[]>`SELECT id FROM users WHERE admin`).map((r) => r.id),
+        };
+
+        this.projectMembers = {
+            list: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ user_id: string; role: ProjectRole }[]>`
+                        SELECT user_id, role FROM project_members WHERE project_id = ${projectId}`;
+                    return rows.map((r) => ({ userId: r.user_id, role: r.role }));
+                }),
+            set: async (tenantId, projectId, userId, role) => {
+                await this.withTenant(tenantId, (tx) =>
+                    role === null
+                        ? tx`DELETE FROM project_members WHERE project_id = ${projectId} AND user_id = ${userId}`
+                        : tx`
+                            INSERT INTO project_members (project_id, tenant_id, user_id, role) VALUES (${projectId}, ${tenantId}, ${userId}, ${role})
+                            ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+                );
+            },
+            forUser: async (tenantId, userId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ project_id: string; role: ProjectRole }[]>`
+                        SELECT project_id, role FROM project_members WHERE user_id = ${userId}`;
+                    return rows.map((r) => ({ projectId: r.project_id, role: r.role }));
+                }),
         };
 
         const MEDIA_COLS =

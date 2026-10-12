@@ -3,7 +3,7 @@ import { validInstructions } from "../services/instructions.ts";
 import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
 import type { ProjectPatch } from "../store/types.ts";
-import { type Api, type Ctx, ORG, PROJECT, SLUG_RE, slugify } from "./kit.ts";
+import { type Api, type Ctx, ORG, PROJECT, param, SLUG_RE, slugify } from "./kit.ts";
 
 // Projects (websites): create, list, settings, archive, delete.
 export function projectRoutes(api: Api): void {
@@ -13,7 +13,62 @@ export function projectRoutes(api: Api): void {
     route("get", `${ORG}/projects`, "project.read", async (c) => {
         const all = await store.projects.list(c.get("org").id);
         const archived = c.req.query("archived") === "1";
-        return c.json({ projects: all.filter((p) => (p.archivedAt !== null) === archived) });
+        // `myRole`: this person's role on a website, where it differs from their role in the studio.
+        const role = c.get("role");
+        const mine = role === "editor" || role === "viewer" ? await store.projectMembers.forUser(c.get("org").id, c.get("user").id) : [];
+        const own = new Map(mine.map((m) => [m.projectId, m.role]));
+        return c.json({
+            projects: all.filter((p) => (p.archivedAt !== null) === archived).map((p) => ({ ...p, myRole: own.get(p.id) ?? role })),
+        });
+    });
+
+    // Who can do what on this website: every member of the studio, with their role
+    // here. Owners and admins have the same role everywhere.
+    route("get", `${PROJECT}/members`, "project.read", async (c) => {
+        const org = c.get("org");
+        const [members, own] = await Promise.all([store.memberships.list(org.id), store.projectMembers.list(org.id, c.get("project").id)]);
+        const here = new Map(own.map((m) => [m.userId, m.role]));
+        return c.json({
+            members: members.map((m) => {
+                const fixed = m.role === "owner" || m.role === "admin";
+                return {
+                    userId: m.userId,
+                    name: m.name,
+                    email: m.email,
+                    studioRole: m.role,
+                    role: fixed ? m.role : (here.get(m.userId) ?? m.role),
+                    differs: !fixed && here.has(m.userId),
+                    fixed,
+                };
+            }),
+        });
+    });
+
+    // `role`: admin, editor or viewer on this website; null to go back to their role in the studio.
+    route("put", `${PROJECT}/members/:userId`, "org.members", stepUp, async (c) => {
+        const org = c.get("org");
+        const project = c.get("project");
+        const body = (await c.req.json().catch(() => null)) as { role?: unknown } | null;
+        const role = body?.role;
+        if (role !== null && role !== "admin" && role !== "editor" && role !== "viewer")
+            return c.json({ error: "choose a role: admin, editor or viewer" }, 400);
+        const member = (await store.memberships.list(org.id)).find((m) => m.userId === param(c, "userId"));
+        if (!member) return c.json({ error: "that person is not a member of this studio" }, 404);
+        if (member.role === "owner" || member.role === "admin")
+            return c.json({ error: "owners and admins have the same role on every website" }, 409);
+        await store.projectMembers.set(org.id, project.id, member.userId, role === member.role ? null : role);
+        await audit(c, "project.member", `project:${project.id}`, { userId: member.userId, role });
+        if (role !== null && role !== member.role && member.userId !== c.get("user").id) {
+            await api.notifier.tell([member.userId], {
+                tenantId: org.id,
+                kind: "project.role",
+                title: `Your role on ${project.name} changed`,
+                body: `${c.get("user").name} made you ${role === "admin" ? "an admin" : role === "editor" ? "an editor" : "a viewer"} on the website ${project.name} in ${org.name}.`,
+                link: `/o/${org.slug}/p/${project.slug}`,
+                dedupe: null,
+            });
+        }
+        return c.json({ ok: true });
     });
 
     // A project needs only a name; the slug is derived (and made unique) unless given.

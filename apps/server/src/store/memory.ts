@@ -31,6 +31,8 @@ import type {
     Notice,
     NotificationStore,
     OrganizationStore,
+    ProjectMemberStore,
+    ProjectRole,
     ProjectStore,
     ProviderKeyStore,
     ReleaseStore,
@@ -126,6 +128,13 @@ export class MemoryStore implements Store {
             if (!org || org.personalOf || [...this.orgMap.values()].some((o) => o.personalOf === userId)) return false;
             this.orgMap.set(id, { ...org, personalOf: userId });
             return true;
+        },
+        delete: async (id) => {
+            for (const p of [...this.projectMap.values()]) if (p.tenantId === id) await this.projects.delete(id, p.id);
+            for (const [k, m] of this.membershipMap) if (m.tenantId === id) this.membershipMap.delete(k);
+            for (const [k, i] of this.invitationMap) if (i.tenantId === id) this.invitationMap.delete(k);
+            for (const k of [...this.providerKeyMap.keys()]) if (k.startsWith(`${id}\0`)) this.providerKeyMap.delete(k);
+            this.orgMap.delete(id);
         },
         listAll: async () => {
             const since = Date.now() - 30 * 86_400_000;
@@ -275,6 +284,17 @@ export class MemoryStore implements Store {
                 units: input.units,
                 at: Date.now(),
             });
+        },
+        monthly: async (tenantId, since) => {
+            const sums = new Map<string, { month: string; kind: string; units: number }>();
+            for (const e of this.usageLog) {
+                if (e.tenantId !== tenantId || e.at < since.getTime()) continue;
+                const month = new Date(e.at).toISOString().slice(0, 7);
+                const row = sums.get(key(month, e.kind)) ?? { month, kind: e.kind, units: 0 };
+                row.units += e.units;
+                sums.set(key(month, e.kind), row);
+            }
+            return [...sums.values()].sort((a, b) => b.month.localeCompare(a.month));
         },
         totals: async (tenantId, since) => {
             const sums = new Map<string, UsageTotals>();
@@ -683,6 +703,24 @@ export class MemoryStore implements Store {
             else this.noEmail.add(userId);
         },
         admins: async () => [...this.userMap.values()].filter((u) => u.admin).map((u) => u.id),
+    };
+
+    private readonly projectRoles = new Map<string, { tenantId: string; projectId: string; userId: string; role: ProjectRole }>();
+    projectMembers: ProjectMemberStore = {
+        list: async (tenantId, projectId) =>
+            [...this.projectRoles.values()]
+                .filter((r) => r.tenantId === tenantId && r.projectId === projectId)
+                .map(({ userId, role }) => ({ userId, role })),
+        set: async (tenantId, projectId, userId, role) => {
+            const project = this.projectMap.get(projectId);
+            if (!project || project.tenantId !== tenantId) return;
+            if (role === null) this.projectRoles.delete(key(projectId, userId));
+            else this.projectRoles.set(key(projectId, userId), { tenantId, projectId, userId, role });
+        },
+        forUser: async (tenantId, userId) =>
+            [...this.projectRoles.values()]
+                .filter((r) => r.tenantId === tenantId && r.userId === userId && this.projectMap.has(r.projectId))
+                .map(({ projectId, role }) => ({ projectId, role })),
     };
 
     private readonly mediaMap = new Map<string, MediaAsset>();

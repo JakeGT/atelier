@@ -20,11 +20,12 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE ON
         organizations, memberships, projects, content_documents, content_revisions,
         media_assets, releases, release_documents, deployments, agent_sessions, agent_messages,
-        invitations, provider_keys, project_domains, notifications,
+        invitations, provider_keys, project_domains, notifications, project_members,
         users, sessions
         TO atelier_runtime;
     GRANT SELECT, INSERT ON usage_events TO atelier_runtime;
-    GRANT SELECT, INSERT, UPDATE ON control.tenants TO atelier_runtime;
+    -- DELETE: a studio that is deleted leaves the operator's list too.
+    GRANT SELECT, INSERT, UPDATE, DELETE ON control.tenants TO atelier_runtime;
 
     -- The audit log is append-only for the runtime role.
     GRANT SELECT, INSERT ON audit_log TO atelier_runtime;

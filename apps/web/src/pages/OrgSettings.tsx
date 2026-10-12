@@ -1,7 +1,7 @@
-import { ExternalLink, LogOut, Mail, Trash2, X } from "lucide-react";
+import { Download, ExternalLink, LogOut, Mail, Trash2, X } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AuditEntry, Invitation, Member, Org, Project, ProviderInfo, Role, Session, Usage } from "../lib/api";
+import type { AuditEntry, Invitation, Member, MonthUsage, Org, Project, ProviderInfo, Role, Session, Usage } from "../lib/api";
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo } from "../lib/hooks";
 import { Dialog, Dots, useToast } from "../ui/kit";
@@ -65,9 +65,11 @@ export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onT
                     ))}
                 </div>
                 {current === "general" && <General org={org} session={session} onOrgsChanged={onOrgsChanged} />}
+                {current === "general" && org.role === "owner" && <Everything org={org} session={session} onOrgsChanged={onOrgsChanged} />}
                 {current === "models" && <Models org={org} onOrgsChanged={onOrgsChanged} />}
                 {current === "members" && <Members org={org} session={session} onOrgsChanged={onOrgsChanged} />}
                 {current === "usage" && <UsagePanel org={org} />}
+                {current === "usage" && <MonthByMonth org={org} />}
                 {current === "activity" && <Activity org={org} />}
             </main>
         </div>
@@ -135,6 +137,108 @@ function General({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                 </button>
             </div>
         </form>
+    );
+}
+
+// The whole studio at once: take a copy of everything in it, or delete it. Its owner only.
+function Everything({ org, session, onOrgsChanged }: { org: Org; session: Session; onOrgsChanged: () => Promise<Org[]> }) {
+    const toast = useToast();
+    const reauth = useReauth();
+    const a = useMemo(() => orgApi(org.slug), [org.slug]);
+    const [busy, setBusy] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [typed, setTyped] = useState("");
+    const personal = org.personalOf === session.id;
+
+    async function download() {
+        setBusy(true);
+        try {
+            // A link that works for five minutes; the browser saves the file.
+            window.location.assign(await a.exportStudio());
+            toast("Your download is starting. It may take a while for a studio with many pictures.");
+        } catch (err) {
+            reauth(err);
+        } finally {
+            setBusy(false);
+        }
+    }
+    async function remove() {
+        setBusy(true);
+        try {
+            await a.deleteStudio(typed.trim());
+            await onOrgsChanged();
+            toast(`${org.name} was deleted.`);
+            navigate("/studio");
+        } catch (err) {
+            reauth(err);
+            setBusy(false);
+        }
+    }
+
+    return (
+        <>
+            <div className="panel">
+                <h2 className="panel-title">A copy of everything</h2>
+                <p className="muted">
+                    Download every website in this studio as files: their pages, wording, pictures, conversations with the assistant and
+                    publishing record, in one archive (a .tar file, which any computer can open). Nothing is changed or removed.
+                </p>
+                <div className="panel-foot">
+                    <button type="button" className="btn" onClick={() => void download()} disabled={busy}>
+                        <Download /> Download everything in this studio
+                    </button>
+                </div>
+            </div>
+            <div className="panel panel-danger">
+                <h2 className="panel-title">Delete this studio</h2>
+                {personal ? (
+                    <p className="muted">
+                        This is your personal studio. Everyone keeps theirs, so it cannot be deleted. You can delete the websites in it one
+                        at a time.
+                    </p>
+                ) : (
+                    <>
+                        <p className="muted">
+                            This removes the studio and every website in it for good: their pages and versions, wording, pictures, published
+                            websites (which go offline at once) and the keys connected here. Its members lose access and are told. It cannot
+                            be undone; download a copy first if you might want any of it.
+                        </p>
+                        <div className="panel-foot">
+                            <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}>
+                                <Trash2 /> Delete this studio…
+                            </button>
+                        </div>
+                    </>
+                )}
+            </div>
+            {deleting && (
+                <Dialog onClose={() => setDeleting(false)}>
+                    <p className="eyebrow">This cannot be undone</p>
+                    <h2>Delete {org.name}?</h2>
+                    <p>
+                        Every website in this studio will be deleted, and any that are published will go offline now. Everyone in the studio
+                        loses access.
+                    </p>
+                    <label className="field-line">
+                        <span className="eyebrow">Type the studio's name to confirm: {org.name}</span>
+                        <input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus autoComplete="off" />
+                    </label>
+                    <div className="dialog-actions">
+                        <button type="button" className="btn btn-primary" onClick={() => setDeleting(false)} disabled={busy}>
+                            Keep the studio
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-danger"
+                            onClick={() => void remove()}
+                            disabled={busy || typed.trim() !== org.name}
+                        >
+                            {busy ? <Dots /> : "Delete it for good"}
+                        </button>
+                    </div>
+                </Dialog>
+            )}
+        </>
     );
 }
 
@@ -765,11 +869,55 @@ function UsagePanel({ org }: { org: Org }) {
     );
 }
 
+function MonthByMonth({ org }: { org: Org }) {
+    const a = useMemo(() => orgApi(org.slug), [org.slug]);
+    const [months, setMonths] = useState<MonthUsage[] | null>(null);
+    useEffect(() => {
+        a.monthlyUsage().then(setMonths, () => setMonths([]));
+    }, [a]);
+    const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+    const name = (month: string) =>
+        new Date(`${month}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+    if (!months || months.length === 0) return null;
+    return (
+        <div className="panel">
+            <h2 className="panel-title">Month by month</h2>
+            <p className="muted">The last twelve months. Tokens are what your model provider bills you for.</p>
+            <table className="table">
+                <thead>
+                    <tr>
+                        <th>Month</th>
+                        <th>Requests</th>
+                        <th>Working time</th>
+                        <th>Tokens read</th>
+                        <th>Tokens written</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {months.map((m) => (
+                        <tr key={m.month}>
+                            <td>{name(m.month)}</td>
+                            <td className="mono">{m.requests}</td>
+                            <td className="mono">{m.minutes >= 60 ? `${(m.minutes / 60).toFixed(1)} h` : `${m.minutes} min`}</td>
+                            <td className="mono">{compact.format(m.tokensIn)}</td>
+                            <td className="mono">{compact.format(m.tokensOut)}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 // ---- activity ------------------------------------------------------------------------
 
 const ACTION: Record<string, string> = {
     "org.create": "Created the studio",
     "org.update": "Changed studio settings",
+    "org.export": "Downloaded a copy of everything",
+    "project.member": "Changed someone's role on a website",
+    "media.upload": "Uploaded a file",
+    "media.remove": "Removed a file",
     "member.role": "Changed a member's role",
     "member.remove": "Removed a member",
     "member.leave": "Left the studio",
