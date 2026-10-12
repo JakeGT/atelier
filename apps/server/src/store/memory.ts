@@ -341,6 +341,8 @@ export class MemoryStore implements Store {
                 agentModel: null,
                 askLevel: 1,
                 coverAt: null,
+                conversationAt: null,
+                changesSeen: 0,
                 archivedAt: null,
                 createdAt: now(),
             };
@@ -374,6 +376,8 @@ export class MemoryStore implements Store {
                 name: patch.name ?? p.name,
                 agentInstructions: patch.agentInstructions === undefined ? p.agentInstructions : patch.agentInstructions,
                 askLevel: patch.askLevel ?? p.askLevel,
+                conversationAt: patch.newConversation ? now() : p.conversationAt,
+                changesSeen: patch.changesSeen ?? p.changesSeen,
                 agentModel: patch.agentModel === undefined ? p.agentModel : patch.agentModel,
                 ...(patch.archived === undefined
                     ? {}

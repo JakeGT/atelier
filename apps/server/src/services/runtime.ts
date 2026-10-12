@@ -16,6 +16,13 @@ export interface RunRequest {
     agentToken: string;
     // Pick up the previous request where it left off.
     resume?: boolean;
+    // Which conversation this belongs to. The assistant carries on with what it has in mind when
+    // that is this conversation; when it is not (a new one, or its memory went with a rebuilt
+    // workspace) it starts afresh and is given `earlier`, the conversation written out.
+    conversation?: string;
+    earlier?: string;
+    // Something to be told before the request, once: what has changed in Atelier.
+    news?: string;
     // Whether the model can read pictures: decides whether "look at the page" sends
     // it pictures or a measured description.
     vision?: boolean;

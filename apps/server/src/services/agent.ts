@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseModel } from "./providers.ts";
 
@@ -86,6 +86,11 @@ export interface AgentRunInput {
     agentToken: string;
     // Pick up the previous request where it left off (it was stopped or ran out of time).
     resume?: boolean;
+    // The conversation this request belongs to, the conversation so far written out (used when
+    // the engine does not have it in mind), and something to be told first. See RunRequest.
+    conversation?: string;
+    earlier?: string;
+    news?: string;
     // The model can read pictures.
     vision?: boolean;
     // Called as each step completes, so progress can be shown while it works.
@@ -171,11 +176,20 @@ export class OpenCodeAgent implements AgentRuntime {
             { mode: 0o600 },
         );
 
+        // Which conversation the engine's last session was. It is kept beside the session, so the
+        // two are lost together (a rebuilt workspace) and what the engine has in mind is never
+        // mistaken for a conversation it was not part of.
+        const marker = join(stateDir, "conversation");
+        const inMind = input.conversation
+            ? (await readFile(marker, "utf8").catch(() => null)) === input.conversation
+            : input.resume === true;
+        if (input.conversation) await writeFile(marker, input.conversation, { mode: 0o600 });
         const args = ["run", "--format", "json", "--dir", input.workspaceDir, "--auto"];
         // Continues the last session if there is one; starts afresh if there is not.
-        if (input.resume) args.push("--continue");
+        if (inMind) args.push("--continue");
         if (input.model) args.push("--model", input.model);
-        args.push("--", input.prompt);
+        // An engine starting afresh is given the conversation so far in writing.
+        args.push("--", [inMind ? "" : (input.earlier ?? ""), input.news ?? "", input.prompt].filter(Boolean).join("\n\n"));
 
         const env: NodeJS.ProcessEnv = {
             PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",

@@ -661,10 +661,14 @@ export function orgApi(org: string) {
                 authors: Record<string, string>;
                 question?: AssistantQuestions | null;
                 askLevel?: number;
+                conversationAt?: string | null;
             }>(`${p(projectId)}/messages`).then((b) => ({
                 ...b,
                 activeRun: wholeRun(b.activeRun),
             })),
+        // From here the assistant no longer has in mind what was said before. Messages and website stay.
+        newConversation: (projectId: string) =>
+            post<{ conversationAt: string }>(`${p(projectId)}/conversation`).then((b) => b.conversationAt),
         getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => wholeRun(b.run)),
 
         listCheckpoints: (projectId: string) =>

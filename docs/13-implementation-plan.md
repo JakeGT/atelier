@@ -423,6 +423,10 @@ current host. What needs the VPS is P6, which is last.
 - E5.13 The assistant is limited only where safety requires it: a look of the website's own, any
   font, no steering to ready-made designs; page previews made reliable
   (ADR-0022, asked for and built 2026-10-11 on `own-look`).
+- E5.14 The assistant sees more and remembers (asked for and built 2026-10-12): `page_look`
+  measures near-misses of layout and shows one part close up (`layout-checks`); every request
+  carries its conversation, the person can start a new one, and the assistant is told once what
+  has changed in Atelier (ADR-0023, `assistant-memory`).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown
