@@ -1,7 +1,7 @@
 import { ArrowUp, Clock, Lightbulb, MessageSquareWarning, Play, RotateCcw, Square } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clock, stepDone, stepList, summary } from "../lib/activity";
+import { clock, isSaid, stepDone, stepItems, summary } from "../lib/activity";
 import type { AssistantQuestions, Pulse, Run, ThreadMessage } from "../lib/api";
 import { useClickOutside } from "../lib/hooks";
 import { IDEAS } from "../lib/ideas";
@@ -296,23 +296,27 @@ export function Chat(props: ChatProps) {
     );
 }
 
-// What the assistant did, one line that opens into the steps.
+// What the assistant did, one line that opens into the steps, with what it said along the
+// way among them. Folded away, so the reply above is the only thing to read unless asked.
 function Steps({ tools, label }: { tools: Message["tools"]; label: string }) {
-    const list = stepList(tools ?? []);
-    if (list.length === 0) return null;
+    const items = stepItems(tools ?? []);
+    const done = items.filter((x) => !x.said).length;
+    if (items.length === 0) return null;
     const line = summary(tools ?? []);
     return (
         <details className="msg-steps">
             <summary>
                 <span className="mono">{line || label}</span>
                 <span className="steps-toggle">
-                    {label}: {list.length} {list.length === 1 ? "step" : "steps"}
+                    {label}: {done} {done === 1 ? "step" : "steps"}
                 </span>
             </summary>
             <ol>
-                {list.map((s, i) => (
+                {items.map((s, i) => (
                     // biome-ignore lint/suspicious/noArrayIndexKey: a fixed list of what happened, in order
-                    <li key={i}>{s}</li>
+                    <li key={i} className={s.said ? "step-said" : ""}>
+                        {s.text}
+                    </li>
                 ))}
             </ol>
         </details>
@@ -348,8 +352,11 @@ function Working({
         return () => clearInterval(t);
     }, []);
 
-    const list = stepList(run.steps);
-    const lastStep = run.steps.at(-1);
+    const items = stepItems(run.steps);
+    const list = items.filter((x) => !x.said);
+    // What it last did, and what it last said about what it is doing.
+    const lastStep = run.steps.filter((x) => !isSaid(x)).at(-1);
+    const note = run.steps.filter(isSaid).at(-1)?.said ?? null;
     const quiet = now - new Date(run.lastActivityAt).getTime();
     const left = new Date(run.deadlineAt).getTime() - now;
     const headline = stopping
@@ -370,6 +377,7 @@ function Working({
                 </span>
                 <span className="mono muted">{clock(now - new Date(run.startedAt).getTime())}</span>
             </div>
+            {note && <p className="working-note">{note}</p>}
             {lastStep && (
                 <p className="working-last">Just finished: {stepDone(lastStep).charAt(0).toLowerCase() + stepDone(lastStep).slice(1)}.</p>
             )}
@@ -381,9 +389,11 @@ function Working({
                     </button>
                     {open && (
                         <ol className="working-steps">
-                            {list.map((s, i) => (
+                            {items.map((s, i) => (
                                 // biome-ignore lint/suspicious/noArrayIndexKey: a growing list of what happened, in order
-                                <li key={i}>{s}</li>
+                                <li key={i} className={s.said ? "step-said" : ""}>
+                                    {s.text}
+                                </li>
                             ))}
                         </ol>
                     )}

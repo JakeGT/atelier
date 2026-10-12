@@ -221,6 +221,8 @@ export interface AgentToolEvent {
     state: string;
     // For file tools: which file, relative to the website.
     target?: string | null;
+    // For a step named "say": what the assistant said as it worked. Its reply is not a step.
+    said?: string;
 }
 
 export interface AgentResult {

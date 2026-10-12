@@ -107,17 +107,29 @@ export function stepDone(step: AgentToolEvent): string {
 // Whether a step changed a file (the preview is worth reloading after one).
 export const changedFiles = (step: AgentToolEvent): boolean => ["write", "edit"].includes(kindOf(step.name));
 
-// The steps as a short list, repeats folded: ["Read the home page", "Wrote the styles ×2"].
-export function stepList(steps: AgentToolEvent[]): string[] {
-    const out: { label: string; n: number }[] = [];
+// Something the assistant said while it worked, rather than something it did.
+export const isSaid = (step: AgentToolEvent): boolean => step.name === "say" && Boolean(step.said);
+
+// The steps in order, repeats folded, with what the assistant said along the way kept as its own lines.
+export function stepItems(steps: AgentToolEvent[]): { text: string; said: boolean }[] {
+    const out: { label: string; n: number; said: boolean }[] = [];
     for (const s of steps) {
-        if (s.state !== "completed" && s.state !== "unknown") continue;
+        if (isSaid(s)) {
+            out.push({ label: s.said ?? "", n: 1, said: true });
+            continue;
+        }
+        if (s.name === "say" || (s.state !== "completed" && s.state !== "unknown")) continue;
         const label = stepDone(s);
         const last = out.at(-1);
-        if (last && last.label === label) last.n++;
-        else out.push({ label, n: 1 });
+        if (last && !last.said && last.label === label) last.n++;
+        else out.push({ label, n: 1, said: false });
     }
-    return out.map((x) => (x.n > 1 ? `${x.label} ×${x.n}` : x.label));
+    return out.map((x) => ({ text: x.n > 1 ? `${x.label} ×${x.n}` : x.label, said: x.said }));
+}
+
+// Only what it did: ["Read the home page", "Wrote the styles ×2"].
+export function stepList(steps: AgentToolEvent[]): string[] {
+    return stepItems(steps.filter((s) => s.name !== "say")).map((x) => x.text);
 }
 
 // One line for a finished reply: "Wrote 3 pages and the styles · saved your wording".

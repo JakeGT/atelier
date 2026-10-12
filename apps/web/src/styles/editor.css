@@ -1163,6 +1163,32 @@
     margin-left: 0;
 }
 
+/* What the assistant said as it worked: set apart from what it did, quieter, with no number. */
+.msg-steps li.step-said,
+.working-steps li.step-said {
+    list-style: none;
+    /* Not a step: the numbering carries on past it. */
+    counter-increment: list-item 0;
+    margin: 6px 0 6px -18px;
+    padding-left: 10px;
+    border-left: 2px solid var(--line-strong);
+    color: var(--ink-3);
+    font-style: italic;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* What it is doing now, in its own words. */
+.working-note {
+    /* In line with the heading above it and the line below. */
+    margin: 8px 0 0 34px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .msg-note {
     padding: 12px 14px;
     border: 1px dashed var(--line-strong);
