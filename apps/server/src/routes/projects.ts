@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { findLook, LOOK_PREFIX } from "../design/looks.ts";
+import { isAskLevel } from "../services/asking.ts";
 import { validInstructions } from "../services/instructions.ts";
 import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
@@ -109,7 +110,12 @@ export function projectRoutes(api: Api): void {
               ? findLook(template.slice(LOOK_PREFIX.length)) !== undefined
               : templates.some((t) => t.id === template);
         if (template && !known) return c.json({ error: "that template isn't available" }, 400);
-        const created = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template });
+        const made = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template });
+        // How much the assistant should ask, chosen with the website (it builds the first page straight away).
+        const created =
+            isAskLevel(body?.askLevel) && body.askLevel !== made.askLevel
+                ? await store.projects.update(org.id, made.id, { askLevel: body.askLevel })
+                : made;
         await audit(c, "project.create", `project:${created.id}`, { slug, name, ...(template ? { template } : {}) });
         return c.json({ project: created }, 201);
     });

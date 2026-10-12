@@ -249,6 +249,8 @@ export interface Pulse {
     run: Run | null;
     runBy: { id: string; name: string; you: boolean } | null;
     stamp: number;
+    // How much the assistant asks on this website (someone else may have changed it).
+    askLevel?: number;
 }
 
 export interface ThreadMessage {
@@ -611,8 +613,12 @@ export function orgApi(org: string) {
 
         listProjects: (archived = false) =>
             get<{ projects: Project[] }>(`${o}/projects${archived ? "?archived=1" : ""}`).then((b) => b.projects),
-        createProject: (name: string, template?: string | null) =>
-            post<{ project: Project }>(`${o}/projects`, { name, ...(template ? { template } : {}) }).then((b) => b.project),
+        createProject: (name: string, template?: string | null, askLevel?: number) =>
+            post<{ project: Project }>(`${o}/projects`, {
+                name,
+                ...(template ? { template } : {}),
+                ...(askLevel === undefined ? {} : { askLevel }),
+            }).then((b) => b.project),
         updateProject: (projectId: string, changes: { name?: string; agentInstructions?: string | null; agentModel?: string | null }) =>
             patch<{ project: Project }>(p(projectId), changes).then((b) => b.project),
         archiveProject: (projectId: string) => post<{ project: Project }>(`${p(projectId)}/archive`).then((b) => b.project),

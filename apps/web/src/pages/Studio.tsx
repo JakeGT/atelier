@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AskLevelSlider } from "../editor/Asking";
 import type { Org, Project, Session, Template } from "../lib/api";
 import { api, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo, useClickOutside, useDragScroll } from "../lib/hooks";
@@ -44,6 +45,8 @@ interface StudioProps {
     onToggleTheme: () => void;
 }
 
+const ASK_KEPT = "atelier.askLevel";
+
 export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme }: StudioProps) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
@@ -56,6 +59,15 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     // Starter templates: a finished small website to begin from, instead of an empty page.
     const [templates, setTemplates] = useState<Template[]>([]);
     const [template, setTemplate] = useState<string | null>(null);
+    // How much the assistant asks on the new website. What was chosen last is offered again.
+    const [askLevel, setAskLevelState] = useState(() => {
+        const kept = Number(window.localStorage.getItem(ASK_KEPT));
+        return Number.isInteger(kept) && kept >= 0 && kept <= 3 && window.localStorage.getItem(ASK_KEPT) !== null ? kept : 1;
+    });
+    const setAskLevel = (level: number) => {
+        setAskLevelState(level);
+        window.localStorage.setItem(ASK_KEPT, String(level));
+    };
     const loadTemplates = useCallback(() => a.templates().then(setTemplates, () => api.templates().then(setTemplates, () => {})), [a]);
     useEffect(() => {
         void loadTemplates();
@@ -80,9 +92,9 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     // Everything a website can start from, in the order it is offered: the studio's own
     // templates, then looks (an empty website in a finished design), then finished websites.
     const starts: (Template & { tag: string })[] = [
-        ...templates.filter((t) => t.own).map((t) => ({ ...t, tag: "Your studio's" })),
-        ...looks.map((t) => ({ ...t, name: t.name.replace(/ look$/, ""), tag: "A look" })),
-        ...templates.filter((t) => !t.own).map((t) => ({ ...t, tag: "A finished website" })),
+        ...templates.filter((t) => t.own).map((t) => ({ ...t, tag: "Yours" })),
+        ...looks.map((t) => ({ ...t, name: t.name.replace(/ look$/, ""), tag: "Look" })),
+        ...templates.filter((t) => !t.own).map((t) => ({ ...t, tag: "Website" })),
     ];
     const chosen = starts.find((t) => t.id === template);
     const [choosing, setChoosing] = useState(false);
@@ -146,7 +158,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
         }
         setBusy(true);
         try {
-            const project = await a.createProject(name.trim(), template);
+            const project = await a.createProject(name.trim(), template, askLevel);
             if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
             navigate(`/o/${org.slug}/p/${project.slug}`);
         } catch (err) {
@@ -251,7 +263,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 value={brief}
                                 onChange={(e) => setBrief(e.target.value)}
                                 onKeyDown={onBriefKey}
-                                rows={3}
+                                rows={2}
                                 aria-label="Describe the website"
                             />
                             {/* The designs and templates are shown, not hidden behind a button: a row of
@@ -313,8 +325,10 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                                         <span className="gallery-blank">Empty</span>
                                                     )}
                                                 </span>
-                                                <span className="design-name">{t.name}</span>
-                                                {t.tag && <span className="design-tag mono muted">{t.tag}</span>}
+                                                <span className="design-name">
+                                                    {t.name}
+                                                    {t.tag && <span className="design-tag mono muted">{t.tag}</span>}
+                                                </span>
                                             </label>
                                         );
                                     })}
@@ -323,15 +337,18 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                     <LayoutTemplate /> See all {starts.length} designs and templates, larger
                                 </button>
                             </div>
-                            <p className="brief-start">
-                                {chosen
-                                    ? `${chosen.name}: ${chosen.description} It is there the moment you open the website; then ask your assistant to make it yours.`
-                                    : "Your assistant builds the first page from your description, or you start in the editor with nothing."}
-                            </p>
+                            <div className="brief-asking">
+                                <AskLevelSlider level={askLevel} onChange={setAskLevel} row />
+                            </div>
                             <div className="brief-foot">
                                 <span className="starters">
                                     <span className="starters-label">Starts from</span>
                                     <strong className="starter-chosen">{chosen ? chosen.name : "An empty page"}</strong>
+                                    <span className="starter-about muted">
+                                        {chosen
+                                            ? `${chosen.description} It is there the moment you open the website.`
+                                            : "Your assistant builds the first page from your description."}
+                                    </span>
                                 </span>
                                 <button type="submit" className="btn btn-seal" disabled={busy}>
                                     {busy ? (

@@ -6,6 +6,7 @@ import { can, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate } from "../lib/hooks";
 import { Dialog, Dots, useToast } from "../ui/kit";
 import { ModelPicker } from "../ui/ModelPicker";
+import { AskLevelSlider } from "./Asking";
 
 interface Props {
     project: Project;
@@ -13,11 +14,14 @@ interface Props {
     api: OrgApi;
     onClose: () => void;
     onSaved: (project: Project) => void;
+    // How much the assistant asks on this website; changed at once, not with Save.
+    askLevel?: number;
+    onAskLevel?: (level: number) => void;
 }
 
 // A website's own settings: its name, what the assistant should keep in mind for
 // it, and putting it away. Deleting lives on the studio page, behind archiving.
-export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) {
+export function ProjectSettings({ project, org, api, onClose, onSaved, askLevel, onAskLevel }: Props) {
     const toast = useToast();
     const [name, setName] = useState(project.name);
     const [instructions, setInstructions] = useState(project.agentInstructions ?? "");
@@ -90,6 +94,17 @@ export function ProjectSettings({ project, org, api, onClose, onSaved }: Props) 
                         Your assistant reads these before every request, along with the studio's house rules.
                     </span>
                 </label>
+
+                {onAskLevel && (
+                    <div className="field">
+                        <AskLevelSlider
+                            level={askLevel ?? 1}
+                            onChange={onAskLevel}
+                            disabled={archived || !can.edit(project.myRole ?? org.role)}
+                            full
+                        />
+                    </div>
+                )}
 
                 <div className="field-line">
                     <span className="eyebrow">Assistant model</span>

@@ -1735,33 +1735,300 @@
     font-size: 12.5px;
 }
 
-/* ---- how much it asks ---- */
+/* ---- how much it asks: the slider, always in view ---- */
 
 .asking {
-    width: min(340px, calc(100vw - 48px));
-    padding: 14px 16px;
+    min-width: 0;
+    margin: 4px 2px 6px;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
 }
 
-.asking input[type="range"] {
-    width: 100%;
-    margin: 6px 0 2px;
-    accent-color: var(--seal);
+.asking-full {
+    margin: 0;
 }
 
-.asking-ends {
+.asking-head {
     display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
     justify-content: space-between;
-    gap: 12px;
-    font-size: 12px;
+    gap: 2px 12px;
+    float: left;
+    width: 100%;
+    padding: 0;
+}
+
+.asking-head label {
+    cursor: pointer;
+}
+
+.asking-name {
+    font-size: 13px;
 }
 
 .asking-now {
-    margin: 12px 0 6px;
-    font-size: 13.5px;
+    margin: 8px 0 2px;
+    font-size: 13px;
     line-height: 1.5;
 }
 
-.asking-note {
+.asking:disabled {
+    opacity: 0.55;
+}
+
+/* The buttons under the message box share its whole width. */
+.menu-wrap.ideas {
+    gap: 6px;
+}
+
+.menu-wrap.ideas > .btn,
+.menu-wrap.ideas > label {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: max-content;
+}
+
+/* How much it asks, under the message box: a button like the two above it, which opens the
+   slider in place. The panel grows and shrinks smoothly; nothing changes on hover. */
+.asking-fold {
+    padding: 0 2px 4px;
+}
+
+.asking-fold-button {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+    color: var(--ink-2);
+}
+
+.asking-fold-button strong {
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.asking-fold-chevron {
+    transition: rotate 0.3s var(--ease);
+}
+
+.asking-fold.open .asking-fold-chevron {
+    rotate: 180deg;
+}
+
+.asking-fold-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+        grid-template-rows 0.32s var(--ease),
+        opacity 0.25s var(--ease);
+}
+
+.asking-fold.open .asking-fold-panel {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.asking-fold-panel > div {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.asking-fold-inner {
+    min-width: 0;
+    margin: 6px 0 2px;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .asking-fold-panel,
+    .asking-fold-chevron {
+        transition: none;
+    }
+}
+
+/* ---- the slider, drawn: a line with a stop for each choice and a handle that glides ---- */
+
+.ask-track {
+    --thumb: 20px;
+    position: relative;
+    min-width: 0;
+}
+
+/* The line runs between the centres of the first and last stops. */
+.ask-line {
+    position: relative;
+    height: var(--thumb);
+    margin: 0 calc(var(--thumb) / 2);
+    pointer-events: none;
+}
+
+.ask-line::before,
+.ask-fill {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 4px;
+    border-radius: 2px;
+    translate: 0 -50%;
+}
+
+/* The line itself reaches both edges, so it lines up with the words above and below it;
+   the stops sit half a handle in, so the handle rests flush with each edge. */
+.ask-line::before {
+    left: calc(var(--thumb) / -2);
+    right: calc(var(--thumb) / -2);
+    background: var(--line-strong);
+}
+
+.ask-fill {
+    left: calc(var(--thumb) / -2);
+    width: calc(var(--at) * 100% + var(--thumb) / 2);
+    background: var(--seal);
+    transition: width 0.35s var(--ease);
+}
+
+.ask-stop {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--i) * 100%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    translate: -50% -50%;
+    transition: background 0.3s var(--ease);
+}
+
+/* On the part of the line already passed, a stop is a lighter mark on the colour. */
+.ask-stop.passed {
+    background: color-mix(in srgb, var(--surface-raised) 70%, var(--seal));
+}
+
+.ask-handle {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--at) * 100%);
+    width: var(--thumb);
+    height: var(--thumb);
+    border: 2px solid var(--seal);
+    border-radius: 50%;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    translate: -50% -50%;
+    transition:
+        left 0.35s var(--ease-spring),
+        scale 0.2s var(--ease),
+        box-shadow 0.2s var(--ease);
+}
+
+.ask-handle::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    background: var(--seal);
+}
+
+/* The real control lies over the drawing, invisible: it takes the pointer and the keyboard. */
+.ask-track input[type="range"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: var(--thumb);
     margin: 0;
-    font-size: 12px;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.ask-track:hover .ask-handle {
+    scale: 1.1;
+}
+
+.ask-track:has(input:active) .ask-handle {
+    scale: 0.94;
+    box-shadow: 0 0 0 6px var(--seal-wash);
+}
+
+.ask-track:has(input:focus-visible) .ask-handle {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+}
+
+.ask-names {
+    position: relative;
+    height: 20px;
+    margin: 6px calc(var(--thumb) / 2) 0;
+}
+
+.ask-names button {
+    position: absolute;
+    top: 0;
+    left: calc(var(--i) * 100%);
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--ink-3);
+    font: inherit;
+    font-size: 12.5px;
+    line-height: 16px;
+    white-space: nowrap;
+    cursor: pointer;
+    translate: -50% 0;
+    transition: color 0.25s var(--ease);
+}
+
+.ask-names button.first {
+    translate: calc(var(--thumb) / -2) 0;
+}
+
+.ask-names button.last {
+    translate: calc(-100% + var(--thumb) / 2) 0;
+}
+
+.ask-names button:hover {
+    color: var(--ink);
+}
+
+.ask-names button.on {
+    color: var(--ink);
+    font-weight: 500;
+}
+
+/* Where there is no room to name every stop, the two ends are named. */
+.ask-track-ends .ask-names .middle {
+    display: none;
+}
+
+.ask-track-ends .ask-names button {
+    font-size: 11.5px;
+}
+
+fieldset:disabled .ask-track {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ask-fill,
+    .ask-handle,
+    .ask-stop {
+        transition: none;
+    }
+}
+
+/* In the settings box the line sits under the heading (which is floated to span the box). */
+.asking .ask-track {
+    clear: both;
+    padding-top: 10px;
+}
+
+.asking .ask-track input[type="range"] {
+    top: 10px;
 }

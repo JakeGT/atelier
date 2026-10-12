@@ -2010,3 +2010,148 @@ button.where:hover {
     display: grid;
     gap: 6px;
 }
+
+/* ---- the new-website form, kept short: everything on as few lines as stay readable ---- */
+
+.brief-name {
+    padding-top: 18px;
+    padding-bottom: 2px;
+}
+
+.brief-text {
+    padding-top: 6px;
+    padding-bottom: 8px;
+}
+
+.designs {
+    margin-top: 6px;
+    padding-top: 14px;
+}
+
+.designs-head {
+    margin-bottom: 8px;
+}
+
+.designs-row {
+    padding-bottom: 6px;
+}
+
+.design {
+    width: 156px;
+}
+
+/* A design's name and what kind of thing it is, on one line. */
+.design-name {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+.design-tag {
+    flex: none;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.designs-all {
+    margin: 2px auto 0;
+}
+
+.brief-asking {
+    margin-top: 14px;
+    padding: 16px clamp(16px, 2.2vw, 26px) 14px;
+    border-top: 1px solid var(--line);
+}
+
+/* The slider across the whole width: its name and what the chosen stop means, then the line. */
+.asking-row {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.asking-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    min-width: 0;
+    margin: 0;
+}
+
+.asking-row-head label {
+    flex: none;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.asking-row-dot {
+    margin: 0 0.35em;
+}
+
+/* Said in the manner of the line above the designs: the name, then a quieter remark. */
+.asking-row-now {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink-3);
+    font-size: 14.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.brief-foot {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+.brief-foot .starters {
+    flex: 1;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.starter-chosen {
+    flex: none;
+}
+
+.starter-about {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    /* Narrow: what the stop means may run to two lines, and only the ends are named. */
+    .asking-row-head {
+        display: block;
+    }
+    .asking-row-now {
+        display: block;
+        margin-top: 2px;
+        white-space: normal;
+    }
+    .asking-row-dot {
+        display: none;
+    }
+    .asking-row-now::first-letter {
+        text-transform: uppercase;
+    }
+    .asking-row .ask-names .middle {
+        display: none;
+    }
+    .starter-about {
+        display: none;
+    }
+    /* Narrow, the words in the description box run to three lines: room for all of them. */
+    .brief-text {
+        min-height: calc(3 * 1.5em + 14px);
+    }
+}

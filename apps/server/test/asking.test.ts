@@ -159,3 +159,29 @@ test("saying something else instead of answering carries on too; a setting of 'd
     await say({ prompt: "More" });
     assert.equal((await ask(t, [], 3)).status, 400);
 });
+
+test("a new website can be made with the level chosen for it", async () => {
+    const t = await makeApp();
+    const who = await signIn(t);
+    const made = await json<{ project: Project & { askLevel: number } }>(
+        await send(t, who, "POST", `${who.api}/projects`, { name: "Careful", askLevel: 3 }),
+    );
+    assert.equal(made.project.askLevel, 3);
+    const usual = await json<{ project: Project & { askLevel: number } }>(
+        await send(t, who, "POST", `${who.api}/projects`, { name: "Usual", askLevel: 12 }),
+    );
+    assert.equal(usual.project.askLevel, 1);
+});
+
+test("changing how much it asks does not make editors reload; the heartbeat carries it instead", async () => {
+    const t = await makeApp();
+    const who = await signIn(t);
+    const { project } = await json<{ project: Project }>(await send(t, who, "POST", `${who.api}/projects`, { name: "Okoro" }));
+    const p = `${who.api}/projects/${project.id}`;
+    const beat = async () => json<{ stamp: number; askLevel: number }>(await send(t, who, "POST", `${p}/pulse`, { typing: false }));
+    const before = await beat();
+    assert.equal((await send(t, who, "PUT", `${p}/asking`, { level: 3 })).status, 200);
+    const after = await beat();
+    assert.equal(after.stamp, before.stamp);
+    assert.equal(after.askLevel, 3);
+});
