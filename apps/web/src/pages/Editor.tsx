@@ -531,7 +531,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         onToggleTheme={onToggleTheme}
                         items={[
                             {
-                                label: "Content: wording, pictures and files",
+                                label: "Content: wording, pictures, files and messages",
                                 icon: <LayoutList />,
                                 onClick: () => navigate(`/o/${org.slug}/p/${project.slug}/content`),
                             },

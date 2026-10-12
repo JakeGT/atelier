@@ -24,6 +24,7 @@ const contentDocuments = z
     .array(z.object({ kind: z.string(), slug: z.string(), content: z.record(z.string(), z.unknown()).nullable() }))
     .max(2000);
 const CONTENT_CAP = 8 * 1024 * 1024;
+const formActionMap = z.record(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/), z.string().url().max(600));
 // What the library knows about the images this release places (alt text, sizes).
 const mediaInfo = z
     .array(
@@ -128,8 +129,12 @@ export function deployerApp(opts: DeployerOptions): Hono {
                 const info = mediaInfo.safeParse(JSON.parse(String(form.get("media") ?? "[]")));
                 if (!info.success) return c.json({ error: "invalid request" }, 400);
                 const byName = new Map(info.data.map((m) => [m.name, m]));
+                // Where each of the website's forms sends to: worked out by the control plane, which holds the key.
+                const forms = formActionMap.safeParse(JSON.parse(String(form.get("forms") ?? "{}")));
+                if (!forms.success) return c.json({ error: "invalid request" }, 400);
                 const lookup = lookupFrom(documents.data);
-                fill = (html, path) => fillHtml(html, lookup, { media: (n) => byName.get(n), base: baseOf(path) });
+                fill = (html, path) =>
+                    fillHtml(html, lookup, { media: (n) => byName.get(n), base: baseOf(path), forms: (n) => forms.data[n] });
                 // Files from the media library that this release uses.
                 for (const part of form.getAll("media-file")) {
                     if (part instanceof File) media.push({ name: part.name, body: Buffer.from(await part.arrayBuffer()) });

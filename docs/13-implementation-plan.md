@@ -405,6 +405,11 @@ current host. What needs the VPS is P6, which is last.
   but nobody can edit, used by the assistant before it finishes and shown on the
   Content page; and a browser in the workspace so the assistant can look at a
   page at phone and desktop width.
+- E5.6 The design kit (ADR-0016, `design-kit`): looks and ready-made sections.
+- E5.7 Interactive sections and forms (ADR-0017, asked for and built 2026-10-10
+  on `interactive-forms`): no framework; the kit's own small script; forms on
+  published websites are received by Atelier and read under Content → Messages
+  from visitors.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

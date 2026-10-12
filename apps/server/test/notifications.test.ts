@@ -165,14 +165,14 @@ test("retention: old conversation, old versions of wording and removed files go;
     await send(t, who, "DELETE", `${p}/media/${asset.id}`);
     assert.equal(storage.objects.size, 1);
 
-    const policy = { messageDays: 365, revisionDays: 90, revisionsKept: 3, removedMediaDays: 30, auditDays: 730 };
+    const policy = { messageDays: 365, revisionDays: 90, revisionsKept: 3, removedMediaDays: 30, formDays: 365, auditDays: 730 };
     // Today nothing is old enough.
-    assert.deepEqual(await runRetention(t.store, storage, policy), { messages: 0, revisions: 0, files: 0 });
+    assert.deepEqual(await runRetention(t.store, storage, policy), { messages: 0, revisions: 0, files: 0, forms: 0 });
     assert.equal(storage.objects.size, 1);
 
     // Two years on.
     const later = new Date(Date.now() + 730 * 86_400_000);
-    assert.deepEqual(await runRetention(t.store, storage, policy, later), { messages: 1, revisions: 3, files: 1 });
+    assert.deepEqual(await runRetention(t.store, storage, policy, later), { messages: 1, revisions: 3, files: 1, forms: 0 });
     assert.equal(storage.objects.size, 0);
     const { revisions } = await json<{ revisions: { rev: number }[] }>(await get(t, who, `${p}/content/page/home/revisions`));
     assert.deepEqual(

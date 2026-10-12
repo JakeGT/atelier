@@ -951,3 +951,47 @@ test("a studio's own templates belong to it alone", { skip }, async () => {
     await store.studioTemplates.remove(a.tenantId, made.id);
     assert.equal(await store.studioTemplates.get(a.tenantId, made.id), null);
 });
+
+test("what visitors send through a form belongs to its studio, and goes with its website", { skip }, async () => {
+    const a = await studio("form-a");
+    const b = await studio("form-b");
+    const made = await store.forms.add({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        form: "contact",
+        data: { name: "Grace", message: "Hello" },
+        preview: false,
+    });
+    assert.deepEqual(made.data, { name: "Grace", message: "Hello" });
+    assert.equal(await store.forms.unread(a.tenantId, a.projectId), 1);
+    // Another studio cannot read it, mark it, delete it, or file something under this website.
+    assert.equal((await store.forms.list(b.tenantId, a.projectId)).length, 0);
+    await store.forms.markRead(b.tenantId, a.projectId);
+    await store.forms.remove(b.tenantId, a.projectId, made.id);
+    assert.equal(await store.forms.unread(a.tenantId, a.projectId), 1);
+    await assert.rejects(
+        store.forms.add({
+            id: randomUUID(),
+            tenantId: b.tenantId,
+            projectId: a.projectId,
+            form: "contact",
+            data: { x: "y" },
+            preview: false,
+        }),
+    );
+    await store.forms.markRead(a.tenantId, a.projectId);
+    assert.ok((await store.forms.list(a.tenantId, a.projectId))[0]?.readAt);
+    assert.equal(await store.forms.purgeBefore(a.tenantId, new Date(Date.now() - 86_400_000)), 0);
+    assert.equal(await store.forms.purgeBefore(a.tenantId, new Date(Date.now() + 86_400_000)), 1);
+    await store.forms.add({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        form: "signup",
+        data: { email: "g@example.com" },
+        preview: true,
+    });
+    await store.projects.delete(a.tenantId, a.projectId);
+    assert.equal((await store.forms.list(a.tenantId, a.projectId)).length, 0);
+});

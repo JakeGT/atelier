@@ -14,6 +14,8 @@ export interface RetentionPolicy {
     revisionsKept: number;
     // A file taken out of the media library is deleted for good after this long.
     removedMediaDays: number;
+    // What visitors sent through a website's forms.
+    formDays: number;
     // The activity record.
     auditDays: number;
 }
@@ -23,6 +25,7 @@ export const DEFAULT_RETENTION: RetentionPolicy = {
     revisionDays: 90,
     revisionsKept: 20,
     removedMediaDays: 30,
+    formDays: 365,
     auditDays: 730,
 };
 
@@ -32,6 +35,7 @@ export interface RetentionReport {
     messages: number;
     revisions: number;
     files: number;
+    forms: number;
 }
 
 export async function runRetention(
@@ -40,11 +44,12 @@ export async function runRetention(
     policy: RetentionPolicy = DEFAULT_RETENTION,
     now = new Date(),
 ): Promise<RetentionReport> {
-    const report: RetentionReport = { messages: 0, revisions: 0, files: 0 };
+    const report: RetentionReport = { messages: 0, revisions: 0, files: 0, forms: 0 };
     for (const studio of await store.organizations.listAll()) {
         try {
             report.messages += await store.messages.purgeBefore(studio.id, daysAgo(policy.messageDays, now));
             report.revisions += await store.content.pruneRevisions(studio.id, daysAgo(policy.revisionDays, now), policy.revisionsKept);
+            report.forms += await store.forms.purgeBefore(studio.id, daysAgo(policy.formDays, now));
             if (!storage) continue;
             for (const asset of await store.media.removedBefore(studio.id, daysAgo(policy.removedMediaDays, now))) {
                 // The files first: a record without files is harmless, files without a record are lost track of.

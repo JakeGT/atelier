@@ -11,6 +11,8 @@ export interface Layout {
     description: string;
     // Where on a page it usually goes.
     place: "top" | "body" | "bottom";
+    // It does something when pressed (needs kit.js on the page, which every kit page has).
+    interactive?: boolean;
     html: string;
 }
 
@@ -24,9 +26,10 @@ export const LAYOUTS: Layout[] = [
         name: "Name and menu",
         description: "The website's name and the links to its pages, across the top of every page.",
         place: "top",
-        html: `<header class="k-nav">
+        html: `<header class="k-nav" data-k-menu>
   <div class="k-wrap">
     <a class="k-brand" href="index.html" data-content="page/shared#site_name">Okoro Ceramics</a>
+    <button class="k-menu-button" type="button" data-k-menu-toggle hidden data-content="page/shared#menu_button">Menu</button>
     <nav aria-label="Pages">
       <ul data-content-list="page/shared#menu">
         <li><a data-item="label" data-item-href="link" href="index.html">Home</a></li>
@@ -212,6 +215,164 @@ export const LAYOUTS: Layout[] = [
 </section>`,
     },
     {
+        id: "accordion",
+        name: "Questions that open and close",
+        description: "A list of questions; each opens to show its answer when pressed. Tidier than showing every answer at once.",
+        place: "body",
+        interactive: true,
+        html: `<section class="k-section">
+  <div class="k-wrap">
+    <div class="k-head">
+      <h2 data-content="page/PAGE#questions_heading">Good to know</h2>
+    </div>
+    <div class="k-accordion" data-content-list="page/PAGE#questions">
+      <details>
+        <summary data-item="question">Do I need any experience?</summary>
+        <div class="k-stack" data-item-rich="answer"><p>None at all. Most people who come have never touched clay.</p></div>
+      </details>
+    </div>
+  </div>
+</section>`,
+    },
+    {
+        id: "tabs",
+        name: "Tabs",
+        description:
+            "Several panels in one place, with a row of names to switch between them: a menu by course, opening times by season, plans by audience.",
+        place: "body",
+        interactive: true,
+        html: `<section class="k-section">
+  <div class="k-wrap">
+    <div class="k-head">
+      <h2 data-content="page/PAGE#tabs_heading">What happens in a course</h2>
+    </div>
+    <div data-k-tabs data-content-list="page/PAGE#tabs">
+      <div data-k-tab class="k-stack">
+        <h3 data-k-tab-title data-item="title">Weeks one and two</h3>
+        <div class="k-stack" data-item-rich="text"><p>Centring and pulling up a cylinder. Everyone makes a mug.</p></div>
+      </div>
+    </div>
+  </div>
+</section>`,
+    },
+    {
+        id: "carousel",
+        name: "Pictures to flick through",
+        description:
+            "A row of pictures with captions that slides sideways, with buttons to move along. For more pictures than fit on the screen.",
+        place: "body",
+        interactive: true,
+        html: `<section class="k-section">
+  <div class="k-wrap">
+    <div class="k-head">
+      <h2 data-content="page/PAGE#carousel_heading">From the studio</h2>
+    </div>
+    <div class="k-carousel" data-k-carousel>
+      <ul class="k-track" data-k-track data-content-list="page/PAGE#carousel">
+        <li class="k-stack">
+          <img class="k-picture" data-item-image="picture" src="${PLACEHOLDER}" alt="">
+          <p class="k-muted" data-item="caption">Glazing day</p>
+        </li>
+      </ul>
+      <div class="k-carousel-buttons">
+        <button class="k-btn k-btn-quiet" type="button" data-k-prev hidden data-content="page/PAGE#carousel_back">Back</button>
+        <button class="k-btn k-btn-quiet" type="button" data-k-next hidden data-content="page/PAGE#carousel_next">Next</button>
+      </div>
+    </div>
+  </div>
+</section>`,
+    },
+    {
+        id: "filter",
+        name: "A list that can be narrowed",
+        description:
+            "Cards that each belong to a kind, with buttons above to show one kind at a time: products by type, events by month, work by client.",
+        place: "body",
+        interactive: true,
+        html: `<section class="k-section">
+  <div class="k-wrap" data-k-filter>
+    <div class="k-head">
+      <h2 data-content="page/PAGE#filter_heading">What we make</h2>
+    </div>
+    <div class="k-filterbar" data-k-filter-bar data-k-all="Everything" hidden></div>
+    <ul class="k-grid k-grid-3" data-content-list="page/PAGE#filter_items">
+      <li class="k-card k-stack" data-k-filter-item>
+        <span class="k-kind" data-k-kind data-item="kind">Tableware</span>
+        <h3 data-item="title">Breakfast set</h3>
+        <p class="k-muted" data-item="text">Two bowls, two plates, two mugs.</p>
+      </li>
+    </ul>
+  </div>
+</section>`,
+    },
+    {
+        id: "calculator",
+        name: "Tick and add up",
+        description: "A list of things with prices that a visitor ticks, with a total that adds itself up: build a quote, choose extras.",
+        place: "body",
+        interactive: true,
+        html: `<section class="k-section k-surface">
+  <div class="k-wrap" data-k-sum>
+    <div class="k-head">
+      <h2 data-content="page/PAGE#sum_heading">Build your own day</h2>
+      <p class="k-lead" data-content="page/PAGE#sum_intro">Tick what you would like and see what it comes to.</p>
+    </div>
+    <ul class="k-sum" data-content-list="page/PAGE#sum_items">
+      <li data-k-row>
+        <label>
+          <input type="checkbox">
+          <span class="k-sum-name" data-item="name">Two hours at the wheel</span>
+          <strong data-k-price data-item="price">£35</strong>
+        </label>
+      </li>
+    </ul>
+    <p class="k-total"><span data-content="page/PAGE#sum_total_label">Total</span> <span data-k-total data-content-skip>£0</span></p>
+  </div>
+</section>`,
+    },
+    {
+        id: "contact-form",
+        name: "A form to write to you",
+        description: "Name, e-mail address and a message. What a visitor sends arrives in Messages on the Content page, and by e-mail.",
+        place: "bottom",
+        interactive: true,
+        html: `<section class="k-section" id="contact">
+  <div class="k-wrap k-stack">
+    <h2 data-content="page/PAGE#form_heading">Write to us</h2>
+    <p class="k-lead" data-content="page/PAGE#form_intro">We answer within a day or two.</p>
+    <form class="k-form" data-form="contact" data-k-form>
+      <label class="k-field"><span data-content="page/PAGE#form_name_label">Your name</span><input name="name" autocomplete="name" required></label>
+      <label class="k-field"><span data-content="page/PAGE#form_email_label">Your e-mail address</span><input name="email" type="email" autocomplete="email" required></label>
+      <label class="k-field"><span data-content="page/PAGE#form_message_label">Your message</span><textarea name="message" required></textarea></label>
+      <div><button class="k-btn" type="submit" data-content="page/PAGE#form_button">Send</button></div>
+    </form>
+    <p class="k-notice" data-k-form-done hidden data-content="page/PAGE#form_thanks">Thank you. Your message has been sent.</p>
+    <p class="k-notice" data-k-form-failed hidden data-content="page/PAGE#form_failed">That did not send. Please try again in a moment.</p>
+  </div>
+</section>`,
+    },
+    {
+        id: "signup-form",
+        name: "A form to leave an e-mail address",
+        description: "One box and a button, for a newsletter or a waiting list. Each address arrives in Messages on the Content page.",
+        place: "body",
+        interactive: true,
+        html: `<section class="k-section k-surface k-center">
+  <div class="k-wrap k-stack">
+    <h2 data-content="page/PAGE#signup_heading">Hear when the kiln is opened</h2>
+    <p class="k-lead" data-content="page/PAGE#signup_intro">One e-mail a month. Nothing else.</p>
+    <form class="k-form" data-form="signup" data-k-form style="margin-inline:auto">
+      <div class="k-form-row">
+        <input name="email" type="email" autocomplete="email" required aria-label="Your e-mail address">
+        <button class="k-btn" type="submit" data-content="page/PAGE#signup_button">Sign up</button>
+      </div>
+    </form>
+    <p class="k-notice" data-k-form-done hidden data-content="page/PAGE#signup_thanks">Thank you. You are on the list.</p>
+    <p class="k-notice" data-k-form-failed hidden data-content="page/PAGE#signup_failed">That did not work. Please try again in a moment.</p>
+  </div>
+</section>`,
+    },
+    {
         id: "band",
         name: "One thing to do",
         description: "A band of colour with a short line and one button: book, call, subscribe.",
@@ -272,6 +433,7 @@ export function samplePage(title: string, sections: Layout[]): string {
 <title>${title}</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="kit.css">
+<script src="kit.js" defer></script>
 </head>
 <body>
 ${sections.map((s) => s.html.replaceAll("page/PAGE#", "page/home#")).join("\n")}
@@ -338,6 +500,29 @@ export const SAMPLE_CONTENT: { kind: string; slug: string; content: Record<strin
                 { question: "When do I get my pots?", answer: "About three weeks after your last class, once they are glazed and fired." },
             ],
             hours: ["Tuesday to Friday, 10 to 6", "Saturday, 10 to 4", "Sunday and Monday, closed"],
+            tabs: [
+                { title: "Weeks one and two", text: "<p>Centring and pulling up a cylinder. Everyone makes a mug.</p>" },
+                { title: "Weeks three and four", text: "<p>Bowls, then handles and spouts.</p>" },
+                { title: "Weeks five and six", text: "<p>Trimming and glazing. Your pots are fired for you.</p>" },
+            ],
+            carousel: [
+                { caption: "Glazing day" },
+                { caption: "Out of the kiln" },
+                { caption: "The Saturday class" },
+                { caption: "Shelves of bisque" },
+            ],
+            filter_items: [
+                { kind: "Tableware", title: "Breakfast set", text: "Two bowls, two plates, two mugs." },
+                { kind: "Tableware", title: "Serving dish", text: "Wide and shallow, for the middle of the table." },
+                { kind: "Vases", title: "Bud vase", text: "For a single stem." },
+                { kind: "Vases", title: "Tall jug", text: "Holds a proper armful." },
+                { kind: "One-offs", title: "Moon jar", text: "Thrown in two halves and joined." },
+            ],
+            sum_items: [
+                { name: "Two hours at the wheel", price: "£35" },
+                { name: "Glazing and firing your pots", price: "£15" },
+                { name: "Lunch from the café next door", price: "£12" },
+            ],
         },
     },
 ];

@@ -439,3 +439,299 @@ a {
 .k-lead:empty {
     display: none;
 }
+
+/* ==== interactive sections (kit.js adds the behaviour; all of them read fine without it) ==== */
+
+/* ---- a menu that folds away on a small screen ---- */
+
+.k-menu-button {
+    display: none;
+    padding: 0.5em 0.9em;
+    border: var(--border) solid var(--line);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+@media (max-width: 640px) {
+    .k-menu-ready .k-menu-button {
+        display: inline-flex;
+    }
+    .k-menu-ready nav {
+        display: none;
+        flex-basis: 100%;
+    }
+    .k-menu-ready.k-open nav {
+        display: block;
+    }
+    .k-menu-ready nav ul {
+        flex-direction: column;
+        gap: 0;
+    }
+    .k-menu-ready nav li a {
+        display: block;
+        padding: 0.7em 0;
+        border-top: var(--border) solid var(--line);
+    }
+}
+
+/* ---- questions that open and close (no script: <details>) ---- */
+
+.k-accordion {
+    border-top: var(--border) solid var(--line);
+}
+
+.k-accordion details {
+    border-bottom: var(--border) solid var(--line);
+}
+
+.k-accordion summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 1.1em 0;
+    font-family: var(--font-display);
+    font-weight: var(--display-weight);
+    font-style: var(--display-style);
+    font-size: calc(1rem * var(--scale));
+    line-height: 1.25;
+    cursor: pointer;
+    list-style: none;
+}
+
+.k-accordion summary::-webkit-details-marker {
+    display: none;
+}
+
+.k-accordion summary::after {
+    content: "+";
+    flex: none;
+    font-family: var(--font-body);
+    font-style: normal;
+    font-weight: 400;
+    font-size: 1.4em;
+    line-height: 1;
+    color: var(--accent);
+}
+
+.k-accordion details[open] summary::after {
+    content: "\2212";
+}
+
+.k-accordion details > :not(summary) {
+    padding-bottom: 1.2em;
+    color: var(--muted);
+}
+
+/* ---- tabs ---- */
+
+.k-tabbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: clamp(20px, 3vw, 36px);
+    border-bottom: var(--border) solid var(--line);
+}
+
+.k-tab {
+    margin-bottom: calc(var(--border) * -1);
+    padding: 0.8em 1.2em;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.k-tab[aria-selected="true"] {
+    border-bottom-color: var(--accent);
+    color: var(--text);
+}
+
+/* Without the script every panel shows, one after another, each under its title. */
+[data-k-tabs]:not(.k-tabs-ready) [data-k-tab] + [data-k-tab] {
+    margin-top: 2.5em;
+}
+
+[data-k-tab-title] {
+    margin-bottom: 0.6em;
+}
+
+/* ---- a row to move through ---- */
+
+.k-carousel {
+    position: relative;
+}
+
+.k-track {
+    display: flex;
+    gap: 16px;
+    margin: 0;
+    padding: 0 0 12px;
+    list-style: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: thin;
+}
+
+.k-track > * {
+    flex: 0 0 min(78%, 420px);
+    scroll-snap-align: start;
+}
+
+.k-carousel-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* ---- a list that can be narrowed ---- */
+
+.k-filterbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: clamp(20px, 3vw, 32px);
+}
+
+.k-chip {
+    padding: 0.45em 1em;
+    border: var(--border) solid var(--line);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.k-chip[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+}
+
+.k-kind {
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+/* ---- adding up ---- */
+
+.k-sum {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: var(--border) solid var(--line);
+}
+
+.k-sum li {
+    border-bottom: var(--border) solid var(--line);
+}
+
+.k-sum label {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 1em 0;
+    cursor: pointer;
+}
+
+.k-sum input[type="checkbox"] {
+    width: 1.2em;
+    height: 1.2em;
+    accent-color: var(--accent);
+}
+
+.k-sum .k-sum-name {
+    flex: 1;
+}
+
+.k-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 1.2em;
+    font-family: var(--font-display);
+    font-weight: var(--display-weight);
+    font-size: calc(1rem * var(--scale) * var(--scale));
+}
+
+/* ---- forms ---- */
+
+.k-form {
+    display: grid;
+    gap: 18px;
+    max-width: 560px;
+}
+
+.k-field {
+    display: grid;
+    gap: 6px;
+}
+
+.k-field > span {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.k-form input:not([type="checkbox"]):not([type="radio"]),
+.k-form textarea,
+.k-form select {
+    width: 100%;
+    padding: 0.75em 0.9em;
+    border: var(--border) solid var(--line);
+    border-radius: min(var(--radius), 14px);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+}
+
+.k-form textarea {
+    min-height: 8em;
+    resize: vertical;
+}
+
+.k-form input:focus,
+.k-form textarea:focus,
+.k-form select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.k-form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.k-form-row input {
+    flex: 1 1 220px;
+}
+
+.k-notice {
+    padding: 1.1em 1.3em;
+    border: var(--border) solid var(--accent);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.k-total {
+    max-width: none;
+}

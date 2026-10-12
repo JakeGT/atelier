@@ -5,9 +5,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { findLayout, LAYOUTS } from "../design/layouts.ts";
-import { findLook, KIT_FILE, LOOKS, lookOf, THEME_FILE, themeCss } from "../design/looks.ts";
+import { findLook, KIT_FILE, KIT_SCRIPT, LOOKS, lookOf, THEME_FILE, themeCss } from "../design/looks.ts";
 import { coverageReport } from "../services/coverage.ts";
-import { KIT_CSS } from "../services/designKit.ts";
+import { KIT_CSS, KIT_JS } from "../services/designKit.ts";
 import { Browser, browserPath } from "./look.ts";
 import { inside, readPages, serveSite } from "./site.ts";
 
@@ -232,7 +232,13 @@ server.tool(
                 ? "Use only these variables for colour, type, corners and shadows (var(--accent) and so on). Never write a colour or a font name into a page or another stylesheet: the person can change the look at any time, and everything must follow."
                 : "This website does not have the kit yet. To give it one, call design_use_look with a look's id, link theme.css and kit.css from every page (theme.css first), and replace the pages' own colours and fonts with the variables.",
             looks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
-            sections: LAYOUTS.map((l) => ({ id: l.id, name: l.name, description: l.description, usuallyGoes: l.place })),
+            sections: LAYOUTS.map((l) => ({
+                id: l.id,
+                name: l.name,
+                description: l.description,
+                usuallyGoes: l.place,
+                ...(l.interactive ? { interactive: true } : {}),
+            })),
         });
     },
 );
@@ -244,12 +250,26 @@ server.tool(
     async ({ id }) => {
         const layout = findLayout(id);
         if (!layout) return json({ error: `There is no section called ${id}. Call design_kit to see the sections.` });
+        // A website given its kit a while ago has an older kit: bring its two files up to date,
+        // so the section it is about to get is styled and works. (Sections only ever gain styles.)
+        if (await currentLook()) {
+            await writeFile(join(workspace, KIT_FILE), KIT_CSS);
+            await writeFile(join(workspace, KIT_SCRIPT), KIT_JS);
+        }
         return json({
             id: layout.id,
             name: layout.name,
             description: layout.description,
             html: layout.html,
-            needs: "theme.css and kit.css linked from the page, theme.css first",
+            needs: layout.interactive
+                ? "theme.css and kit.css linked from the page (theme.css first), and kit.js loaded in the head with defer: that script makes this section work"
+                : "theme.css and kit.css linked from the page, theme.css first",
+            ...(layout.html.includes("data-form=")
+                ? {
+                      aboutTheForm:
+                          'Keep data-form (the form\'s name, shown to the person with each message) and do not write an action: where it sends is filled in for you. Every box needs a name attribute in plain lowercase words (name, email, phone, message): that name is the label the person sees beside what was typed. What visitors send arrives under "Messages from visitors" on the Content page and by e-mail; tell the person that, and that they can try the form in the preview.',
+                  }
+                : {}),
         });
     },
 );
@@ -263,7 +283,13 @@ server.tool(
         if (!look) return json({ error: `There is no look called ${id}. Call design_kit to see the looks.` });
         await writeFile(join(workspace, THEME_FILE), themeCss(look));
         await writeFile(join(workspace, KIT_FILE), KIT_CSS);
-        return json({ written: [THEME_FILE, KIT_FILE], look: look.name, howToDesignInIt: look.guidance, variables: look.tokens });
+        await writeFile(join(workspace, KIT_SCRIPT), KIT_JS);
+        return json({
+            written: [THEME_FILE, KIT_FILE, KIT_SCRIPT],
+            look: look.name,
+            howToDesignInIt: look.guidance,
+            variables: look.tokens,
+        });
     },
 );
 

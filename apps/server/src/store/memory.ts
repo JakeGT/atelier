@@ -22,6 +22,8 @@ import type {
     ContentStore,
     DeploymentStore,
     DomainStore,
+    FormStore,
+    FormSubmission,
     InvitationStore,
     LoginSession,
     LoginSessionStore,
@@ -723,6 +725,39 @@ export class MemoryStore implements Store {
             [...this.projectRoles.values()]
                 .filter((r) => r.tenantId === tenantId && r.userId === userId && this.projectMap.has(r.projectId))
                 .map(({ projectId, role }) => ({ projectId, role })),
+    };
+
+    private readonly formLog: (FormSubmission & { tenantId: string })[] = [];
+    forms: FormStore = {
+        add: async (input) => {
+            const project = this.projectMap.get(input.projectId);
+            if (!project || project.tenantId !== input.tenantId) throw new Error("project not found");
+            const made = { ...input, createdAt: now(), readAt: null };
+            this.formLog.unshift(made);
+            const { tenantId: _t, ...out } = made;
+            return out;
+        },
+        list: async (tenantId, projectId, limit = 500) =>
+            this.formLog
+                .filter((f) => f.tenantId === tenantId && f.projectId === projectId && this.projectMap.has(f.projectId))
+                .slice(0, limit)
+                .map(({ tenantId: _t, ...f }) => f),
+        unread: async (tenantId, projectId) =>
+            this.formLog.filter(
+                (f) => f.tenantId === tenantId && f.projectId === projectId && f.readAt === null && this.projectMap.has(f.projectId),
+            ).length,
+        markRead: async (tenantId, projectId) => {
+            for (const f of this.formLog) if (f.tenantId === tenantId && f.projectId === projectId && f.readAt === null) f.readAt = now();
+        },
+        remove: async (tenantId, projectId, id) => {
+            const i = this.formLog.findIndex((f) => f.id === id && f.tenantId === tenantId && f.projectId === projectId);
+            if (i >= 0) this.formLog.splice(i, 1);
+        },
+        purgeBefore: async (tenantId, before) => {
+            const old = this.formLog.filter((f) => f.tenantId === tenantId && new Date(f.createdAt).getTime() < before.getTime());
+            for (const f of old) this.formLog.splice(this.formLog.indexOf(f), 1);
+            return old.length;
+        },
     };
 
     private readonly templateMap = new Map<string, StudioTemplate>();

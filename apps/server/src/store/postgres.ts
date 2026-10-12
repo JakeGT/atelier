@@ -24,6 +24,8 @@ import type {
     ContentStore,
     DeploymentStore,
     DomainStore,
+    FormStore,
+    FormSubmission,
     InvitationStore,
     LoginSessionStore,
     MediaStore,
@@ -361,6 +363,7 @@ export class PostgresStore implements Store {
     media: MediaStore;
     projectMembers: ProjectMemberStore;
     studioTemplates: StudioTemplateStore;
+    forms: FormStore;
     notifications: NotificationStore;
     audit: AuditStore;
     loginSessions: LoginSessionStore;
@@ -1082,6 +1085,60 @@ export class PostgresStore implements Store {
                         SELECT project_id, role FROM project_members WHERE user_id = ${userId}`;
                     return rows.map((r) => ({ projectId: r.project_id, role: r.role }));
                 }),
+        };
+
+        interface FormRow {
+            id: string;
+            project_id: string;
+            form: string;
+            data: Record<string, string>;
+            preview: boolean;
+            created_at: Ts;
+            read_at: Ts | null;
+        }
+        const rowToForm = (r: FormRow): FormSubmission => ({
+            id: r.id,
+            projectId: r.project_id,
+            form: r.form,
+            data: r.data ?? {},
+            preview: r.preview,
+            createdAt: isoNow(r.created_at),
+            readAt: r.read_at ? isoNow(r.read_at) : null,
+        });
+        const FORM_COLS = "id, project_id, form, data, preview, created_at, read_at";
+        this.forms = {
+            add: async (f) =>
+                this.withTenant(f.tenantId, async (tx) => {
+                    const rows = await tx<FormRow[]>`
+                        INSERT INTO form_submissions (id, project_id, tenant_id, form, data, preview)
+                        VALUES (${f.id}, ${f.projectId}, ${f.tenantId}, ${f.form}, ${json(f.data)}, ${f.preview})
+                        RETURNING ${tx.unsafe(FORM_COLS)}`;
+                    return rowToForm(firstRow(rows));
+                }),
+            list: async (tenantId, projectId, limit = 500) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<FormRow[]>`
+                        SELECT ${tx.unsafe(FORM_COLS)} FROM form_submissions WHERE project_id = ${projectId} ORDER BY created_at DESC LIMIT ${limit}`;
+                    return rows.map(rowToForm);
+                }),
+            unread: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<
+                        { n: string }[]
+                    >`SELECT count(*) AS n FROM form_submissions WHERE project_id = ${projectId} AND read_at IS NULL`;
+                    return Number(rows[0]?.n ?? 0);
+                }),
+            markRead: async (tenantId, projectId) => {
+                await this.withTenant(
+                    tenantId,
+                    (tx) => tx`UPDATE form_submissions SET read_at = now() WHERE project_id = ${projectId} AND read_at IS NULL`,
+                );
+            },
+            remove: async (tenantId, projectId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM form_submissions WHERE id = ${id} AND project_id = ${projectId}`);
+            },
+            purgeBefore: async (tenantId, before) =>
+                this.withTenant(tenantId, async (tx) => (await tx`DELETE FROM form_submissions WHERE created_at < ${before}`).count),
         };
 
         interface TemplateRow {
