@@ -184,6 +184,51 @@ test("the assistant can describe fields with its own token, and nothing else new
     assert.equal(documents[0]?.fields?.[0]?.label, "Headline");
 });
 
+test("what the assistant saves is added to what is saved, unless it says otherwise", async () => {
+    const { t } = await setup();
+    const token = t.agent.calls.at(-1)?.agentToken ?? assert.fail("no token");
+    const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const at = "/api/agent/content/page/about";
+    const put = async (path: string, body: unknown) => {
+        const res = await t.app.request(path, { method: "PUT", headers: auth, body: JSON.stringify(body) });
+        return { status: res.status, ...(await json<{ document?: ContentDocument; error?: string }>(res)) };
+    };
+    const keys = (d?: ContentDocument) => [Object.keys(d?.draft ?? {}).sort(), (d?.fields ?? []).map((f) => `${f.key}:${f.label}`)];
+    const text = (key: string, label = key) => ({ key, label, type: "text" });
+
+    await put(at, { headline: "About us", intro: "Since 1990", hours: "9 to 5" });
+    await put(`${at}/fields`, { fields: [text("headline"), text("intro"), text("hours")] });
+    // A few values and one field sent later: the rest is still there.
+    await put(at, { intro: "Since 1989", phone: "01234" });
+    const added = await put(`${at}/fields`, { fields: [text("intro", "Introduction"), text("phone")] });
+    assert.deepEqual(keys(added.document), [
+        ["headline", "hours", "intro", "phone"],
+        ["headline:headline", "hours:hours", "intro:Introduction", "phone:phone"],
+    ]);
+    assert.equal(added.document?.draft?.intro, "Since 1989");
+    // Taking a value away takes its field with it.
+    assert.deepEqual(keys((await put(`${at}?remove=hours`, {})).document), [
+        ["headline", "intro", "phone"],
+        ["headline:headline", "intro:Introduction", "phone:phone"],
+    ]);
+    // Asked to replace: what is sent is all there is.
+    await put(`${at}?replace=1`, { headline: "Hello" });
+    assert.deepEqual(keys((await put(`${at}/fields?replace=1`, { fields: [text("headline")] })).document), [
+        ["headline"],
+        ["headline:headline"],
+    ]);
+
+    // A page may have many more fields than it once could, and what is wrong with one is said.
+    const many = Array.from({ length: 150 }, (_, i) => text(`f${i}`));
+    assert.equal((await put(`${at}/fields`, { fields: many })).document?.fields?.length, 151);
+    const long = await put(`${at}/fields`, { fields: [{ key: "note", label: "Note", type: "text", help: "x".repeat(300) }] });
+    assert.equal(long.status, 400);
+    assert.match(long.error ?? "", /field "note", help: .*200/);
+    const tooMany = await put(`${at}/fields?replace=1`, { fields: Array.from({ length: 501 }, (_, i) => text(`g${i}`)) });
+    assert.match(tooMany.error ?? "", /up to 500 fields and this has 501/);
+    assert.match((await put(`${at}/fields`, { fields: "headline" })).error ?? "", /must be a list/);
+});
+
 test("the deployer fills pages from the content it is given, and leaves unbound pages byte-for-byte alone", () => {
     const dir = mkdtempSync(join(tmpdir(), "atelier-fill-"));
     const plain = "<h1>Plain</h1>\n<p>no closing tags";

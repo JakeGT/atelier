@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type ContentField, contentFieldSchema } from "@atelier/shared";
+import { type ContentField, contentFieldSchema, FIELD_TYPES } from "@atelier/shared";
 import type { Context } from "hono";
 import { z } from "zod";
 import { readTar } from "../runtime/tar.ts";
@@ -49,14 +49,32 @@ export function contentRoutes(api: Api): void {
         );
     };
 
-    const fieldList = z.array(contentFieldSchema).max(60);
+    // How many fields one document may describe: far more than a page needs, and a bound on what is stored.
+    const MOST_FIELDS = 500;
+    const fieldList = z.array(contentFieldSchema).max(MOST_FIELDS);
+    // What is wrong with a list of fields, said so that whoever sent it can put it right.
+    const fieldProblems = (sent: unknown, issues: z.core.$ZodIssue[]): string => {
+        if (!Array.isArray(sent)) return "fields must be a list, each one { key, label, type, help?, required?, max?, itemFields? }";
+        if (sent.length > MOST_FIELDS)
+            return `a document can describe up to ${MOST_FIELDS} fields and this has ${sent.length}: put a repeated group into one field of type items`;
+        const said = issues.slice(0, 8).map((issue) => {
+            const [index, ...rest] = issue.path;
+            const field = typeof index === "number" && isObject(sent[index]) ? sent[index] : null;
+            const which = field && typeof field.key === "string" ? `field "${field.key}"` : `field ${Number(index) + 1}`;
+            return `${which}${rest.length ? `, ${rest.join(".")}` : ""}: ${issue.message}`;
+        });
+        const more = issues.length > said.length ? ` (and ${issues.length - said.length} more)` : "";
+        return `${said.join("; ")}${more}. A field is { key: letters, digits, - and _, starting with a letter; label: up to 80 characters; type: ${FIELD_TYPES.join(" | ")}; help?: up to 200 characters; required?; max?; itemFields?: for type items, 1 to 40 parts }`;
+    };
     // Describes how a document's fields are shown: labels, types, help. Its content is untouched.
-    const setFields = async (tenantId: string, projectId: string, kind: string, slug: string, body: unknown) => {
-        const parsed = fieldList.safeParse(isObject(body) ? body.fields : body);
-        if (!parsed.success)
-            return {
-                error: "fields must be a list of { key, label, type: text | long | rich | list | image | items, help?, required?, max?, itemFields? }",
-            } as const;
+    // `merge`: the fields sent are added to those already described (one of the same key takes its place).
+    const setFields = async (tenantId: string, projectId: string, kind: string, slug: string, body: unknown, merge = false) => {
+        const sent = isObject(body) ? body.fields : body;
+        const kept = merge && Array.isArray(sent) ? ((await store.content.get(tenantId, projectId, kind, slug))?.fields ?? []) : [];
+        const sentKeys = new Set(Array.isArray(sent) ? sent.map((f) => (isObject(f) ? f.key : null)) : []);
+        const all = Array.isArray(sent) ? [...kept.filter((f) => !sentKeys.has(f.key)), ...sent] : sent;
+        const parsed = fieldList.safeParse(all);
+        if (!parsed.success) return { error: fieldProblems(all, parsed.error.issues) } as const;
         const keys = new Set<string>();
         const fields: ContentField[] = parsed.data.filter((f) => !keys.has(f.key) && keys.add(f.key));
         const document = await store.content.setFields(tenantId, projectId, kind, slug, fields);
@@ -260,21 +278,37 @@ export function contentRoutes(api: Api): void {
             param(c, "kind"),
             param(c, "slug"),
             await c.req.json().catch(() => null),
+            c.req.query("replace") !== "1",
         );
         return "error" in out ? c.json({ error: out.error }, "missing" in out ? 404 : 400) : c.json(out);
     });
+    // What the assistant sends is added to what is saved, so sending a few values never loses the rest.
+    // `?replace=1` makes what is sent the whole of it; `?remove=a,b` takes those values (and their fields) away.
     agentRoute("put", "/api/agent/content/:kind/:slug", async (c, claims) => {
         const kind = param(c, "kind");
         const slug = param(c, "slug");
         if (!KEY_RE.test(kind) || !KEY_RE.test(slug)) return c.json({ error: "invalid kind or slug" }, 400);
         const body = await c.req.json().catch(() => null);
         if (!isObject(body)) return c.json({ error: "draft must be a JSON object" }, 400);
+        const remove = new Set((c.req.query("remove") ?? "").split(",").filter(Boolean));
+        const saved = await store.content.get(claims.tenantId, claims.projectId, kind, slug);
+        const draft = c.req.query("replace") === "1" ? body : { ...(saved?.draft ?? {}), ...body };
+        for (const key of remove) delete draft[key];
+        if (remove.size && saved?.fields?.some((f) => remove.has(f.key))) {
+            await store.content.setFields(
+                claims.tenantId,
+                claims.projectId,
+                kind,
+                slug,
+                saved.fields.filter((f) => !remove.has(f.key)),
+            );
+        }
         const doc = await store.content.upsertDraft({
             tenantId: claims.tenantId,
             projectId: claims.projectId,
             kind,
             slug,
-            draft: await prepared(claims.tenantId, claims.projectId, kind, slug, body),
+            draft: await prepared(claims.tenantId, claims.projectId, kind, slug, draft),
             updatedBy: null,
         });
         return c.json({ document: doc });

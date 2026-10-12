@@ -82,13 +82,26 @@ const field = z.object({
 
 server.tool(
     "content_upsert_draft",
-    "Create or update the wording of a page. `kind` is 'page' and `slug` names the page ('home', 'about'), both lowercase letters, digits and hyphens. `draft` holds every field's value. Always pass `fields` too, describing each field in plain words, so the person sees proper labelled fields. The page shows a field wherever an element has data-content=\"<kind>/<slug>#<key>\".",
-    { kind: z.string(), slug: z.string(), draft: z.record(z.string(), z.unknown()), fields: z.array(field).optional() },
-    async ({ kind, slug, draft, fields }) => {
+    "Create or update the wording of a page. `kind` is 'page' and `slug` names the page ('home', 'about'), both lowercase letters, digits and hyphens. `draft` holds the values you are saving and `fields` describes them in plain words, so the person sees proper labelled fields. Both are added to what is already saved: a value or field you do not send stays as it is, and one you send takes the place of the one with the same key, so you may save a page a few fields at a time. To take values away, name their keys in `remove`. To make what you send the whole of the page's wording, discarding everything else saved for it, pass `replace: true`. The answer says which keys are saved now. The page shows a field wherever an element has data-content=\"<kind>/<slug>#<key>\".",
+    {
+        kind: z.string(),
+        slug: z.string(),
+        draft: z.record(z.string(), z.unknown()),
+        fields: z.array(field).optional(),
+        remove: z.array(z.string()).optional().describe("Keys whose values and fields are taken away"),
+        replace: z.boolean().optional().describe("true: what you send becomes everything saved for this page"),
+    },
+    async ({ kind, slug, draft, fields, remove, replace }) => {
         const path = `/api/agent/content/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`;
-        let result = (await api(path, { method: "PUT", body: JSON.stringify(draft) })) as { document: unknown };
-        if (fields?.length)
-            result = (await api(`${path}/fields`, { method: "PUT", body: JSON.stringify({ fields }) })) as { document: unknown };
+        const query = new URLSearchParams();
+        if (replace) query.set("replace", "1");
+        if (remove?.length) query.set("remove", remove.join(","));
+        const how = query.size ? `?${query}` : "";
+        let result = (await api(`${path}${how}`, { method: "PUT", body: JSON.stringify(draft) })) as { document: unknown };
+        if (fields?.length || (replace && fields))
+            result = (await api(`${path}/fields${replace ? "?replace=1" : ""}`, { method: "PUT", body: JSON.stringify({ fields }) })) as {
+                document: unknown;
+            };
         return json(result.document);
     },
 );
@@ -419,7 +432,7 @@ const writeOwn = async (look: NonNullable<Awaited<ReturnType<typeof savedOwnLook
 
 server.tool(
     "design_make_look",
-    `Make a look for this website alone, or change the one it has: its colours, lettering, corners, spacing and movement, as CSS variables in theme.css. This is how a website gets a design language that can be restyled in one step: use it for a new website, and whenever the person asks to change something about the look (a colour, a font, the corners, the whole feeling). Any CSS value is accepted, and you may add variables of your own. Give every value that matters to the design; anything you leave out is filled in from the look named in startFrom (use "own" to adjust the look this website already has). You are told if text may be hard to read; that is advice. Afterwards look at the pages with page_look, and tell the person in a sentence what the look is. Typefaces the website can carry as its own files (give the id): ${FONTS.map((f) => `${f.id} (${f.description})`).join("; ")}. Any other typeface may be given as a CSS font-family value. The variables the kit's styles read: ${Object.entries(
+    `Make a look for this website alone, or change the one it has: its colours, lettering, corners, spacing and movement, as CSS variables in theme.css. This is how a website gets a design language that can be restyled in one step: use it for a new website, and whenever the person asks to change something about the look (a colour, a font, the corners, the whole feeling). Any CSS value is accepted, and you may add variables of your own. Give every value that matters to the design; anything you leave out keeps a plain default, or the value of the look named in startFrom (use "own" to adjust the look this website already has; on a website with no look of its own yet, "own" simply makes one). You are told if text may be hard to read; that is advice. Afterwards look at the pages with page_look, and tell the person in a sentence what the look is. Typefaces the website can carry as its own files (give the id): ${FONTS.map((f) => `${f.id} (${f.description})`).join("; ")}. Any other typeface may be given as a CSS font-family value. The variables the kit's styles read: ${Object.entries(
         OWN_VALUES,
     )
         .map(([k, v]) => `${k} (${v})`)
@@ -449,12 +462,12 @@ server.tool(
     async ({ name, description, howToDesignInIt, startFrom, displayFont, bodyFont, values }) => {
         // Adjusting the look it already made: start from that, fonts included.
         const before = startFrom === OWN ? await savedOwnLook() : null;
-        if (startFrom === OWN && !before) return json({ error: "This website has no look of its own yet. Start from a ready-made look." });
         const made = makeOwnLook({
             name,
             description,
             howToDesignInIt,
-            startFrom: before ? "studio" : startFrom,
+            // "own" on a website with no look of its own yet simply makes one.
+            startFrom: startFrom === OWN ? "studio" : startFrom,
             displayFont,
             bodyFont,
             values: before ? { ...ownValues(before.tokens), ...values } : values,

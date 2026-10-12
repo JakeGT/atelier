@@ -123,7 +123,7 @@ export const contentFieldSchema = z.object({
     // entries each have several parts, described by `itemFields`. link: where something
     // leads. number. date: "2026-10-10". yesno: true or false, to show or hide a part of a page.
     type: z.enum(FIELD_TYPES),
-    itemFields: z.array(itemFieldSchema).min(1).max(12).optional(),
+    itemFields: z.array(itemFieldSchema).min(1).max(40).optional(),
 });
 export type ItemField = z.infer<typeof itemFieldSchema>;
 export type ContentField = z.infer<typeof contentFieldSchema>;
