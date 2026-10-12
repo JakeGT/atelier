@@ -43,6 +43,7 @@ nav a{margin-left:16px}
 </style></head><body>
 <header><div class="logo">Okoro</div><nav><a href="#">One</a><a href="#">Two</a></nav></header>
 <section class="hero"><h1>Headline here</h1><p class="lede">First paragraph.</p><p>Second paragraph, nudged.</p><p class="lede">Third.</p></section>
+<div class="mast" style="text-align:center;padding:0 40px"><h2 style="margin:0">Bloom</h2><p style="max-width:400px;margin:0">Stories of women</p></div>
 <div class="box">A box meant to be centred</div>
 <div class="cards"><div class="card">Short</div><div class="card">Rather longer<br>two lines<br>three</div><div class="card">Short</div></div>
 <div class="list"><div class="item"></div><div class="item"></div><div class="item"></div><div class="item"></div></div>
@@ -131,6 +132,7 @@ test("near-misses of layout are measured and offered as worth a look; one part c
             /In header: side by side but not quite level: div\.logo 'Okoro' sits 5px lower than nav/,
             /In section\.hero: p 'Second paragraph, nudged\.' starts 4px to the right of the things above and below it/,
             /In body: div.box 'A box meant to be centred' is almost centred but not quite: 316px of space on its left and 324px on its right/,
+            /In div\.mast: p 'Stories of women' is 400px to the left of the middle, though the words here are centred: its box is 400px wide and sits to one side \(0px of space on its left, 800px on its right; it has a max-width, and margin-inline: auto would put it in the middle\)/,
             /In div\.cards: 3 div\.card side by side are of different heights \(52px, 88px, 52px\)/,
             /In div\.cards: the gaps between 3 div\.card side by side are uneven \(24px, 31px\)/,
             /In div\.list: the gaps between 4 div\.item one under another are uneven \(16px, 22px, 16px\)/,

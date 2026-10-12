@@ -16,6 +16,7 @@ export const LAYOUT_NOTICES = `(() => {
     const box = (el) => { const r = el.getBoundingClientRect(); return { el, l: r.left, r: r.right, t: r.top + scrollY, b: r.bottom + scrollY, w: r.width, h: r.height }; };
     const painted = (el) => { const s = getComputedStyle(el); return (s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent") || s.backgroundImage !== "none" || parseFloat(s.borderTopWidth) + parseFloat(s.borderBottomWidth) > 0 || s.boxShadow !== "none"; };
     const kind = (el) => el.tagName + "." + (typeof el.className === "string" ? el.className.trim() : "");
+    const drawsBeside = (el) => ["::before", "::after", "::marker"].some((p) => { const c = getComputedStyle(el, p); return c.content !== "none" && c.content !== "normal" && c.display !== "none"; }) || getComputedStyle(el).display === "list-item";
     const spread = (ns) => Math.max(...ns) - Math.min(...ns);
     // A near-miss: more than a browser's rounding, less than anyone would choose.
     const near = (n, most) => n >= 1.5 && n <= most;
@@ -56,9 +57,19 @@ export const LAYOUT_NOTICES = `(() => {
             }
             // The line as a whole within its container: centred, or nearly.
             const left = line[0].l - inner.l, right = inner.r - line.at(-1).r;
-            if (left > 8 && right > 8 && near(Math.abs(left - right), 16))
+            // (Not where the container draws something of its own beside it, a number or a mark: that takes up room no child accounts for.)
+            if (left > 8 && right > 8 && near(Math.abs(left - right), 16) && !drawsBeside(parent))
                 add(top, bottom, where + (line.length > 1 ? "the row starting " : "") + say(line[0].el) + " is almost centred but not quite: " + px(left) + " of space on its left and " + px(right) + " on its right");
         }
+
+        // Words centred, in a container whose words are centred, but in a box that is itself to one side:
+        // a width or a margin on it has moved them off the middle that everything around them keeps.
+        if (ps.textAlign === "center" && !laidOut)
+            for (const k of kids) {
+                if (getComputedStyle(k.el).textAlign !== "center" || !k.el.textContent.trim() || k.el.children.length > 3) continue;
+                const off = (k.l + k.r) / 2 - (inner.l + inner.r) / 2;
+                if (Math.abs(off) >= 2) add(k.t, k.b, where + say(k.el) + " is " + px(Math.abs(off)) + " to the " + (off > 0 ? "right" : "left") + " of the middle, though the words here are centred: its box is " + px(k.w) + " wide and sits to one side (" + px(k.l - inner.l) + " of space on its left, " + px(inner.r - k.r) + " on its right" + (getComputedStyle(k.el).maxWidth !== "none" ? "; it has a max-width, and margin-inline: auto would put it in the middle" : "") + ")");
+            }
 
         if (lines.length > 2 && lines.every((l) => l.length === 1)) {
             // One under another. Left edges that nearly agree:
