@@ -1,12 +1,21 @@
 import type { NotificationStore, Store } from "../store/types.ts";
+import { mailHtml } from "./mailHtml.ts";
 
 // Telling people about things that happen when they are not looking (E5.3): a
 // request to the assistant that did not finish, a website that could not be
 // published, a studio that reached its usage limit. Every notification is shown
 // in the app; it is also e-mailed when mail is set up and the person wants that.
 
+export interface Mail {
+    to: string;
+    subject: string;
+    // What a program that shows no formatting shows.
+    text: string;
+    // The same, drawn in Atelier's own style (services/mailHtml.ts).
+    html?: string;
+}
 export interface Mailer {
-    send(message: { to: string; subject: string; text: string }): Promise<void>;
+    send(message: Mail): Promise<void>;
 }
 
 // Resend's HTTP API (the platform already sends its sign-in mail through Resend).
@@ -19,16 +28,24 @@ export class ResendMailer implements Mailer {
         this.from = opts.from;
         this.fetch = opts.fetch ?? fetch;
     }
-    async send(message: { to: string; subject: string; text: string }): Promise<void> {
+    async send(message: Mail): Promise<void> {
         const res = await this.fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-            body: JSON.stringify({ from: this.from, to: [message.to], subject: message.subject, text: message.text }),
+            body: JSON.stringify({
+                from: this.from,
+                to: [message.to],
+                subject: message.subject,
+                text: message.text,
+                ...(message.html ? { html: message.html } : {}),
+            }),
             signal: AbortSignal.timeout(15_000),
         });
         if (!res.ok) throw new Error(`the mail service answered ${res.status}`);
     }
 }
+
+const STOP = 'To stop these e-mails, open Notifications in Atelier and untick "E-mail me about these too".';
 
 export interface NoticeInput {
     tenantId: string | null;
@@ -71,7 +88,18 @@ export class Notifier {
                 if (!made || !this.mailer || !(await this.notifications.emailWanted(userId))) continue;
                 const user = await this.store.users.findById(userId);
                 if (!user) continue;
-                await this.mailer.send({ to: user.email, subject: notice.title, text: this.letter(notice) });
+                await this.mailer.send({
+                    to: user.email,
+                    subject: notice.title,
+                    text: this.letter(notice),
+                    html: mailHtml({
+                        title: notice.title,
+                        body: notice.body,
+                        action: notice.link ? { href: `${this.origin}${notice.link}`, label: "Open it in Atelier" } : null,
+                        foot: STOP,
+                        origin: this.origin,
+                    }),
+                });
                 await this.notifications.markEmailed(userId, made.id);
             } catch (err) {
                 console.warn(`could not notify ${userId} (${notice.kind}): ${(err as Error).message}`);
@@ -83,7 +111,9 @@ export class Notifier {
     // Never throws; does nothing when e-mail is not set up.
     async mail(to: string, subject: string, text: string): Promise<void> {
         if (!this.mailer) return;
-        await this.mailer.send({ to, subject, text }).catch((err: Error) => console.warn(`could not e-mail ${to}: ${err.message}`));
+        await this.mailer
+            .send({ to, subject, text, html: mailHtml({ title: subject, body: text, origin: this.origin }) })
+            .catch((err: Error) => console.warn(`could not e-mail ${to}: ${err.message}`));
     }
 
     // A studio's owners and admins: the people who can do something about it.
@@ -118,7 +148,18 @@ export class Notifier {
         if (!fresh) return false;
         if (this.mailer && this.operatorEmail)
             await this.mailer
-                .send({ to: this.operatorEmail, subject: `Atelier: ${title}`, text: `${body}\n\n${this.origin}/admin/reports\n` })
+                .send({
+                    to: this.operatorEmail,
+                    subject: `Atelier: ${title}`,
+                    text: `${body}\n\n${this.origin}/admin/reports\n`,
+                    html: mailHtml({
+                        title,
+                        body,
+                        action: { href: `${this.origin}/admin/reports`, label: "Open the reports" },
+                        foot: "Sent to whoever runs this Atelier.",
+                        origin: this.origin,
+                    }),
+                })
                 .catch((err: Error) => console.warn(`could not e-mail the operator: ${err.message}`));
         return true;
     }
@@ -136,12 +177,23 @@ export class Notifier {
         if (!this.mailer || !this.operatorEmail || Date.now() - last < 30 * 60_000) return;
         this.lastOperatorMail.set(kind, Date.now());
         await this.mailer
-            .send({ to: this.operatorEmail, subject: `Atelier: ${title}`, text: `${body}\n\n${this.origin}/operator\n` })
+            .send({
+                to: this.operatorEmail,
+                subject: `Atelier: ${title}`,
+                text: `${body}\n\n${this.origin}/operator\n`,
+                html: mailHtml({
+                    title,
+                    body,
+                    action: { href: `${this.origin}/operator`, label: "Open the operator pages" },
+                    foot: "Sent to whoever runs this Atelier.",
+                    origin: this.origin,
+                }),
+            })
             .catch((err: Error) => console.warn(`could not e-mail the operator: ${err.message}`));
     }
 
     private letter(notice: NoticeInput): string {
         const where = notice.link ? `\n\nOpen it: ${this.origin}${notice.link}` : "";
-        return `${notice.body}${where}\n\n—\nAtelier. To stop these e-mails, open Notifications in Atelier and untick "E-mail me about these too".\n`;
+        return `${notice.body}${where}\n\n—\nAtelier. ${STOP}\n`;
     }
 }
