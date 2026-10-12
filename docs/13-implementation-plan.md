@@ -308,8 +308,10 @@ give the operator control. (No billing.)
   cross-studio totals.
 - **Also done here, from E5.0 (step a):** each item in the editor's Wording
   panel opens a pop-up with room to edit.
-- **Not done:** per-tenant feature flags beyond those two switches; cost in
-  money (only tokens are known; prices belong to each studio's provider).
+- **Not done:** per-tenant feature flags beyond those two switches.
+- **Cost in money** is now estimated (`cost-estimate`, 2026-10-10): when a
+  request finishes, tokens x the model's list price is recorded, and shown
+  month by month as "about $x". The provider's bill is what counts.
 - **Done later (`gallery-previews`, 2026-10-10):** a template gallery with
   live previews, and templates a studio saves from its own websites.
 

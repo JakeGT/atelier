@@ -288,7 +288,9 @@ export const invitationSchema = z.object({
     expiresAt: z.string().datetime(),
 });
 
-export const USAGE_KINDS = ["agent.input_tokens", "agent.output_tokens", "agent.runs", "agent.seconds"] as const;
+// `agent.cost_micros`: an estimate in millionths of a US dollar, from the tokens
+// used and the model's list price at the time. The provider's bill is what counts.
+export const USAGE_KINDS = ["agent.input_tokens", "agent.output_tokens", "agent.runs", "agent.seconds", "agent.cost_micros"] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
 export type Member = z.infer<typeof memberSchema>;

@@ -233,6 +233,10 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                 </header>
 
                 <div className="content-head">
+                    {/* On a phone the bar has no room for the way back, so it is here, in words. */}
+                    <button type="button" className="link content-back" onClick={() => navigate(editor)}>
+                        <ArrowLeft /> Back to the editor
+                    </button>
                     <p className="eyebrow">{project.name}</p>
                     <h1 className="display">
                         Its <em>content.</em>
@@ -316,7 +320,7 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                                 )}
                             </div>
                         )}
-                        {loose.length === 0 && looseCount > 0 && (
+                        {looseCount > 0 && (
                             <div className="content-loose" role="status">
                                 <Unlink />
                                 <div>

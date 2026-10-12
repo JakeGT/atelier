@@ -882,7 +882,10 @@ function MonthByMonth({ org }: { org: Org }) {
     return (
         <div className="panel">
             <h2 className="panel-title">Month by month</h2>
-            <p className="muted">The last twelve months. Tokens are what your model provider bills you for.</p>
+            <p className="muted">
+                The last twelve months. Tokens are what your model provider bills you for. The cost is an estimate from each model's list
+                price at the time; your provider's bill is what counts. Requests made with the built-in model have no price.
+            </p>
             <table className="table">
                 <thead>
                     <tr>
@@ -891,6 +894,7 @@ function MonthByMonth({ org }: { org: Org }) {
                         <th>Working time</th>
                         <th>Tokens read</th>
                         <th>Tokens written</th>
+                        <th>Estimated cost</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -901,6 +905,9 @@ function MonthByMonth({ org }: { org: Org }) {
                             <td className="mono">{m.minutes >= 60 ? `${(m.minutes / 60).toFixed(1)} h` : `${m.minutes} min`}</td>
                             <td className="mono">{compact.format(m.tokensIn)}</td>
                             <td className="mono">{compact.format(m.tokensOut)}</td>
+                            <td className="mono">
+                                {m.cost === null ? <span className="muted">not known</span> : `about $${m.cost.toFixed(2)}`}
+                            </td>
                         </tr>
                     ))}
                 </tbody>

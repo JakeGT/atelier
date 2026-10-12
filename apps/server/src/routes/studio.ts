@@ -38,9 +38,14 @@ export function studioRoutes(api: Api): void {
         since.setUTCHours(0, 0, 0, 0);
         since.setUTCMonth(since.getUTCMonth() - 11);
         const rows = await store.usage.monthly(c.get("org").id, since);
-        const months = new Map<string, { month: string; requests: number; minutes: number; tokensIn: number; tokensOut: number }>();
+        // `cost`: estimated US dollars, or null when nothing that month had a known price.
+        const months = new Map<
+            string,
+            { month: string; requests: number; minutes: number; tokensIn: number; tokensOut: number; cost: number | null }
+        >();
         for (const r of rows) {
-            const m = months.get(r.month) ?? { month: r.month, requests: 0, minutes: 0, tokensIn: 0, tokensOut: 0 };
+            const m = months.get(r.month) ?? { month: r.month, requests: 0, minutes: 0, tokensIn: 0, tokensOut: 0, cost: null };
+            if (r.kind === "agent.cost_micros") m.cost = Math.round(((m.cost ?? 0) + r.units / 1_000_000) * 100) / 100;
             if (r.kind === "agent.runs") m.requests += r.units;
             if (r.kind === "agent.seconds") m.minutes += Math.round(r.units / 60);
             if (r.kind === "agent.input_tokens") m.tokensIn += r.units;

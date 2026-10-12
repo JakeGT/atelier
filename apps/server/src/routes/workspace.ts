@@ -232,6 +232,16 @@ export function workspaceRoutes(api: Api): void {
             meter("agent.input_tokens", run.result?.tokens?.input ?? 0),
             meter("agent.output_tokens", run.result?.tokens?.output ?? 0),
         ]);
+        // What that probably cost, when the model in use has a list price: the catalog's
+        // price is in dollars per million tokens, so tokens x price is millionths of a dollar.
+        const project = await store.projects.findById(tenantId, projectId);
+        const org = await store.organizations.findById(tenantId);
+        const ref = project?.agentModel ?? org?.defaultModel ?? null;
+        const model = ref ? (await api.catalog.get().catch(() => null))?.models.find((m) => m.ref === ref) : undefined;
+        if (model && model.costIn !== null && model.costOut !== null) {
+            const micros = Math.round((run.result?.tokens?.input ?? 0) * model.costIn + (run.result?.tokens?.output ?? 0) * model.costOut);
+            if (micros > 0) await meter("agent.cost_micros", micros);
+        }
     };
 
     route("get", `${PROJECT}/runs/:runId`, "project.read", async (c) => {

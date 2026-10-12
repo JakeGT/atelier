@@ -123,7 +123,10 @@ files.
   no content).
 - **Usage by month** (`GET …/usage/monthly`): requests, working time and tokens
   for the last twelve months, computed from the usage records, which are all
-  kept. There is no separate table of aggregates.
+  kept. There is no separate table of aggregates. Each month also shows an
+  **estimated cost**: as a request finishes, its tokens are multiplied by the
+  list price of the model in use (from the model catalog) and recorded as
+  `agent.cost_micros`. Requests on the built-in model have no price.
 
 ## 6. Alerting
 
