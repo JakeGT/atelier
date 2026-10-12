@@ -5,7 +5,6 @@ import type { Org, Session } from "../lib/api";
 import { api, orgApi } from "../lib/api";
 import { navigate, type Theme } from "../lib/hooks";
 import { Dots, ThemeToggle, useToast, Wordmark } from "../ui/kit";
-import { FIRST_PROMPT_KEY } from "./Studio";
 
 interface Props {
     session: Session;
@@ -17,20 +16,18 @@ interface Props {
     onToggleTheme: () => void;
 }
 
-const STEPS = ["Your studio", "Your assistant", "Your first website"] as const;
+const STEPS = ["Your studio", "Your assistant"] as const;
 
 // The introduction someone sees the first time they arrive: their own studio is
-// already there, so this names it, says how the assistant works, and gets a
-// first website started. Every step can be skipped, and it is shown only once
-// (it stays available at /welcome).
+// already there, so this names it and says how the assistant works, then takes
+// them to their studio page, where a first website is one form away when they
+// want one. It can be skipped, and is shown only once (it stays available at /welcome).
 export function Welcome({ session, orgs, onOrgsChanged, onDone, theme, onToggleTheme }: Props) {
     const toast = useToast();
     const studio = orgs.find((o) => o.personalOf === session.id) ?? orgs[0];
     const firstName = session.name.trim().split(/[\s@]/)[0] || "there";
     const [step, setStep] = useState(0);
     const [studioName, setStudioName] = useState(studio?.name ?? "");
-    const [siteName, setSiteName] = useState("");
-    const [brief, setBrief] = useState("");
     const [busy, setBusy] = useState(false);
 
     if (!studio) return null;
@@ -60,20 +57,6 @@ export function Welcome({ session, orgs, onOrgsChanged, onDone, theme, onToggleT
             setBusy(false);
         }
         setStep(1);
-    }
-
-    async function createSite(e: FormEvent) {
-        e.preventDefault();
-        if (!siteName.trim() || busy) return;
-        setBusy(true);
-        try {
-            const project = await a.createProject(siteName.trim());
-            if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
-            await finish(`/o/${studio?.slug}/p/${project.slug}`);
-        } catch (err) {
-            toast((err as Error).message, "error");
-            setBusy(false);
-        }
     }
 
     return (
@@ -131,7 +114,7 @@ export function Welcome({ session, orgs, onOrgsChanged, onDone, theme, onToggleT
 
                 {step === 1 && (
                     <div className="welcome-card">
-                        <p className="eyebrow">Step 2 of 3</p>
+                        <p className="eyebrow">Step 2 of 2</p>
                         <h1 className="display">
                             How your <em>assistant</em> works.
                         </h1>
@@ -150,68 +133,24 @@ export function Welcome({ session, orgs, onOrgsChanged, onDone, theme, onToggleT
                             </li>
                         </ol>
                         <p className="welcome-note">
-                            Your assistant starts on a built-in AI model, so there is nothing to set up. If you have your own account with
-                            an AI company such as Anthropic or OpenAI, you can connect it later under Studio settings, then Models.
+                            Next is your studio page, where you name a website and describe it whenever you are ready. Your assistant starts
+                            on a built-in AI model, so there is nothing to set up. If you have your own account with an AI company such as
+                            Anthropic or OpenAI, you can connect it later under Studio settings, then Models.
                         </p>
                         <div className="welcome-actions">
                             <button type="button" className="btn" onClick={() => setStep(0)}>
                                 Back
                             </button>
-                            <button type="button" className="btn btn-seal btn-lg" onClick={() => setStep(2)}>
-                                Continue <ArrowRight />
+                            <button type="button" className="btn btn-seal btn-lg" onClick={() => void finish(`/o/${studio.slug}`)}>
+                                Go to my studio <ArrowRight />
                             </button>
                         </div>
                     </div>
                 )}
 
-                {step === 2 && (
-                    <form className="welcome-card" onSubmit={createSite}>
-                        <p className="eyebrow">Step 3 of 3</p>
-                        <h1 className="display">
-                            Your first <em>website.</em>
-                        </h1>
-                        <label className="field-line">
-                            <span className="eyebrow">What is it called?</span>
-                            <input
-                                value={siteName}
-                                onChange={(e) => setSiteName(e.target.value)}
-                                placeholder="Okoro Ceramics"
-                                maxLength={120}
-                            />
-                            <span className="field-help">You can change the name later.</span>
-                        </label>
-                        <label className="field-line">
-                            <span className="eyebrow">Describe it (if you like)</span>
-                            <textarea
-                                value={brief}
-                                onChange={(e) => setBrief(e.target.value)}
-                                rows={4}
-                                placeholder="A one-page site for my ceramics studio: a big photo, a few pieces for sale, and how to find me."
-                            />
-                            <span className="field-help">
-                                Your assistant starts building from this straight away. Leave it empty to start with a blank page.
-                            </span>
-                        </label>
-                        <div className="welcome-actions">
-                            <button type="button" className="btn" onClick={() => setStep(1)} disabled={busy}>
-                                Back
-                            </button>
-                            <button type="submit" className="btn btn-seal btn-lg" disabled={!siteName.trim() || busy}>
-                                {busy ? (
-                                    <Dots />
-                                ) : (
-                                    <>
-                                        Create my website <ArrowRight />
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </form>
-                )}
-
                 <p className="welcome-skip">
                     <button type="button" className="link" onClick={() => void finish(`/o/${studio.slug}`)} disabled={busy}>
-                        {step === 2 ? "I'll make a website later: take me to my studio" : "Skip the introduction and go to my studio"}
+                        Skip the introduction and go to my studio
                     </button>
                 </p>
             </main>

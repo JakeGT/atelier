@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.28` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #15. Seventeen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`, [#29](https://github.com/JakeGT/atelier/pull/29) `fast-gallery`, [#30](https://github.com/JakeGT/atelier/pull/30) `asking-visible`, [#31](https://github.com/JakeGT/atelier/pull/31) `page-transitions`, [#32](https://github.com/JakeGT/atelier/pull/32) `website-covers`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
+> Last updated 2026-10-10. Status: **`p5.29` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #15. Eighteen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`, [#29](https://github.com/JakeGT/atelier/pull/29) `fast-gallery`, [#30](https://github.com/JakeGT/atelier/pull/30) `asking-visible`, [#31](https://github.com/JakeGT/atelier/pull/31) `page-transitions`, [#32](https://github.com/JakeGT/atelier/pull/32) `website-covers`, [#33](https://github.com/JakeGT/atelier/pull/33) `straight-to-studio`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.28` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.29` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -120,7 +120,7 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 ## Arrival (branch `onboarding`)
 
 - **Who gets in is decided in Authentik**, by group. Atelier admits anyone who completes a sign-in (`SIGNUP_MODE=open`).
-- **Everyone has one personal studio** from their first sign-in, and sees a three-step introduction once (`/welcome`).
+- **Everyone has one personal studio** from their first sign-in, and sees a two-step introduction once (`/welcome`: name the studio, how the assistant works), which ends on the studio page. (It used to have a third step that made a first website; removed at the owner's request on 2026-10-11.)
 - **Shared studios**: owners and admins add people by e-mail under Studio settings → Members; it shows up the next time that person opens Atelier.
 - Details: `docs/07-auth-and-rbac.md` §3.
 
