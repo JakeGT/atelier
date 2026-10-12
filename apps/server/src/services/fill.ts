@@ -84,9 +84,28 @@ function setChildren(el: Element, children: DefaultTreeAdapterTypes.ChildNode[])
     el.childNodes = children;
 }
 
-// ---- rich text: a short allow-list, enforced on the way in and on the way out -------------
+// ---- rich text: formatting and structure are kept; anything that can run is not ------------
+// Enforced on the way in and on the way out. What is kept is whatever a designed article needs
+// (panels, tables, figures, class names for the website's own styles); what is refused is what
+// could run or load code in a visitor's browser, or in Atelier while the wording is edited.
 
-const RICH_TAGS = new Set(["p", "br", "strong", "b", "em", "i", "a", "ul", "ol", "li", "h2", "h3", "h4", "blockquote"]);
+const RICH_TAGS = new Set(
+    "p br hr strong b em i u s del ins mark small sub sup code pre kbd abbr cite q time span a ul ol li dl dt dd h1 h2 h3 h4 h5 h6 blockquote div section article aside header footer figure figcaption img picture table caption thead tbody tfoot tr th td colgroup col details summary".split(
+        " ",
+    ),
+);
+// Kept on any element, and on particular ones. Never style, id, or anything beginning "on".
+const RICH_ATTRS = new Set(["class", "title", "lang", "dir"]);
+const RICH_ATTRS_ON: Record<string, string[]> = {
+    img: ["alt", "width", "height", "loading"],
+    td: ["colspan", "rowspan"],
+    th: ["colspan", "rowspan", "scope"],
+    col: ["span"],
+    colgroup: ["span"],
+    ol: ["start", "reversed"],
+    time: ["datetime"],
+    details: ["open"],
+};
 // Dropped with everything inside them. Anything else unknown is unwrapped: its text is kept.
 const RICH_DROP = new Set([
     "script",
@@ -118,19 +137,22 @@ function cleanRich(nodes: DefaultTreeAdapterTypes.ChildNode[], depth = 0): Defau
             out.push(...kids);
             continue;
         }
+        const keep = RICH_ATTRS_ON[n.tagName] ?? [];
+        const attrs = n.attrs.filter((a) => (RICH_ATTRS.has(a.name) || keep.includes(a.name)) && a.value.length <= 500);
         const href = n.tagName === "a" ? attr(n, "href")?.trim() : undefined;
-        const el = defaultTreeAdapter.createElement(
-            n.tagName,
-            n.namespaceURI,
-            href && SAFE_HREF.test(href) && !/^\s*javascript:/i.test(href) ? [{ name: "href", value: href }] : [],
-        );
+        if (href && SAFE_HREF.test(href) && !/^\s*javascript:/i.test(href)) attrs.push({ name: "href", value: href });
+        // A picture: a file of the website's or one at a web address, never anything that is not a plain address.
+        const src = n.tagName === "img" ? attr(n, "src")?.trim() : undefined;
+        if (n.tagName === "img" && !isPicturePath(src)) continue;
+        if (src) attrs.push({ name: "src", value: src });
+        const el = defaultTreeAdapter.createElement(n.tagName, n.namespaceURI, attrs);
         setChildren(el, kids);
         out.push(el);
     }
     return out;
 }
 
-// Reduces any HTML to the allowed formatting. Safe to store and safe to place in a page.
+// Reduces any HTML to what is kept. Safe to store and safe to place in a page.
 export function sanitizeRich(html: string): string {
     const fragment = parseFragment(html.slice(0, 200_000));
     const holder = defaultTreeAdapter.createElement(

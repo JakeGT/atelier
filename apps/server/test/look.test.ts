@@ -21,9 +21,39 @@ writeFileSync(
 writeFileSync(join(dir, "site.css"), "body{margin:0;font-family:sans-serif}h1{color:#c63}");
 writeFileSync(join(dir, "blog/post.html"), "<!doctype html><title>Post</title><body style='margin:0'><p>short</p></body>");
 writeFileSync(join(dir, "notes.txt"), "not a page");
+// A page of near-misses: each is a few pixels from lined up, centred or even. The last row is as it should be.
+writeFileSync(
+    join(dir, "layout.html"),
+    `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Layout</title><style>
+body{margin:0;font-family:sans-serif}
+header{display:flex;align-items:flex-start;justify-content:space-between;padding:16px 32px;background:#eee}
+header .logo{font-size:24px;margin-top:5px}
+nav a{margin-left:16px}
+.hero{padding:40px 32px}
+.hero h1{margin:0 0 16px}
+.hero p{margin:0 0 16px 4px}
+.hero .lede{margin-left:0}
+.box{width:600px;margin-left:calc(50% - 324px);background:#ddd;padding:20px}
+.cards{display:flex;align-items:flex-start;gap:24px;padding:32px}
+.card{flex:1;background:#fafafa;border:1px solid #ccc;padding:16px}
+.card:nth-child(3){margin-left:7px}
+.list{padding:32px}.item{height:30px;background:#cde;margin-bottom:16px}.item:nth-child(2){margin-bottom:22px}
+.btn{display:inline-block;background:#246;color:#fff;padding:6px 14px 12px 24px;margin:32px}
+.good{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding:32px}.good div{background:#eee;padding:16px}
+</style></head><body>
+<header><div class="logo">Okoro</div><nav><a href="#">One</a><a href="#">Two</a></nav></header>
+<section class="hero"><h1>Headline here</h1><p class="lede">First paragraph.</p><p>Second paragraph, nudged.</p><p class="lede">Third.</p></section>
+<div class="box">A box meant to be centred</div>
+<div class="cards"><div class="card">Short</div><div class="card">Rather longer<br>two lines<br>three</div><div class="card">Short</div></div>
+<div class="list"><div class="item"></div><div class="item"></div><div class="item"></div><div class="item"></div></div>
+<a class="btn" href="#">Buy now</a>
+<div class="good"><div>Even</div><div>Even</div><div>Even</div></div>
+</body></html>
+`,
+);
 
 test("the website's pages are listed, home first; paths cannot leave the workspace", async () => {
-    assert.deepEqual(await listPages(dir), ["index.html", "blog/post.html"]);
+    assert.deepEqual(await listPages(dir), ["index.html", "blog/post.html", "layout.html"]);
     assert.equal(inside(dir, "blog/post.html"), join(dir, "blog/post.html"));
     assert.equal(inside(dir, "../../etc/passwd"), null);
     assert.equal(inside(dir, "/etc/passwd"), join(dir, "etc/passwd"));
@@ -86,6 +116,45 @@ test("looking at a page: pictures at the visitor's width, saved wording filled i
         assert.deepEqual([post?.width, post?.pictures.length], [1280, 1]);
         assert.deepEqual(post?.problems, ["No margin: p 'short' touches the edge of the screen."]);
         await assert.rejects(browser?.look("http://127.0.0.1:1/nothing", "phone") ?? Promise.resolve(), /could not be opened/);
+    } finally {
+        site.close();
+    }
+});
+
+test("near-misses of layout are measured and offered as worth a look; one part can be seen close up", { skip }, async () => {
+    const site = await serveSite(dir, { documents: async () => [], media: async () => [], mediaFile: async () => null });
+    try {
+        const seen = await browser?.look(`${site.url}layout.html`, "desktop");
+        assert.deepEqual(seen?.problems, []);
+        const notices = seen?.notices.join("\n") ?? "";
+        for (const expected of [
+            /In header: side by side but not quite level: div\.logo 'Okoro' sits 5px lower than nav/,
+            /In section\.hero: p 'Second paragraph, nudged\.' starts 4px to the right of the things above and below it/,
+            /In body: div.box 'A box meant to be centred' is almost centred but not quite: 316px of space on its left and 324px on its right/,
+            /In div\.cards: 3 div\.card side by side are of different heights \(52px, 88px, 52px\)/,
+            /In div\.cards: the gaps between 3 div\.card side by side are uneven \(24px, 31px\)/,
+            /In div\.list: the gaps between 4 div\.item one under another are uneven \(16px, 22px, 16px\)/,
+            /a\.btn 'Buy now': its words are 5px right of its middle/,
+            /a\.btn 'Buy now': its words are 4px above its middle/,
+        ])
+            assert.match(notices, expected);
+        // What is even and level is not mentioned.
+        assert.ok(!notices.includes("div.good"), notices);
+
+        // One part, enlarged, with what was measured within it.
+        const close = await browser?.look(`${site.url}layout.html`, "desktop", 0, "header");
+        assert.equal(close?.pictures.length, 1);
+        assert.ok((close?.enlarged ?? 0) > 1);
+        const picture = await sharp(Buffer.from(close?.pictures[0] ?? "", "base64")).metadata();
+        assert.ok((picture.width ?? 0) > 1280, String(picture.width));
+        assert.deepEqual(close?.notices.length, 1);
+        const button = await browser?.look(`${site.url}layout.html`, "phone", 0, ".btn");
+        assert.equal(button?.enlarged, 3);
+        await assert.rejects(browser?.look(`${site.url}layout.html`, "phone", 0, "..bad") ?? Promise.resolve(), /is not a CSS selector/);
+        await assert.rejects(
+            browser?.look(`${site.url}layout.html`, "phone", 0, ".nothing") ?? Promise.resolve(),
+            /nothing visible on the page matches/,
+        );
     } finally {
         site.close();
     }

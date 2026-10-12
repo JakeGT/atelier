@@ -41,7 +41,7 @@ test("nothing stored, an unknown document or a malformed name keeps what is writ
     }
 });
 
-test("rich text keeps a little formatting and loses everything else", () => {
+test("rich text keeps formatting, structure and class names, and loses anything that can run", () => {
     const out = filled('<div data-content-rich="page/home#story">old</div>');
     assert.match(out, /<p>Made <strong>by hand<\/strong>\. <a href="about\.html">More<\/a><\/p>/);
     assert.ok(!out.includes("script") && !out.includes("alert"));
@@ -52,8 +52,19 @@ test("rich text keeps a little formatting and loses everything else", () => {
         '<a>x</a><a href="https://example.com">y</a>',
     );
     // Unknown wrappers are unwrapped (their text stays); dangerous elements go with their contents.
-    assert.equal(sanitizeRich("<section><span>kept</span><iframe src=x>gone</iframe><style>p{}</style></section>"), "kept");
-    assert.equal(sanitizeRich("<img src=x onerror=alert(1)><svg><script>alert(1)</script></svg>plain"), "plain");
+    assert.equal(sanitizeRich("<main><font>kept</font><iframe src=x>gone</iframe><style>p{}</style></main>"), "kept");
+    assert.equal(sanitizeRich('<img src="javascript:x" onerror=alert(1)><svg><script>alert(1)</script></svg>plain'), "plain");
+    // A designed part of an article survives: its elements, its class names, its table, its picture.
+    const panel =
+        '<aside class="pull-out wide"><h3>In numbers</h3><table class="figures"><tbody><tr><th scope="row">Kilns</th><td colspan="2">3</td></tr></tbody></table><figure><img alt="The kiln" src="img/kiln.webp"><figcaption>Fired <span class="date">daily</span></figcaption></figure></aside>';
+    assert.equal(sanitizeRich(panel), panel);
+    // What comes with it and could run, restyle the page from inside, or pose as something else does not.
+    assert.equal(
+        sanitizeRich(
+            '<div class="panel" id="app" style="position:fixed" onclick="x()" data-content="page/home#x"><img src="https://example.com/a.jpg" onerror="x()" srcset="x"></div>',
+        ),
+        '<div class="panel"><img src="https://example.com/a.jpg"></div>',
+    );
     assert.equal(
         sanitizeRich("<ul><li>one</li><li><em>two</em></li></ul><h2>T</h2>"),
         "<ul><li>one</li><li><em>two</em></li></ul><h2>T</h2>",

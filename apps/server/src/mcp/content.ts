@@ -72,7 +72,7 @@ const field = z.object({
     type: z
         .enum(["text", "long", "rich", "list", "image", "items", "link", "number", "date", "yesno", "video"])
         .describe(
-            "text: one line. long: several lines. rich: a little formatting (HTML). list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members). link: a web address or a page such as about.html, shown with data-content-href on an <a>. number (also how long a bar is, 0 to 100, with data-content-percent or data-item-percent on the bar's fill). date: 'YYYY-MM-DD', written out by the page when the element has data-content-date. yesno: true or false, with data-content-if on a part of the page to show or hide it. video: the path of a clip from media_list, on a <video data-content-video>",
+            "text: one line. long: several lines. rich: HTML for a body of writing, with any structure and class names the design needs (paragraphs, headings, lists, links, blockquote, div, section, aside, figure, img, table, span and the like, with class, and on a link href, on a picture src and alt; style it from the website's stylesheet by class). What can run is taken out: script, style and iframe elements, style and id attributes, event handlers. list: an array of short strings. image: the path of a file from media_list, e.g. 'media/shop-front-3f9a1c.jpg'. items: an array of objects, each with the parts described in itemFields (services, menu entries, team members). link: a web address or a page such as about.html, shown with data-content-href on an <a>. number (also how long a bar is, 0 to 100, with data-content-percent or data-item-percent on the bar's fill). date: 'YYYY-MM-DD', written out by the page when the element has data-content-date. yesno: true or false, with data-content-if on a part of the page to show or hide it. video: the path of a clip from media_list, on a <video data-content-video>",
         ),
     itemFields: z
         .array(z.object({ ...base, type: z.enum(["text", "long", "rich", "image", "link", "number", "date"]) }))
@@ -160,9 +160,19 @@ const libraryFiles = async () =>
 
 server.tool(
     "page_look",
-    "Look at a page of the website as a visitor would see it: opens it in a real browser at phone, tablet or desktop width and returns pictures of it (a long page comes in up to three pictures from the top; pass `from` to look further down), with the page's height and anything wrong that a picture may not make obvious (content wider than the screen, pictures that did not load, script errors, text too small). Use it after you build or change how a page looks, at phone and at desktop width, and fix what you see before you finish. `page` is the file's path, e.g. index.html.",
-    { page: z.string().default("index.html"), size: SIZE.default("phone"), from: z.number().int().min(0).default(0) },
-    async ({ page, size, from }) => {
+    "Look at a page of the website as a visitor would see it: opens it in a real browser at phone, tablet or desktop width and returns pictures of it (a long page comes in up to three pictures from the top; pass `from` to look further down), with the page's height and anything wrong that a picture may not make obvious (content wider than the screen, pictures that did not load, script errors, text too small). Use it after you build or change how a page looks, at phone and at desktop width, and fix what you see before you finish. It also measures what is hard to judge from a picture of a whole page, and lists it as worth a look: things side by side that are not quite level or are of different heights, things almost but not quite centred, left edges that nearly agree, uneven gaps between repeated things, words not quite in the middle of a button. Those are measurements, not faults: some will be what you meant. To see one part of a page enlarged (a header, a card, a row of buttons), pass `closeUp` with a CSS selector for it. `page` is the file's path, e.g. index.html.",
+    {
+        page: z.string().default("index.html"),
+        size: SIZE.default("phone"),
+        from: z.number().int().min(0).default(0),
+        closeUp: z
+            .string()
+            .optional()
+            .describe(
+                "A CSS selector, e.g. 'header' or '.card:nth-of-type(2)': the picture is of that part alone, enlarged, with a little of what is around it",
+            ),
+    },
+    async ({ page, size, from, closeUp }) => {
         if (!browser)
             return json({ unavailable: "Looking at pages is not available in this workspace. Check the HTML and CSS carefully instead." });
         const file = inside(workspace, page);
@@ -193,13 +203,19 @@ server.tool(
                         : null;
                 },
             });
-            const seen = await browser.look(`${site.url}${page.replace(/^\/+/, "")}`, size, from);
-            const more = seen.to < seen.pageHeight ? ` There is more below: call again with from=${seen.to}.` : "";
-            const text = `${page} at ${size} width (${seen.width}px). The page is ${seen.pageHeight}px tall; these pictures show ${seen.from}px to ${seen.to}px.${more}\n${
+            const seen = await browser.look(`${site.url}${page.replace(/^\/+/, "")}`, size, from, closeUp?.trim() || undefined);
+            const more = !seen.enlarged && seen.to < seen.pageHeight ? ` There is more below: call again with from=${seen.to}.` : "";
+            const shows = seen.enlarged
+                ? `this picture is of ${closeUp} alone, from ${seen.from}px to ${seen.to}px down the page, ${seen.enlarged === 1 ? "at its real size" : `${seen.enlarged} times its real size`}`
+                : `these pictures show ${seen.from}px to ${seen.to}px`;
+            const notices = seen.notices.length
+                ? `\nMeasured on this stretch, and worth a look (each may be what you meant):\n- ${seen.notices.join("\n- ")}`
+                : "";
+            const text = `${page} at ${size} width (${seen.width}px). The page is ${seen.pageHeight}px tall; ${shows}.${more}\n${
                 seen.problems.length
                     ? `Problems found:\n- ${seen.problems.join("\n- ")}`
                     : "No problems were detected automatically; judge the pictures yourself."
-            }`;
+            }${notices}`;
             // A model that cannot read pictures is given the layout in words and numbers instead.
             if (!vision) {
                 const outline = seen.outline.join("\n- ") || "(nothing visible)";

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { LAYOUT_NOTICES } from "./layout.ts";
 
 // The assistant's eyes: a headless browser inside the workspace that opens a
 // page of the website the way a visitor's browser would and takes pictures of
@@ -24,6 +25,9 @@ const SIZES: Record<Size, { width: number; height: number; mobile: boolean }> = 
 // A picture taller than this is hard for a model to read; a long page is given in parts.
 const PART_HEIGHT = 1400;
 const MAX_PARTS = 3;
+// One part looked at close up: how much of its surroundings is kept, and how large its picture is made.
+const CLOSE_UP_MARGIN = 24;
+const CLOSE_UP_PIXELS = 1500;
 const IDLE_MS = 90_000;
 
 export interface Look {
@@ -41,6 +45,11 @@ export interface Look {
     // The main things on the stretch looked at, top to bottom, with where they are and
     // how big: what a model that cannot read pictures has to go on.
     outline: string[];
+    // Near-misses of layout on the stretch looked at: almost lined up, almost centred, unevenly
+    // spaced. Offered as worth a look; some are meant.
+    notices: string[];
+    // When one part was looked at close up: how much larger than life the picture is.
+    enlarged?: number;
 }
 
 export function browserPath(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -203,14 +212,15 @@ export class Browser {
     // Opens `url` at a visitor's screen size and returns pictures of it from `from` pixels down.
     // Looks wait their turn, and one that fails because the browser itself gave up (it stopped
     // answering, or closed) is tried once more with a new browser.
-    look(url: string, size: Size, from = 0): Promise<Look> {
+    // `closeUp`: a CSS selector. The picture is then of that one part of the page, enlarged.
+    look(url: string, size: Size, from = 0, closeUp?: string): Promise<Look> {
         const run = async (): Promise<Look> => {
             try {
-                return await this.once(url, size, from);
+                return await this.once(url, size, from, closeUp);
             } catch (err) {
                 if (!/did not answer|browser closed|not running|did not start|could not connect/.test((err as Error).message)) throw err;
                 await this.close();
-                return await this.once(url, size, from);
+                return await this.once(url, size, from, closeUp);
             }
         };
         const turn = this.queue.then(run, run);
@@ -218,7 +228,7 @@ export class Browser {
         return turn;
     }
 
-    private async once(url: string, size: Size, from: number): Promise<Look> {
+    private async once(url: string, size: Size, from: number, closeUp?: string): Promise<Look> {
         if (this.idle) clearTimeout(this.idle);
         if (this.stuck) await this.close();
         if (!this.socket) {
@@ -370,29 +380,62 @@ export class Browser {
                                   `Loaded from another address, which cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${u.slice(0, 160)}`,
                         );
                 }
+                const noticed = (
+                    (await this.send("Runtime.evaluate", { returnByValue: true, expression: LAYOUT_NOTICES }, sessionId)) as {
+                        result?: { value?: { y: number; bottom: number; line: string }[] };
+                    }
+                ).result?.value;
+                const within = (top: number, bottom: number) => ({
+                    outline: m.outline
+                        .filter((o) => o.bottom > top && o.y < bottom)
+                        .slice(0, 60)
+                        .map((o) => o.line),
+                    notices: (noticed ?? [])
+                        .filter((n) => n.bottom > top && n.y < bottom)
+                        .slice(0, 12)
+                        .map((n) => n.line),
+                });
+                const shot = async (clip: { x: number; y: number; width: number; height: number; scale: number }) =>
+                    (
+                        (await this.send(
+                            "Page.captureScreenshot",
+                            { format: "jpeg", quality: 72, captureBeyondViewport: true, clip },
+                            sessionId,
+                        )) as { data: string }
+                    ).data;
+                const about = { title: m.title, size, width: screen.width, pageHeight: m.height, problems };
+                if (closeUp) {
+                    const found = (
+                        (await this.send(
+                            "Runtime.evaluate",
+                            {
+                                returnByValue: true,
+                                expression: `(() => { try { const el = document.querySelector(${JSON.stringify(closeUp)}); if (!el) return { none: true }; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top + scrollY, w: r.width, h: r.height }; } catch { return { bad: true }; } })()`,
+                            },
+                            sessionId,
+                        )) as { result?: { value?: { none?: boolean; bad?: boolean; x: number; y: number; w: number; h: number } } }
+                    ).result?.value;
+                    if (!found || found.bad) throw new Error(`"${closeUp}" is not a CSS selector`);
+                    if (found.none || found.w < 1 || found.h < 1)
+                        throw new Error(`nothing visible on the page matches "${closeUp}" at this width`);
+                    // A little of what surrounds it is kept, to see how it sits among its neighbours.
+                    const x = Math.max(0, Math.floor(found.x - CLOSE_UP_MARGIN));
+                    const y = Math.max(0, Math.floor(found.y - CLOSE_UP_MARGIN));
+                    const width = Math.max(1, Math.min(screen.width - x, Math.ceil(found.w + 2 * CLOSE_UP_MARGIN)));
+                    const height = Math.min(PART_HEIGHT, Math.ceil(found.h + 2 * CLOSE_UP_MARGIN), Math.max(1, m.height - y));
+                    const scale = Math.round(Math.max(1, Math.min(3, CLOSE_UP_PIXELS / Math.max(width, height))) * 100) / 100;
+                    const picture = await shot({ x, y, width, height, scale });
+                    return { ...about, from: y, to: y + height, pictures: [picture], enlarged: scale, ...within(y, y + height) };
+                }
                 const start = Math.max(0, Math.min(Math.floor(from), Math.max(0, m.height - 200)));
                 const pictures: string[] = [];
                 let y = start;
                 while (y < m.height && pictures.length < MAX_PARTS) {
                     const height = Math.min(PART_HEIGHT, m.height - y);
-                    const shot = (await this.send(
-                        "Page.captureScreenshot",
-                        {
-                            format: "jpeg",
-                            quality: 72,
-                            captureBeyondViewport: true,
-                            clip: { x: 0, y, width: screen.width, height, scale: 1 },
-                        },
-                        sessionId,
-                    )) as { data: string };
-                    pictures.push(shot.data);
+                    pictures.push(await shot({ x: 0, y, width: screen.width, height, scale: 1 }));
                     y += height;
                 }
-                const outline = m.outline
-                    .filter((o) => o.bottom > start && o.y < y)
-                    .slice(0, 60)
-                    .map((o) => o.line);
-                return { title: m.title, size, width: screen.width, pageHeight: m.height, from: start, to: y, pictures, problems, outline };
+                return { ...about, from: start, to: y, pictures, ...within(start, y) };
             } finally {
                 this.listeners.delete(on);
             }
