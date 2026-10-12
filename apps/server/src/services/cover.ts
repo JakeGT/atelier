@@ -25,7 +25,7 @@ export async function takeCover(dir: string, apiUrl: string, token: string): Pro
     if (!existsSync(join(dir, "index.html"))) return null;
     const path = browserPath();
     if (!path) return null;
-    browser ??= new Browser(path);
+    browser ??= new Browser(path, process.env.EGRESS_PROXY);
     const api = async (p: string): Promise<Response> => fetch(`${apiUrl}${p}`, { headers: { authorization: `Bearer ${token}` } });
     interface LibraryFile {
         path: string;

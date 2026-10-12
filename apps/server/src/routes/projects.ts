@@ -175,10 +175,12 @@ export function projectRoutes(api: Api): void {
     route("post", `${PROJECT}/restore`, "project.archive", setArchived(false));
 
     // Deleting is permanent: the website's files, history, content, releases and
-    // conversation all go. It must be archived first, and needs a recent sign-in.
+    // conversation all go. It needs a recent sign-in, and until that is given nothing
+    // changes. A website still in use is put away first (as archiving does), so if a
+    // later step fails it is left archived and the deletion can be tried again.
     route("delete", PROJECT, "project.delete", stepUp, async (c) => {
-        const project = c.get("project");
-        if (!project.archivedAt) return c.json({ error: "archive the website before deleting it" }, 409);
+        let project = c.get("project");
+        if (!project.archivedAt) project = await store.projects.update(c.get("org").id, project.id, { archived: true });
         // The live website first, then the workspace: if either cannot be removed,
         // keep the record so the deletion can be retried and nothing is orphaned.
         if (hosting && project.hostingRef) {

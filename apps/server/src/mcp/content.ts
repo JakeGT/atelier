@@ -52,7 +52,7 @@ server.tool("content_get", "Get a content document by kind and slug", { kind: z.
 
 server.tool(
     "media_list",
-    'List the files the person has uploaded for this website (photographs, logos, PDFs, short clips), with a description of each and its path. Use a file by writing its path exactly, relative to the website\'s top folder: <img src="media/…" alt="…">. You cannot see the pictures or add files; if a needed image is not here, ask the person to upload it in the Content page.',
+    'List the files the person has uploaded for this website (photographs, logos, PDFs, short clips), with a description of each and its path. Use a file by writing its path exactly, relative to the website\'s top folder: <img src="media/…" alt="…">. You cannot open these files; go by their descriptions and sizes. They are not the only pictures you may use: you can draw your own (SVG, CSS) and use pictures from elsewhere by their real address.',
     {},
     async () => json(((await api("/api/agent/media")) as { files: unknown }).files),
 );
@@ -109,7 +109,7 @@ const savedDocuments = async (): Promise<SavedDocument[]> =>
 
 server.tool(
     "content_check",
-    "Check that everything a visitor can read is wording the person can edit. Reads the website's pages as they are now and reports, per page: text and pictures not connected to content (`notEditable`), elements marked for a field that has nothing saved (`markedButNothingSaved`), and lists whose entries are written differently in the page but will all be shown as copies of the first (`entriesWillAllLookTheSame`); and overall: saved wording no page shows (`savedButOnNoPage`) and saved wording with no described field (`notDescribed`). Call it before you finish any request that added or changed pages or wording, fix what it reports, and call it again until `ok` is true. Text that is truly not wording to edit (a decorative symbol, a version number) can be marked with the attribute data-content-skip instead.",
+    "Check that everything a visitor can read is wording the person can edit. Reads the website's pages as they are now and reports, per page: text and pictures not connected to content (`notEditable`), elements marked for a field that has nothing saved (`markedButNothingSaved`), and lists whose entries are written differently in the page but will all be shown as copies of the first (`entriesWillAllLookTheSame`); and overall: saved wording no page shows (`savedButOnNoPage`) and saved wording with no described field (`notDescribed`). Call it before you finish any request that added or changed pages or wording, and connect what it reports. Where connecting something would force the design to change, keep the design and mark it data-content-skip. Text that is truly not wording to edit (a decorative symbol, a version number) can be marked with the attribute data-content-skip instead.",
     {},
     async () => {
         const report = coverageReport(await readPages(workspace), await savedDocuments());
@@ -124,7 +124,7 @@ server.tool(
 const SIZE = z.enum(["phone", "tablet", "desktop"]);
 const browser = (() => {
     const path = browserPath();
-    return path ? new Browser(path) : null;
+    return path ? new Browser(path, process.env.EGRESS_PROXY) : null;
 })();
 let site: Awaited<ReturnType<typeof serveSite>> | null = null;
 const vision = process.env.ATELIER_VISION === "1";
@@ -278,18 +278,18 @@ server.tool(
 
 server.tool(
     "design_kit",
-    "The website's design kit. Returns the look the website wears (a design language: its colours, type, corners, and how to design in it), what to do about it, the fonts for making a look, and the ready-made looks and sections a person may ask for by name. Call this before you design or restyle anything. A website with the kit has theme.css (the look, as CSS variables) and kit.css (the sections' styles); pages link both and take every colour, font and corner from the variables.",
-    {},
-    async () => {
+    "About the look this website wears, when it has one: its colours, type and corners as CSS variables, and how to design in it. A website that was started as a blank canvas has no need of this. Atelier also has ready-made looks and sections a person may pick; they are listed only when you pass readyMade: true, which you should do only when the person has asked for a ready-made look or section.",
+    { readyMade: z.boolean().default(false) },
+    async ({ readyMade }) => {
         const look = lookIn(await themeNow());
         const own = await savedOwnLook();
         return json({
             look: look ? { id: look.id, name: look.name, howToDesignInIt: look.guidance, variables: look.tokens } : null,
             note: look
                 ? NO_COLOURS
-                : "This website has no look yet. Make one for it with design_make_look, link theme.css and kit.css from every page (theme.css first), and take the pages' colours and fonts from the variables.",
+                : "This website has no look. If you want its colours and fonts in one place, so the whole website can be restyled in one step, design_make_look makes one; it is not required.",
             whatToDo: !look
-                ? "Nothing has been chosen, so the design is yours: make a look for this website from what the person described (design_make_look) and design its pages yourself. The ready-made looks and sections listed here are for when the person asks for one by name; do not lean towards them."
+                ? "Nothing has been chosen for this website, so the design is entirely yours. You do not need anything from here."
                 : look.id === OWN
                   ? 'This website wears a look made for it. Start from it, and change it freely with design_make_look (startFrom "own") whenever the website would be better for it or the person asks.'
                   : `This website wears the ready-made look "${look.name}", which the person chose. It is where the design starts, not a limit: begin from it, and change any part of it (design_make_look, starting from "${look.id}") wherever that makes the website better or closer to what the person describes.`,
@@ -303,16 +303,19 @@ server.tool(
                 alreadyOnDevices: Object.entries(STACKS).map(([id, st]) => ({ id, name: st.name })),
                 note: "These are only what is to hand: any typeface may be used. A font the website carries looks the same for every visitor and tells no other company who visited; one already on devices costs nothing to load but differs from device to device; one loaded from a font service is the widest choice.",
             },
-            movement:
-                "For animation of any kind, call design_motion: it puts GSAP and the kit's movement layer in the website and tells you how to use them.",
-            readyMadeLooks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
-            readyMadeSections: LAYOUTS.map((l) => ({
-                id: l.id,
-                name: l.name,
-                description: l.description,
-                usuallyGoes: l.place,
-                ...(l.interactive ? { interactive: true } : {}),
-            })),
+            // Only when the person asked for something ready-made.
+            ...(readyMade
+                ? {
+                      readyMadeLooks: LOOKS.map((l) => ({ id: l.id, name: l.name, description: l.description })),
+                      readyMadeSections: LAYOUTS.map((l) => ({
+                          id: l.id,
+                          name: l.name,
+                          description: l.description,
+                          usuallyGoes: l.place,
+                          ...(l.interactive ? { interactive: true } : {}),
+                      })),
+                  }
+                : {}),
         });
     },
 );
@@ -323,7 +326,7 @@ server.tool(
     { id: z.string() },
     async ({ id }) => {
         const layout = findLayout(id);
-        if (!layout) return json({ error: `There is no section called ${id}. Call design_kit to see the sections.` });
+        if (!layout) return json({ error: `There is no section called ${id}. Call design_kit with readyMade: true to see the sections.` });
         // A website given its kit a while ago has an older kit: bring its two files up to date,
         // so the section it is about to get is styled and works. (Sections only ever gain styles.)
         if (await currentLook()) {
@@ -385,13 +388,13 @@ server.tool(
 
 server.tool(
     "design_use_look",
-    "Give the website one of the ready-made looks: writes theme.css (the look's variables) and kit.css into the website. Use it only when the person asks for that look by name; otherwise make a look of the website's own with design_make_look. The id \"own\" brings back the look made for this website. Afterwards every page must link both files and use the variables; then look at the pages.",
+    "Give the website one of the ready-made looks: writes theme.css (the look's variables) and kit.css into the website. Use it only when the person asks for that look by name; otherwise make a look of the website's own with design_make_look. The id \"own\" brings back the look made for this website. Afterwards link theme.css and kit.css from the pages; then look at the pages.",
     { id: z.string() },
     async ({ id }) => {
         const own = id === OWN ? await savedOwnLook() : null;
         if (id === OWN && !own) return json({ error: "This website has no look of its own yet. Make one with design_make_look." });
         const look = own ?? findLook(id);
-        if (!look) return json({ error: `There is no look called ${id}. Call design_kit to see the looks.` });
+        if (!look) return json({ error: `There is no look called ${id}. Call design_kit with readyMade: true to see the looks.` });
         if (own) await writeOwn(own);
         else await writeFile(join(workspace, THEME_FILE), themeCss(look));
         await writeFile(join(workspace, KIT_FILE), KIT_CSS);
@@ -416,7 +419,7 @@ const writeOwn = async (look: NonNullable<Awaited<ReturnType<typeof savedOwnLook
 
 server.tool(
     "design_make_look",
-    `Make a look for this website alone, or change the one it has: its colours, lettering, corners, spacing and movement, as CSS variables in theme.css. This is how a website gets a design language that can be restyled in one step: use it for a new website, and whenever the person asks to change something about the look (a colour, a font, the corners, the whole feeling). Any CSS value is accepted, and you may add variables of your own. Give every value that matters to the design; anything you leave out is filled in from the look named in startFrom (use "own" to adjust the look this website already has). You are told if text may be hard to read; that is advice. Afterwards look at the pages with page_look, and tell the person in a sentence what the look is. The variables the kit's styles read: ${Object.entries(
+    `Make a look for this website alone, or change the one it has: its colours, lettering, corners, spacing and movement, as CSS variables in theme.css. This is how a website gets a design language that can be restyled in one step: use it for a new website, and whenever the person asks to change something about the look (a colour, a font, the corners, the whole feeling). Any CSS value is accepted, and you may add variables of your own. Give every value that matters to the design; anything you leave out is filled in from the look named in startFrom (use "own" to adjust the look this website already has). You are told if text may be hard to read; that is advice. Afterwards look at the pages with page_look, and tell the person in a sentence what the look is. Typefaces the website can carry as its own files (give the id): ${FONTS.map((f) => `${f.id} (${f.description})`).join("; ")}. Any other typeface may be given as a CSS font-family value. The variables the kit's styles read: ${Object.entries(
         OWN_VALUES,
     )
         .map(([k, v]) => `${k} (${v})`)
@@ -435,7 +438,7 @@ server.tool(
             .string()
             .optional()
             .describe(
-                "Headlines: the id of a font from design_kit's fonts (the website then carries it), or any CSS font-family value for a font you add or load yourself",
+                "Headlines: the id of a typeface from the list above (the website then carries it), or any CSS font-family value for a font you add or load yourself",
             ),
         bodyFont: z.string().optional().describe("Body text: likewise"),
         values: z
@@ -468,10 +471,18 @@ server.tool(
             ).map((f) => f.id);
         }
         const written = await writeOwn(made.look);
-        await writeFile(join(workspace, KIT_FILE), KIT_CSS);
-        await writeFile(join(workspace, KIT_SCRIPT), KIT_JS);
+        // The kit's own files are brought up to date where the website has them, and not put into one that does not.
+        const kit: string[] = [];
+        for (const [file, body] of [
+            [KIT_FILE, KIT_CSS],
+            [KIT_SCRIPT, KIT_JS],
+        ] as const) {
+            if (!(await readFile(join(workspace, file), "utf8").catch(() => null))) continue;
+            await writeFile(join(workspace, file), body);
+            kit.push(file);
+        }
         return json({
-            written: [...written.filter((p) => p !== OWN_FILE), KIT_FILE, KIT_SCRIPT],
+            written: [...written.filter((p) => p !== OWN_FILE), ...kit],
             look: made.look.name,
             variables: made.look.tokens,
             ...(made.warnings.length ? { worthFixing: made.warnings } : {}),

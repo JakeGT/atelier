@@ -156,6 +156,8 @@ export class OpenCodeAgent implements AgentRuntime {
                             ATELIER_WORKSPACE: input.workspaceDir,
                             ATELIER_VISION: input.vision ? "1" : "0",
                             ...(process.env.CHROMIUM_PATH ? { CHROMIUM_PATH: process.env.CHROMIUM_PATH } : {}),
+                            // The way out to the web, for the browser the assistant looks at pages with.
+                            ...(this.opts.egressProxy ? { EGRESS_PROXY: this.opts.egressProxy } : {}),
                         },
                     },
                 },
@@ -199,6 +201,12 @@ export class OpenCodeAgent implements AgentRuntime {
         );
         if (outcome.ended !== "exited") throw new RunInterrupted(outcome.ended, parser.result());
         if (parser.error) throw new Error(parser.error);
+        // No exit code: it did not end, it was ended, from outside. In a workspace that is nearly
+        // always the system reclaiming memory.
+        if (outcome.code === null)
+            throw new Error(
+                "The assistant was stopped part-way by the system, most likely because its workspace ran out of memory. What it had done so far is kept. Send your request again to carry on.",
+            );
         if (outcome.code !== 0) throw new Error(`opencode run failed (exit ${outcome.code}): ${outcome.stderr.slice(0, 2000)}`);
         return parser.result();
     }

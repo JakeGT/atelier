@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { findLook, LOOK_PREFIX, THEME_FILE, themeCss } from "../design/looks.ts";
-import { OWN, OWN_FILE } from "../design/ownLook.ts";
+import { lookIn, OWN, OWN_FILE } from "../design/ownLook.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { answersPrompt, answersText, isAskLevel } from "../services/asking.ts";
 import { starter } from "../services/designKit.ts";
@@ -192,12 +192,21 @@ export function workspaceRoutes(api: Api): void {
             { tenantId: org.id, projectId: project.id, sessionId: session.id, exp: Math.floor(Date.now() / 1000) + AGENT_TOKEN_TTL_S },
             secretsKey,
         );
+        // What was chosen for the design, so the assistant knows without having to go and look:
+        // a look, styling of the website's own, or nothing at all.
+        const look = await runtime
+            .readFile(project.id, THEME_FILE)
+            .then(async (theme) => {
+                if (theme) return lookIn(Buffer.from(theme.body).toString("utf8"))?.name ?? "";
+                return (await runtime.readFile(project.id, "index.html")) ? "" : null;
+            })
+            .catch(() => undefined);
         try {
             const run = await runtime.startRun(project.id, {
                 prompt,
                 // The project's own model, else the organisation's, else the runtime's default.
                 model,
-                instructions: agentInstructions(project),
+                instructions: agentInstructions({ ...project, look }),
                 apiUrl,
                 agentToken,
                 resume,
