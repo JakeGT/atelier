@@ -56,6 +56,7 @@ app.post("/runs", async (c) => {
         apiUrl?: unknown;
         agentToken?: unknown;
         resume?: unknown;
+        vision?: unknown;
     } | null;
     if (
         !body ||
@@ -75,6 +76,7 @@ app.post("/runs", async (c) => {
         apiUrl: body.apiUrl,
         agentToken: body.agentToken,
         resume: body.resume === true,
+        vision: body.vision === true,
     });
     if (run === "busy") return c.json({ error: "busy" }, 409);
     return c.json(run, 202);

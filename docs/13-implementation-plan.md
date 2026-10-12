@@ -394,6 +394,11 @@ current host. What needs the VPS is P6, which is last.
   built:** deleting a whole studio, monthly aggregates of usage.
 - E5.3 Alerting (build/publish failure, stall, spend over ceiling). **Built
   (`p5-media`):** notifications in the app and by e-mail (docs/12 §6).
+- E5.5 The assistant checks and sees its own work (ADR-0015, asked for and
+  built 2026-10-10 on `assistant-sight`): a check of what a visitor can read
+  but nobody can edit, used by the assistant before it finishes and shown on the
+  Content page; and a browser in the workspace so the assistant can look at a
+  page at phone and desktop width.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

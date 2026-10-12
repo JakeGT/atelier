@@ -331,6 +331,34 @@ test("media: an uploaded file is served in the preview and published with the re
     assert.match(inside(ws.container, "cat /workspace/index.html").out, /data-content-image/);
 });
 
+test("the assistant can look at a page: a real browser runs inside the workspace's confinement", async () => {
+    inside(
+        ws.container,
+        `printf '<!doctype html><title>Seen</title><meta name="viewport" content="width=device-width"><h1 style="margin:24px">Hello</h1><div style="width:900px;height:20px;background:red"></div>' > /workspace/index.html`,
+    );
+    const script = `
+        import { Browser, browserPath } from "/app/apps/server/src/mcp/look.ts";
+        import { serveSite } from "/app/apps/server/src/mcp/site.ts";
+        const site = await serveSite("/workspace", { documents: async () => [], media: async () => [], mediaFile: async () => null });
+        const browser = new Browser(browserPath());
+        const seen = await browser.look(site.url + "index.html", "phone");
+        console.log(JSON.stringify({ title: seen.title, pictures: seen.pictures.length, bytes: seen.pictures[0].length, problems: seen.problems, outline: seen.outline }));
+        await browser.close(); site.close(); process.exit(0);`;
+    const out = inside(ws.container, `cat > /tmp/look.mjs <<'EOS'\n${script}\nEOS\nnode /tmp/look.mjs`);
+    assert.ok(out.ok, out.out);
+    const seen = JSON.parse(out.out.split("\n").at(-1) ?? "{}") as {
+        title: string;
+        pictures: number;
+        bytes: number;
+        problems: string[];
+        outline: string[];
+    };
+    assert.equal(seen.title, "Seen");
+    assert.ok(seen.pictures >= 1 && seen.bytes > 1000);
+    assert.match(seen.problems.join(" "), /wider than the screen/);
+    assert.match(seen.outline[0] ?? "", /^h1 'Hello' at left 32px, top 24px/);
+});
+
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
     const tokenOf = (name: string) =>
         inspect<Inspect>(name)
@@ -362,7 +390,7 @@ test("archiving stops the workspace; deleting removes it and its files", async (
     await json(await call("POST", `/projects/${ws.id}/sessions`));
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
     // (Rolling back changed what is live, not the working files.)
-    assert.match(inside(ws.container, "cat /workspace/index.html").out, /data-content-image/);
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /<title>Seen<\/title>/);
 
     await json(await call("POST", `/projects/${ws.id}/archive`));
     // Archived, the published website is still up; deleting takes it down.

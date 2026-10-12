@@ -15,6 +15,9 @@ export interface RunRequest {
     agentToken: string;
     // Pick up the previous request where it left off.
     resume?: boolean;
+    // Whether the model can read pictures: decides whether "look at the page" sends
+    // it pictures or a measured description.
+    vision?: boolean;
 }
 
 export interface PreviewFile {

@@ -80,6 +80,8 @@ export interface AgentRunInput {
     agentToken: string;
     // Pick up the previous request where it left off (it was stopped or ran out of time).
     resume?: boolean;
+    // The model can read pictures.
+    vision?: boolean;
     // Called as each step completes, so progress can be shown while it works.
     onStep?: (step: AgentToolEvent) => void;
     control?: RunControl;
@@ -147,7 +149,14 @@ export class OpenCodeAgent implements AgentRuntime {
                     "atelier-content": {
                         type: "local",
                         command: ["node", this.opts.mcpEntry],
-                        environment: { ATELIER_API_URL: input.apiUrl, ATELIER_AGENT_TOKEN: input.agentToken },
+                        environment: {
+                            ATELIER_API_URL: input.apiUrl,
+                            ATELIER_AGENT_TOKEN: input.agentToken,
+                            // Where the website's files are, for the assistant's own checks (content_check, page_look).
+                            ATELIER_WORKSPACE: input.workspaceDir,
+                            ATELIER_VISION: input.vision ? "1" : "0",
+                            ...(process.env.CHROMIUM_PATH ? { CHROMIUM_PATH: process.env.CHROMIUM_PATH } : {}),
+                        },
                     },
                 },
             }),
@@ -318,6 +327,16 @@ class RunParser {
 
     // Which file a file tool touched, relative to the website. Nothing else is passed on.
     private target(name: string, evt: RunJsonEvent): string | null {
+        // Looking at a page: which page and at what size ("about.html@phone"), so the person can be told.
+        if (name.endsWith("page_look")) {
+            const input = evt.part?.state?.input as { page?: unknown; size?: unknown } | undefined;
+            const page =
+                typeof input?.page === "string" && /^[\w./-]{1,150}\.html?$/.test(input.page) && !input.page.includes("..")
+                    ? input.page
+                    : "index.html";
+            const size = input?.size === "desktop" || input?.size === "tablet" ? input.size : "phone";
+            return `${page}@${size}`;
+        }
         if (!FILE_TOOLS.has(name)) return null;
         const raw = evt.part?.state?.input?.filePath ?? evt.part?.state?.input?.path;
         if (typeof raw !== "string" || !raw) return null;

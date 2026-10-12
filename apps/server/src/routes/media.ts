@@ -149,6 +149,23 @@ export function mediaRoutes(api: Api): void {
         });
     });
 
+    // A library file's bytes, for the assistant's own look at a page (page_look). Read-only.
+    declared.push({ method: "GET", path: "/api/agent/media/file/:name", permission: "agent-token" });
+    app.get("/api/agent/media/file/:name", async (c) => {
+        const auth = c.req.header("authorization");
+        const claims = auth?.startsWith("Bearer ") ? verifyAgentToken(auth.slice(7), secretsKey) : null;
+        const project = claims ? await store.projects.findById(claims.tenantId, claims.projectId) : null;
+        const name = c.req.param("name") ?? "";
+        if (!claims || !project || project.archivedAt) return c.json({ error: "unauthorized" }, 401);
+        if (!storage || !MEDIA_NAME.test(name)) return c.json({ error: "not found" }, 404);
+        const known = (await store.media.list(claims.tenantId, claims.projectId)).some((a) => filesOf(a).includes(name));
+        const body = known ? await storage.get(storageKey({ tenantId: claims.tenantId, projectId: claims.projectId }, name)) : null;
+        if (!body) return c.json({ error: "not found" }, 404);
+        return new Response(body as Uint8Array<ArrayBuffer>, {
+            headers: { "content-type": mimeOfName(name), "x-content-type-options": "nosniff" },
+        });
+    });
+
     // The assistant can see what is in the library and place a file by its path. It cannot add or remove.
     declared.push({ method: "GET", path: "/api/agent/media", permission: "agent-token" });
     app.get("/api/agent/media", async (c) => {
