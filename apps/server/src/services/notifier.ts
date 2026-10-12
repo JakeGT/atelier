@@ -41,7 +41,11 @@ export class ResendMailer implements Mailer {
             }),
             signal: AbortSignal.timeout(15_000),
         });
-        if (!res.ok) throw new Error(`the mail service answered ${res.status}`);
+        // Its reason goes with the number (a refused sender and a rate limit are different repairs); this is only ever logged.
+        if (!res.ok) {
+            const why = (await res.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 200);
+            throw new Error(`the mail service answered ${res.status}${why ? `: ${why}` : ""}`);
+        }
     }
 }
 
@@ -102,7 +106,7 @@ export class Notifier {
                 });
                 await this.notifications.markEmailed(userId, made.id);
             } catch (err) {
-                console.warn(`could not notify ${userId} (${notice.kind}): ${(err as Error).message}`);
+                console.warn(`could not notify ${userId} (${notice.kind}): ${(err as Error)?.message ?? err}`);
             }
         }
     }
@@ -118,7 +122,10 @@ export class Notifier {
 
     // A studio's owners and admins: the people who can do something about it.
     async tellStudio(tenantId: string, notice: Omit<NoticeInput, "tenantId">, alsoTell: string[] = []): Promise<void> {
-        const members = await this.store.memberships.list(tenantId).catch(() => []);
+        const members = await this.store.memberships.list(tenantId).catch((err: Error) => {
+            console.warn(`could not find who to tell in studio ${tenantId} (${notice.kind}): ${err?.message ?? err}`);
+            return [];
+        });
         const responsible = members.filter((m) => m.role === "owner" || m.role === "admin").map((m) => m.userId);
         await this.tell([...responsible, ...alsoTell], { ...notice, tenantId });
     }
@@ -168,7 +175,10 @@ export class Notifier {
     async tellOperator(kind: string, title: string, body: string): Promise<void> {
         // Where to go and look: reports have their own page.
         const link = kind.startsWith("feedback.") ? "/admin/reports" : "/admin";
-        const admins = await this.notifications.admins().catch(() => []);
+        const admins = await this.notifications.admins().catch((err: Error) => {
+            console.warn(`could not find the operators to notify (${kind}): ${err?.message ?? err}`);
+            return [];
+        });
         const hour = new Date().toISOString().slice(0, 13);
         for (const userId of admins) {
             await this.notifications
@@ -191,7 +201,11 @@ export class Notifier {
                     origin: this.origin,
                 }),
             })
-            .catch((err: Error) => console.warn(`could not e-mail the operator: ${err.message}`));
+            .catch((err: Error) => {
+                console.warn(`could not e-mail the operator: ${err.message}`);
+                // A mail that did not go has not told anyone: try again after five minutes, not thirty.
+                this.lastOperatorMail.set(kind, Date.now() - 25 * 60_000);
+            });
     }
 
     private letter(notice: NoticeInput): string {

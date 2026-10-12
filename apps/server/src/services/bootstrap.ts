@@ -35,13 +35,24 @@ export async function ensurePersonalStudio(store: Store, user: Pick<User, "id" |
     }
 
     const base = slugify(user.name || user.email).slice(0, 24) || "studio";
-    const org = await store.organizations.create({
+    // Made as an ordinary studio, given its owner, and only then marked as theirs. Stopping
+    // part-way then leaves nothing that claims to be their personal studio without them in
+    // it, which the next sign-in could neither see nor replace.
+    const made = await store.organizations.create({
         id: randomUUID(),
         slug: `${base}-${randomBytes(6).toString("hex")}`,
         name: personalStudioName(user),
-        personalOf: user.id,
     });
-    await store.memberships.add({ tenantId: org.id, userId: user.id, role: "owner" });
+    await store.memberships.add({ tenantId: made.id, userId: user.id, role: "owner" });
+    if (!(await store.organizations.setPersonal(made.id, user.id))) {
+        // They signed in twice at the same moment and the other sign-in got there first:
+        // this studio is the spare one.
+        await store.organizations.delete(made.id);
+        const theirs = (await store.organizations.listForUser(user.id)).find((o) => o.personalOf === user.id);
+        if (!theirs) throw new Error("could not make a personal studio");
+        return theirs;
+    }
+    const org: Organization = { ...made, personalOf: user.id };
     await store.audit.record({
         tenantId: org.id,
         actorId: user.id,
@@ -65,11 +76,13 @@ export async function acceptInvitations(
     },
 ): Promise<number> {
     const joined = await store.invitations.acceptAll(user.id, user.email);
-    for (const tenantId of joined) {
+    // They already belong to each of these. Recording it and telling people is done one studio
+    // at a time, so that a failure for one neither loses the others nor fails the sign-in.
+    const after = async (tenantId: string): Promise<void> => {
         await store.audit.record({ tenantId, actorId: user.id, action: "invitation.accept", target: `user:${user.id}`, detail: null });
-        if (!notifier) continue;
+        if (!notifier) return;
         const org = await store.organizations.findById(tenantId);
-        if (!org) continue;
+        if (!org) return;
         await notifier.tell([user.id], {
             tenantId,
             kind: "studio.joined",
@@ -89,6 +102,9 @@ export async function acceptInvitations(
             link: `/o/${org.slug}/settings`,
             dedupe: `member:${tenantId}:${user.id}`,
         });
+    };
+    for (const tenantId of joined) {
+        await after(tenantId).catch((err: Error) => console.warn(`could not record joining ${tenantId}: ${err.message}`));
     }
     return joined.length;
 }

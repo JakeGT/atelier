@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PERMISSIONS, ROLE_PERMISSIONS } from "@atelier/shared";
+import { hasPermission, OPERATOR_PERMISSIONS, type OrgRole, PERMISSIONS, ROLE_PERMISSIONS } from "@atelier/shared";
 import { makeApp } from "./helpers.ts";
 
 // docs/06 §4 and docs/11 §7: every API route declares the permission it needs,
@@ -40,4 +40,22 @@ test("publishing and rolling back are owner/admin only; viewers are read-only", 
         ROLE_PERMISSIONS.viewer.filter((p) => !p.endsWith(".read") && p !== "session.open"),
         [],
     );
+});
+
+test("every permission can be held by someone, and only the owner can delete the studio", () => {
+    const granted = new Set([...Object.values(ROLE_PERMISSIONS).flat(), ...OPERATOR_PERMISSIONS]);
+    for (const p of PERMISSIONS) assert.ok(granted.has(p), `nobody can be given ${p}`);
+    assert.deepEqual(
+        ROLE_PERMISSIONS.owner.filter((p) => !ROLE_PERMISSIONS.admin.includes(p)),
+        ["org.delete"],
+    );
+    assert.deepEqual(
+        ROLE_PERMISSIONS.admin.filter((p) => !ROLE_PERMISSIONS.owner.includes(p)),
+        [],
+    );
+});
+
+test("a role that is not known may do nothing", () => {
+    assert.equal(hasPermission("retired" as OrgRole, "org.read"), false);
+    assert.equal(hasPermission("viewer", "org.read"), true);
 });

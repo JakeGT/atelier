@@ -1,5 +1,6 @@
-node_modules
-dist
+# At any depth: a workspace's own node_modules or build output must not replace what the image installs and builds.
+**/node_modules
+**/dist
 .git
 .env
 .env.*

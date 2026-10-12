@@ -23,7 +23,11 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
     const safeNext = (requested: string | undefined): string => {
         // After signing in, people go to their studio unless they were heading somewhere.
         const next = requested ?? "/studio";
-        return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/studio";
+        // Only a path of our own. A browser drops tabs and line breaks from an address and reads a
+        // backslash as a slash, so "/<tab>/elsewhere.example" would otherwise leave for another website.
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what is refused here.
+        if (/[\u0000-\u001f\u007f\\]/.test(next)) return "/studio";
+        return next.startsWith("/") && !next.startsWith("//") ? next : "/studio";
     };
 
     app.get("/auth/login", async (c) => {
@@ -57,8 +61,15 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
         const nonce = randomNonce();
         const codeVerifier = randomCodeVerifier();
         const maxAge = c.req.query("prompt") === "login" ? 0 : undefined;
+        // The identity provider may be out of reach: say so on the sign-in page instead of a bare error.
+        let url: string;
+        try {
+            url = await oidc.buildLoginUrl(state, nonce, codeVerifier, maxAge);
+        } catch (err) {
+            console.error(`OIDC login failed: ${(err as Error).message}`);
+            return c.redirect("/login?auth_error=failed");
+        }
         const flowId = sessions.createFlow({ state, nonce, codeVerifier, next, maxAge });
-        const url = await oidc.buildLoginUrl(state, nonce, codeVerifier, maxAge);
         writeCookie(c, "oidc", secure, flowId, 10 * 60);
         return c.redirect(url);
     });
@@ -101,23 +112,33 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             await ensurePersonalStudio(store, user);
             await acceptInvitations(store, user, notifier);
 
-            // A fresh session id on every sign-in (no fixation); replace any old one.
+            // A fresh session id on every sign-in (no fixation); replace any old one. The new one is
+            // made first, so a failure here does not also sign the person out of the one they had.
             const old = readCookie(c, "session", secure);
-            if (old) await sessions.destroySession(old);
             // Step-up is measured from *this* moment: the person has just completed a
             // round trip through the identity provider in this browser, which a stolen
             // Atelier cookie alone cannot do. (The provider's own auth_time is not used:
             // it can be hours old under single sign-on, and a provider that declines to
             // re-prompt would then make privileged actions impossible.)
             const { id } = await sessions.createSession(user.id);
+            if (old && old !== id) await sessions.destroySession(old);
             writeCookie(c, "session", secure, id);
-            await store.audit.record({
-                tenantId: null,
-                actorId: user.id,
-                action: "auth.sign_in",
-                target: `user:${user.id}`,
-                detail: { admin: isAdmin, stepUp: flow.maxAge !== undefined, providerAuthTime: new Date(claims.authTime).toISOString() },
-            });
+            // The person is signed in by now: a provider's odd auth_time, or the record failing to
+            // be written, must not send them back to the sign-in page saying it failed.
+            const providerAuthTime = new Date(claims.authTime);
+            await store.audit
+                .record({
+                    tenantId: null,
+                    actorId: user.id,
+                    action: "auth.sign_in",
+                    target: `user:${user.id}`,
+                    detail: {
+                        admin: isAdmin,
+                        stepUp: flow.maxAge !== undefined,
+                        providerAuthTime: Number.isNaN(providerAuthTime.getTime()) ? null : providerAuthTime.toISOString(),
+                    },
+                })
+                .catch((err: Error) => console.error(`sign-in of ${user.id} was not recorded: ${err.message}`));
             return c.redirect(flow.next);
         } catch (err) {
             console.error(`OIDC callback failed: ${(err as Error).message}`);

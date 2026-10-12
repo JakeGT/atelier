@@ -1,6 +1,6 @@
 import { ArrowRight, Bell, Check, LogOut, MessageSquareWarning, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
-import type { ReactNode } from "react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Inbox, Session } from "../lib/api";
 import { api, isStale, UPDATE_EVENT } from "../lib/api";
 import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
@@ -48,6 +48,55 @@ export interface MenuItem {
     onClick: () => void;
 }
 
+// The keys a menu answers to: Escape closes it (and goes back to the button that opened it),
+// the arrows, Home and End move through what it offers. Goes on the element that holds both
+// the button and the menu.
+export function menuKeys(e: ReactKeyboardEvent<HTMLElement>, close: () => void): void {
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    if (!items.length) return;
+    if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+        e.currentTarget.querySelector<HTMLElement>("[aria-expanded]")?.focus();
+        return;
+    }
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    let to: number;
+    if (e.key === "ArrowDown") to = at < 0 ? 0 : (at + 1) % items.length;
+    else if (e.key === "ArrowUp") to = at < 0 ? items.length - 1 : (at - 1 + items.length) % items.length;
+    else if (e.key === "Home") to = 0;
+    else if (e.key === "End") to = items.length - 1;
+    else return;
+    e.preventDefault();
+    items[to]?.focus();
+}
+
+// Tab stays inside `box` (a dialog) while focus is in it. Focus that is in another dialog,
+// such as a picker opened on top of this one, is left to that one.
+export function keepTabInside(e: { key: string; shiftKey: boolean; preventDefault: () => void }, box: HTMLElement | null): void {
+    if (e.key !== "Tab" || !box) return;
+    const holder = document.activeElement?.closest('[role="dialog"]') ?? null;
+    // Focus on nothing at all belongs to whichever dialog was opened last.
+    if (holder ? holder !== box : [...document.querySelectorAll('[role="dialog"]')].at(-1) !== box) return;
+    const stops = [
+        ...box.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    ].filter((el) => !el.hasAttribute("disabled") && el.getClientRects().length > 0);
+    const first = stops[0];
+    const last = stops.at(-1);
+    const now = document.activeElement;
+    if (!first || !last) {
+        e.preventDefault();
+        return;
+    }
+    if (e.shiftKey && (now === first || !holder || now === box)) {
+        e.preventDefault();
+        last.focus();
+    } else if (!e.shiftKey && (now === last || !holder)) {
+        e.preventDefault();
+        first.focus();
+    }
+}
+
 export function UserMenu({
     session,
     theme,
@@ -60,12 +109,15 @@ export function UserMenu({
     items?: MenuItem[];
 }) {
     const [open, setOpen] = useState(false);
+    const toast = useToast();
     const ref = useClickOutside(useCallback(() => setOpen(false), []));
-    const initial = (session.name || session.email).trim().charAt(0).toUpperCase();
+    // The first whole character of their name; of their address if they have given no name.
+    const initial = (Array.from(session.name.trim())[0] ?? Array.from(session.email.trim())[0] ?? "").toUpperCase();
     const { inbox, showing, show, hide, setEmail } = useInbox();
     const unread = inbox?.unread ?? 0;
     return (
-        <div className="menu-wrap" ref={ref}>
+        // biome-ignore lint/a11y/noStaticElementInteractions: the keys are for the button and the menu inside it
+        <div className="menu-wrap" ref={ref} onKeyDown={(e) => open && menuKeys(e, () => setOpen(false))}>
             {/* Something new: said in words, beside the account button, until it has been looked at. */}
             {unread > 0 && (
                 <button type="button" className="btn btn-sm notice-new" onClick={show}>
@@ -122,7 +174,15 @@ export function UserMenu({
                             {theme === "paper" ? "Switch to night colours" : "Switch to daylight colours"}
                         </button>
                     )}
-                    <button type="button" role="menuitem" onClick={() => void api.logout()}>
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                            setOpen(false);
+                            // Signing out that did not happen is said, so nobody walks away thinking they are signed out.
+                            api.logout().catch((err: Error) => toast(`You are still signed in. ${err.message}`, "error"));
+                        }}
+                    >
                         <LogOut /> Sign out
                     </button>
                 </div>
@@ -137,9 +197,22 @@ export function UserMenu({
 // a website that could not be published). Checked every minute and whenever the
 // window is returned to.
 function useInbox() {
+    const toast = useToast();
     const [inbox, setInbox] = useState<Inbox | null>(null);
     const [showing, setShowing] = useState(false);
-    const load = useCallback(() => api.notifications().then(setInbox, () => {}), []);
+    // A check in the background that fails is left for the next one: what is shown stays as it was.
+    // Says whether there is now something to show.
+    const load = useCallback(
+        () =>
+            api.notifications().then(
+                (i) => {
+                    setInbox(i);
+                    return true;
+                },
+                () => false,
+            ),
+        [],
+    );
     useEffect(() => {
         void load();
         const timer = setInterval(() => !document.hidden && void load(), 60_000);
@@ -155,16 +228,26 @@ function useInbox() {
         showing,
         show: () => {
             setShowing(true);
-            void load();
+            // Asked for by the person: if there is nothing to show them, they are told why.
+            void load().then((ok) => {
+                if (ok || inbox) return;
+                setShowing(false);
+                toast("Your notifications couldn't be loaded. Please try again.", "error");
+            });
         },
         // Closing the list is what marks them as seen, so they stay marked "new" while it is open.
+        // If that fails they simply stay "new", which is true.
         hide: () => {
             setShowing(false);
-            void api.readNotifications().then(load, () => {});
+            if (inbox?.unread) void api.readNotifications().then(load, () => {});
         },
         setEmail: (on: boolean) => {
             setInbox((i) => (i ? { ...i, email: on } : i));
-            void api.emailNotifications(on).then(load, load);
+            // If it was not saved, the box goes back to what is true and the person is told.
+            void api.emailNotifications(on).then(load, (err: Error) => {
+                toast(`That wasn't saved. ${err.message}`, "error");
+                void load();
+            });
         },
     };
 }
@@ -179,30 +262,34 @@ function NoticeList({ inbox, onClose, onEmail }: { inbox: Inbox; onClose: () => 
                 </p>
             ) : (
                 <ol className="notices">
-                    {inbox.notifications.map((n) => (
-                        <li key={n.id} className={n.readAt ? "" : "notice-unread"}>
-                            <div>
-                                <strong>{n.title}</strong>
-                                {!n.readAt && <span className="chip chip-seal">New</span>}
-                            </div>
-                            <p>{n.body}</p>
-                            <div className="notice-foot">
-                                <span className="mono muted">{timeAgo(n.createdAt)}</span>
-                                {n.link && (
-                                    <button
-                                        type="button"
-                                        className="btn btn-sm"
-                                        onClick={() => {
-                                            onClose();
-                                            navigate(n.link ?? "/");
-                                        }}
-                                    >
-                                        Go and look <ArrowRight />
-                                    </button>
-                                )}
-                            </div>
-                        </li>
-                    ))}
+                    {inbox.notifications.map((n) => {
+                        // Only a place inside Atelier is gone to, whatever the notification says.
+                        const link = n.link?.startsWith("/") && !n.link.startsWith("//") ? n.link : null;
+                        return (
+                            <li key={n.id} className={n.readAt ? "" : "notice-unread"}>
+                                <div>
+                                    <strong>{n.title}</strong>
+                                    {!n.readAt && <span className="chip chip-seal">New</span>}
+                                </div>
+                                <p>{n.body}</p>
+                                <div className="notice-foot">
+                                    <span className="mono muted">{timeAgo(n.createdAt)}</span>
+                                    {link && (
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm"
+                                            onClick={() => {
+                                                onClose();
+                                                navigate(link);
+                                            }}
+                                        >
+                                            Go and look <ArrowRight />
+                                        </button>
+                                    )}
+                                </div>
+                            </li>
+                        );
+                    })}
                 </ol>
             )}
             <label className="check notice-email">
@@ -229,14 +316,27 @@ function NoticeList({ inbox, onClose, onEmail }: { inbox: Inbox; onClose: () => 
 // ---- dialog -------------------------------------------------------------------------
 
 // `large`: as big as the window allows, for looking at something closely.
+// While it is open the keyboard stays inside it: focus moves into it, Tab goes round within it,
+// and closing it puts focus back where it was.
 export function Dialog({ onClose, children, wide, large }: { onClose: () => void; children: ReactNode; wide?: boolean; large?: boolean }) {
+    const box = useRef<HTMLDivElement>(null);
+    // Kept in a ref: callers pass a new function on every render, and the listener need not follow each one.
+    const close = useRef(onClose);
+    close.current = onClose;
     useEffect(() => {
+        const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        // Something inside may have taken focus already (a field marked to).
+        if (box.current && !box.current.contains(document.activeElement)) box.current.focus();
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") close.current();
+            else keepTabInside(e, box.current);
         };
         document.addEventListener("keydown", onKey);
-        return () => document.removeEventListener("keydown", onKey);
-    }, [onClose]);
+        return () => {
+            document.removeEventListener("keydown", onKey);
+            if (before?.isConnected) before.focus();
+        };
+    }, []);
     return (
         // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop only dismisses; Escape does the same for keyboards
         <div
@@ -246,7 +346,13 @@ export function Dialog({ onClose, children, wide, large }: { onClose: () => void
                 if (e.target === e.currentTarget) onClose();
             }}
         >
-            <div className={`dialog ${large ? "dialog-large" : wide ? "dialog-wide" : ""}`} role="dialog" aria-modal="true">
+            <div
+                className={`dialog ${large ? "dialog-large" : wide ? "dialog-wide" : ""}`}
+                role="dialog"
+                aria-modal="true"
+                tabIndex={-1}
+                ref={box}
+            >
                 {children}
             </div>
         </div>

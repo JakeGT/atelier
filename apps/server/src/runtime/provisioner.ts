@@ -39,6 +39,7 @@ interface ContainerInfo {
     Id: string;
     State?: { Running?: boolean };
     Config?: { Labels?: Record<string, string> };
+    NetworkSettings?: { Networks?: Record<string, unknown> };
 }
 
 export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtimeSecret: string) {
@@ -95,20 +96,39 @@ export function specHash(spec: ReturnType<typeof containerSpec>, imageId: string
 export class Provisioner {
     private readonly cfg: ProvisionerConfig;
     private readonly docker: DockerClient;
-    private readonly pending = new Map<string, Promise<{ workspaceId: string }>>();
+    private readonly pending = new Map<string, { secret: string; done: Promise<{ workspaceId: string }> }>();
+    private readonly queues = new Map<string, Promise<unknown>>();
 
     constructor(cfg: ProvisionerConfig, docker: DockerClient) {
         this.cfg = cfg;
         this.docker = docker;
     }
 
+    // One thing at a time per project: starting, stopping and removing a workspace each take
+    // several steps, and two of them interleaved leave it half-made (or bring back one just removed).
+    private inTurn<T>(projectId: string, work: () => Promise<T>): Promise<T> {
+        const done = (this.queues.get(projectId) ?? Promise.resolve()).then(work, work);
+        const settled = done.catch(() => {});
+        this.queues.set(projectId, settled);
+        void settled.then(() => {
+            if (this.queues.get(projectId) === settled) this.queues.delete(projectId);
+        });
+        return done;
+    }
+
     ensure(projectId: string, runtimeSecret: string): Promise<{ workspaceId: string }> {
         assertProjectId(projectId);
+        // Asked twice at once for the same thing: one piece of work answers both. With another
+        // secret it is not the same thing, and takes its turn.
         const inflight = this.pending.get(projectId);
-        if (inflight) return inflight;
-        const p = this.doEnsure(projectId, runtimeSecret).finally(() => this.pending.delete(projectId));
-        this.pending.set(projectId, p);
-        return p;
+        if (inflight?.secret === runtimeSecret) return inflight.done;
+        const entry = { secret: runtimeSecret, done: this.inTurn(projectId, () => this.doEnsure(projectId, runtimeSecret)) };
+        this.pending.set(projectId, entry);
+        const forget = () => {
+            if (this.pending.get(projectId) === entry) this.pending.delete(projectId);
+        };
+        entry.done.then(forget, forget);
+        return entry.done;
     }
 
     private async inspect(name: string): Promise<ContainerInfo | null> {
@@ -148,7 +168,8 @@ export class Provisioner {
                 Driver: "bridge",
                 Labels: { [MANAGED]: "true" },
             });
-            if (created.status !== 201) throw dockerError("create egress network", created);
+            // 409: another workspace's start made it a moment ago.
+            if (created.status !== 201 && created.status !== 409) throw dockerError("create egress network", created);
         } else if (egress.status !== 200) {
             throw dockerError(`egress network ${this.cfg.egressNetwork}`, egress);
         }
@@ -173,11 +194,15 @@ export class Provisioner {
         if (!info) {
             const created = await this.docker.call("POST", `/containers/create?name=${name}`, spec);
             if (created.status !== 201) throw dockerError("create", created);
-            if (!this.cfg.egressProxy) {
-                // Outbound internet for the model provider; the runtime network is internal.
-                const net = await this.docker.call("POST", `/networks/${this.cfg.egressNetwork}/connect`, { Container: name });
-                if (net.status !== 200) throw dockerError("connect egress", net);
-            }
+        }
+        // Outbound internet for the model provider; the runtime network is internal. Looked at
+        // for a container that was already there too: one whose making stopped before this
+        // step would otherwise be started, time after time, with no way out.
+        if (!this.cfg.egressProxy && !info?.NetworkSettings?.Networks?.[this.cfg.egressNetwork]) {
+            const net = await this.docker.call("POST", `/networks/${this.cfg.egressNetwork}/connect`, { Container: name });
+            // 403 "already exists": it was connected after all.
+            const already = net.status === 403 && /already exists/.test(dockerError("", net).message);
+            if (net.status !== 200 && !already) throw dockerError("connect egress", net);
         }
         if (!info?.State?.Running) {
             const started = await this.docker.call("POST", `/containers/${name}/start`);
@@ -188,16 +213,23 @@ export class Provisioner {
 
     async stop(projectId: string): Promise<void> {
         assertProjectId(projectId);
-        const name = workspaceName(projectId);
-        if (!(await this.inspect(name))) return;
-        const res = await this.docker.call("POST", `/containers/${name}/stop?t=10`);
-        if (res.status !== 204 && res.status !== 304) throw dockerError("stop", res);
+        return this.inTurn(projectId, async () => {
+            const name = workspaceName(projectId);
+            if (!(await this.inspect(name))) return;
+            const res = await this.docker.call("POST", `/containers/${name}/stop?t=10`);
+            // 404: it went away in between, which is stopped enough.
+            if (res.status !== 204 && res.status !== 304 && res.status !== 404) throw dockerError("stop", res);
+        });
     }
 
     // Removes a project's container and its volume: the website's files and history
     // are gone for good. Only ever touches what this provisioner created and labelled.
     async purge(projectId: string): Promise<void> {
         assertProjectId(projectId);
+        return this.inTurn(projectId, () => this.doPurge(projectId));
+    }
+
+    private async doPurge(projectId: string): Promise<void> {
         const name = workspaceName(projectId);
         if (await this.inspect(name)) {
             const rm = await this.docker.call("DELETE", `/containers/${name}?force=true`);
@@ -206,10 +238,14 @@ export class Provisioner {
         const vol = await this.docker.call("GET", `/volumes/${name}`);
         if (vol.status === 404) return;
         if (vol.status !== 200) throw dockerError("inspect volume", vol);
-        // A volume created before labels existed has none; one with labels must be ours.
+        // A volume from before labels existed has none, and belongs to the default installation
+        // (as such a container does); one with labels must be this installation's, for this project.
         const labels = (vol.body as { Labels?: Record<string, string> | null }).Labels ?? {};
-        if (labels[INSTANCE] !== undefined && labels[INSTANCE] !== this.cfg.instance) {
+        if ((labels[INSTANCE] ?? "default") !== this.cfg.instance) {
             throw new Error(`volume ${name} belongs to another Atelier installation`);
+        }
+        if (labels[PROJECT] !== undefined && labels[PROJECT] !== projectId) {
+            throw new Error(`volume ${name} belongs to another website`);
         }
         const rmVol = await this.docker.call("DELETE", `/volumes/${name}`);
         if (rmVol.status !== 204 && rmVol.status !== 404) throw dockerError("remove volume", rmVol);
@@ -228,6 +264,8 @@ export class Provisioner {
 }
 
 export function provisionerApp(provisioner: Provisioner, secret: string): Hono {
+    // Without a secret every request would pass the check below.
+    if (!secret) throw new Error("the provisioner needs a secret");
     const app = new Hono();
     const want = Buffer.from(secret);
     app.get("/healthz", (c) => c.json({ ok: true }));
@@ -246,6 +284,15 @@ export function provisionerApp(provisioner: Provisioner, secret: string): Hono {
         }
     });
     app.use("/workspaces/*", guard);
+    // A project id that is not one is the caller's mistake, not a failure here.
+    app.use("/workspaces/:projectId", async (c, next) => {
+        try {
+            assertProjectId(c.req.param("projectId"));
+        } catch {
+            return c.json({ error: "invalid project id" }, 400);
+        }
+        await next();
+    });
     app.put("/workspaces/:projectId", async (c) => {
         const body = (await c.req.json().catch(() => null)) as { runtimeSecret?: unknown } | null;
         if (typeof body?.runtimeSecret !== "string" || body.runtimeSecret.length < 32)

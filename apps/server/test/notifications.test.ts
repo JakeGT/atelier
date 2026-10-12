@@ -213,3 +213,69 @@ test("e-mails are drawn in Atelier's own style, with its logo, and nothing a per
     assert.match((sent[0] as { html?: string }).html ?? "", /mail-logo\.png[\s\S]*You were added/);
     assert.match(sent[0]?.text ?? "", /^Hello\./);
 });
+
+test("retention: one removed file that cannot be deleted does not hold up the others", async () => {
+    const asset = (id: string, name: string) => ({ id, tenantId: "t", projectId: "p", name, variants: [], poster: null });
+    const purged: string[] = [];
+    const nothing = async () => 0;
+    const store = {
+        organizations: { listAll: async () => [{ id: "t" }] },
+        messages: { purgeBefore: nothing },
+        content: { pruneRevisions: nothing },
+        forms: { purgeBefore: nothing },
+        media: {
+            removedBefore: async () => [asset("a1", "stuck.png"), asset("a2", "fine.png")],
+            purge: async (_tenant: string, id: string) => void purged.push(id),
+        },
+    } as unknown as Parameters<typeof runRetention>[0];
+    const storage = {
+        kind: "memory" as const,
+        put: async () => {},
+        get: async () => null,
+        delete: async (key: string) => {
+            // Not an Error on purpose: whatever is thrown must be reported, not crash the run.
+            if (key.endsWith("stuck.png")) throw "storage is not answering";
+        },
+    };
+    const report = await runRetention(store, storage);
+    assert.equal(report.files, 1);
+    // The one whose file is still there keeps its record, so it is tried again tomorrow.
+    assert.deepEqual(purged, ["a2"]);
+});
+
+test("an operator e-mail that could not be sent is tried again sooner than one that went; the mail service's reason is kept", async (ctx) => {
+    const t = await makeApp();
+    const { Notifier, ResendMailer } = await import("../src/services/notifier.ts");
+    let attempts = 0;
+    let down = true;
+    const mailer: Mailer = {
+        send: async () => {
+            attempts++;
+            if (down) throw new Error("down");
+        },
+    };
+    const notifier = new Notifier(t.store, { mailer, publicOrigin: "https://atelier.example", operatorEmail: "ops@example.com" });
+    ctx.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    const tell = () => notifier.tellOperator("storage.failed", "File storage is failing", "An upload could not be stored.");
+    await tell();
+    await tell();
+    assert.equal(attempts, 1, "not again at once");
+    ctx.mock.timers.tick(6 * 60_000);
+    down = false;
+    await tell();
+    assert.equal(attempts, 2, "again after five minutes, since the first never went");
+    ctx.mock.timers.tick(6 * 60_000);
+    await tell();
+    assert.equal(attempts, 2, "one that went is not repeated for half an hour");
+    ctx.mock.timers.tick(30 * 60_000);
+    await tell();
+    assert.equal(attempts, 3);
+
+    const refused = new ResendMailer({
+        apiKey: "k",
+        from: "Atelier <a@example.com>",
+        fetch: (async () =>
+            Response.json({ name: "validation_error", message: "The sender is not verified" }, { status: 422 })) as typeof fetch,
+    });
+    await assert.rejects(refused.send({ to: "x@example.com", subject: "s", text: "t" }), /answered 422: .*The sender is not verified/);
+});

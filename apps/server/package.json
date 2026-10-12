@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/main.ts",
-    "dev": "COOKIE_SECURE=false node --watch src/main.ts",
-    "migrate": "node src/db/migrate.ts"
+    "dev": "COOKIE_SECURE=false node --watch src/main.ts"
   },
   "dependencies": {
     "@atelier/shared": "workspace:*",

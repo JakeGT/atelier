@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, Bold, GripVertical, Italic, Link2, List, Plus, Tras
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ContentDocument, ContentField } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
-import { Dialog, Dots } from "../ui/kit";
+import { Dialog, Dots, useToast } from "../ui/kit";
 import { PictureField } from "./Media";
 
 // Editing a piece of wording: proper fields with plain labels, in whichever place
@@ -90,7 +90,9 @@ const described = (f: ContentField): Shape => ({
 export function fieldsOf(doc: Pick<ContentDocument, "draft" | "fields">): Shape[] {
     const draft = doc.draft ?? {};
     const known = (doc.fields ?? []).map((f) =>
-        f.type === "items" && !f.itemFields ? { ...shapeOf(f.key, draft[f.key] ?? []), label: f.label, help: f.help } : described(f),
+        f.type === "items" && !f.itemFields
+            ? { ...shapeOf(f.key, draft[f.key] ?? []), label: f.label, help: f.help, required: f.required, max: f.max }
+            : described(f),
     );
     const seen = new Set(known.map((f) => f.key));
     return [
@@ -112,14 +114,19 @@ const text = (v: unknown): string =>
 const lines = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => !isObject(x)).map((x) => text(x)) : []);
 const entries = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isObject) : []);
 
-// What is stored: lists without blank lines, everything else as typed.
+// What is stored: lists without blank lines, everything else as typed. A value that is not what
+// its field expects (a list holding numbers or further lists, say, as the assistant may have
+// saved it) is left exactly as it is: saving something else in the document must not change or lose it.
 function tidy(shape: Shape, value: unknown): unknown {
-    if (shape.type === "list")
-        return lines(value)
-            .map((l) => l.trim())
-            .filter(Boolean);
-    if (shape.type === "items") return entries(value).map((e) => tidyAll(shape.parts ?? [], e));
-    if (shape.type === "group") return tidyAll(shape.parts ?? [], isObject(value) ? value : {});
+    if (shape.type === "list") {
+        if (!Array.isArray(value) || value.some((x) => typeof x !== "string")) return value;
+        return value.map((l: string) => l.trim()).filter(Boolean);
+    }
+    if (shape.type === "items") {
+        if (!Array.isArray(value) || !value.every(isObject)) return value;
+        return value.map((e) => tidyAll(shape.parts ?? [], e));
+    }
+    if (shape.type === "group") return isObject(value) ? tidyAll(shape.parts ?? [], value) : value;
     return value;
 }
 function tidyAll(shapes: Shape[], values: Record<string, unknown>): Record<string, unknown> {
@@ -164,9 +171,12 @@ interface FieldProps {
 }
 
 function Field({ shape, value, onChange, readOnly, id, focus, where }: FieldProps) {
+    // Only a field with a box of its own to type in has something for its label to point at;
+    // a group, a set of entries and a picture do not.
+    const boxed = shape.type !== "group" && shape.type !== "items" && shape.type !== "image" && shape.type !== "video";
     const label = (
         <span className="field-label">
-            <label htmlFor={id} className="eyebrow">
+            <label htmlFor={boxed ? id : undefined} className="eyebrow">
                 {shape.label}
                 {shape.type === "list" && <span className="field-note"> · one per line</span>}
                 {shape.required && <span className="field-note"> · needed before publishing</span>}
@@ -524,9 +534,44 @@ export function WordingDialog(props: FormProps & { onClose: () => void }) {
             <p className="eyebrow">Wording</p>
             <h2>{documentName(props.doc)}</h2>
             <p>Changes show in the preview when you press Save. They go public the next time you publish.</p>
-            <WordingForm {...props} />
+            {/* Keyed by the document: if a different one is shown in this pop-up, its form starts afresh. */}
+            <WordingForm key={props.doc.id} {...props} />
         </Dialog>
     );
+}
+
+// Where a link or a picture may point: a web address, an e-mail address, a telephone number, or
+// one of the website's own pages or files. Anything else that names a scheme (javascript:, data:)
+// is refused. A browser ignores spaces and control characters in a scheme, so they are taken out first.
+const safeAddress = (address: string): boolean => {
+    const bare = [...address].filter((c) => c > " ").join("");
+    return !/^[a-z][a-z0-9+.-]*:/i.test(bare) || /^(https?:\/\/|mailto:|tel:)/i.test(bare);
+};
+const UNSAFE_TAGS = "script,style,iframe,object,embed,template,noscript,svg,math,form,link,meta,base";
+const ADDRESSES = new Set(["href", "src", "srcset", "poster", "data", "action", "formaction", "xlink:href"]);
+
+// Puts formatted wording into the editing box with anything that could run taken out. The server
+// cleans formatted text too, but only fields described as formatted; wording saved without a
+// description is shown here as well, so this page does not rely on that. The wording is read in a
+// document of its own (where nothing loads or runs) and its parts are moved across, never written
+// into this page as markup. Styling on it is kept: it cannot run anything, and losing it would
+// undo what the assistant made the moment someone corrected a word.
+function fillRich(box: HTMLElement, html: string): void {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    for (const el of parsed.body.querySelectorAll(UNSAFE_TAGS)) el.remove();
+    for (const el of parsed.body.querySelectorAll("*")) {
+        for (const a of [...el.attributes]) {
+            const name = a.name.toLowerCase();
+            const unsafe =
+                name.startsWith("on") ||
+                name === "id" ||
+                name === "name" ||
+                name === "srcdoc" ||
+                (ADDRESSES.has(name) && !safeAddress(a.value));
+            if (unsafe) el.removeAttribute(a.name);
+        }
+    }
+    box.replaceChildren(...parsed.body.childNodes);
 }
 
 // A small editor for text with a little formatting: bold, italic, links, lists.
@@ -544,13 +589,14 @@ function RichEditor({
     readOnly: boolean;
     focus: boolean;
 }) {
+    const toast = useToast();
     const box = useRef<HTMLDivElement>(null);
     // The box owns its contents while it is being typed in; only an outside change is written back into it.
     const last = useRef(value);
     useEffect(() => {
         const el = box.current;
         if (!el) return;
-        if (el.innerHTML === "" || value !== last.current) el.innerHTML = value;
+        if (el.innerHTML === "" || value !== last.current) fillRich(el, value);
         last.current = value;
     }, [value]);
     useEffect(() => {
@@ -569,7 +615,13 @@ function RichEditor({
     };
     const link = () => {
         const url = window.prompt("Where should the link go? (a web address, or a page such as about.html)");
-        if (url) run("createLink", url.trim());
+        if (!url?.trim()) return;
+        if (safeAddress(url)) run("createLink", url.trim());
+        else
+            toast(
+                "A link can go to a web address, an e-mail address, a telephone number or one of your pages. No link was added.",
+                "error",
+            );
     };
 
     return (

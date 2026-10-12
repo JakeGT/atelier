@@ -105,7 +105,13 @@
     /* The angles are driven from Landing.tsx (useTilt), eased frame by frame; the
        fallbacks are the resting pose, which is also what reduced-motion and touch get. */
     transform: rotateX(var(--rx, 3deg)) rotateY(var(--ry, -9deg)) rotate(var(--rz, 1deg));
-    will-change: transform;
+}
+
+/* Only where the tilt can run (the same test as useTilt) is the easel kept ready to move. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) and (min-width: 981px) {
+    .easel {
+        will-change: transform;
+    }
 }
 
 .easel-stage {
@@ -403,6 +409,12 @@
     --line: color-mix(in srgb, var(--paper) 14%, transparent);
 }
 
+/* At night this block is the light one, so it takes the paper theme's vermilion: the night
+   one is made for dark backgrounds and is too faint here. */
+:root[data-theme="night"] .rules {
+    --seal: #dc4326;
+}
+
 .rules .display em {
     color: var(--seal);
 }
@@ -452,8 +464,10 @@
 
 .landing-foot {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+    gap: 8px 24px;
     padding: 28px var(--gutter);
     border-top: 1px solid var(--line);
 }

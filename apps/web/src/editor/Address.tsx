@@ -26,6 +26,15 @@ const STATUS: Record<string, { label: string; chip: string }> = {
     unknown: { label: "Status unavailable", chip: "chip-plain" },
 };
 
+// The name in an address ("example.com"), or the address as it is if it cannot be read as one.
+const hostOf = (url: string): string => {
+    try {
+        return new URL(url).host;
+    } catch {
+        return url;
+    }
+};
+
 // Where the website lives: its address, and the owner's own domains.
 export function Address({ project, api, mayManage, canPublish, startUnpublish = false, onUnpublished, onClose }: Props) {
     const toast = useToast();
@@ -83,12 +92,16 @@ export function Address({ project, api, mayManage, canPublish, startUnpublish = 
     }
 
     async function remove(d: HostedDomain) {
+        if (busy) return;
+        setBusy(true);
         try {
             await api.removeDomain(project.id, d.hostname);
             toast(`${d.hostname} is disconnected.`);
             await load();
         } catch (err) {
             fail(err);
+        } finally {
+            setBusy(false);
         }
     }
 
@@ -105,10 +118,13 @@ export function Address({ project, api, mayManage, canPublish, startUnpublish = 
     }
 
     const copy = (text: string) => {
-        void navigator.clipboard.writeText(text).then(() => {
+        // The browser can refuse (an old browser, or copying not allowed here): say so, not nothing.
+        const refused = () => toast("That couldn't be copied from here. Select the address and copy it yourself.", "error");
+        if (!navigator.clipboard) return refused();
+        navigator.clipboard.writeText(text).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 1600);
-        });
+        }, refused);
     };
 
     return (
@@ -127,7 +143,7 @@ export function Address({ project, api, mayManage, canPublish, startUnpublish = 
                 <>
                     <div className="address-line">
                         <a href={hosting.url} target="_blank" rel="noreferrer" className="mono">
-                            {new URL(hosting.url).host} <ExternalLink />
+                            {hostOf(hosting.url)} <ExternalLink />
                         </a>
                         <button type="button" className="btn btn-sm" onClick={() => copy(hosting.url ?? "")}>
                             {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
@@ -160,7 +176,12 @@ export function Address({ project, api, mayManage, canPublish, startUnpublish = 
                                                 </button>
                                             )}
                                             {mayManage && (
-                                                <button type="button" className="btn btn-sm btn-danger" onClick={() => void remove(d)}>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-sm btn-danger"
+                                                    disabled={busy}
+                                                    onClick={() => void remove(d)}
+                                                >
                                                     <Trash2 /> Remove
                                                 </button>
                                             )}

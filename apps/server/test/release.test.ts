@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { ReleaseService } from "../src/services/release.ts";
+import type { Hosting } from "../src/services/hosting.ts";
+import { type ReleaseError, ReleaseService } from "../src/services/release.ts";
 import type { WorkspaceRuntime } from "../src/services/runtime.ts";
 import { MemoryStore } from "../src/store/memory.ts";
 
@@ -67,4 +68,55 @@ test("invalid transitions are refused", async () => {
     await releases.publish(tenantId, projectId, r1.number);
     await assert.rejects(releases.publish(tenantId, projectId, r1.number), /not planned/);
     await assert.rejects(releases.publish(tenantId, projectId, 99), /not found/);
+});
+
+// A host that takes whatever it is given, and counts how often.
+function fakeHost() {
+    const host = { deploys: 0 };
+    const hosting = {
+        deploy: async () => {
+            host.deploys += 1;
+            return { id: "d1", url: "https://d1.example.pages.dev", siteUrl: "https://site.example.pages.dev" };
+        },
+        listDomains: async () => [],
+    } as unknown as Hosting;
+    return { host, hosting };
+}
+
+test("with hosting, a workspace that cannot be reached is said as that, not as nothing built yet", async () => {
+    const { store, tenantId, projectId, actorId } = await setup();
+    const runtime = {
+        head: async () => {
+            throw new Error("fetch failed");
+        },
+    } as unknown as WorkspaceRuntime;
+    const releases = new ReleaseService(store, runtime, fakeHost().hosting);
+    await assert.rejects(
+        releases.create(tenantId, projectId, actorId),
+        (err: ReleaseError) => err.status === 502 && /try again/.test(err.message),
+    );
+    await assert.rejects(releases.share(tenantId, projectId), (err: ReleaseError) => err.status === 502);
+    assert.equal(await store.releases.get(tenantId, projectId, 1), null);
+});
+
+test("a release the host is serving is not called failed when recording it fails; publishing again puts it right", async () => {
+    const { store, tenantId, projectId, actorId } = await setup();
+    const { host, hosting } = fakeHost();
+    const runtime = { head: async () => "a".repeat(40), exportTree: async () => new Uint8Array() } as unknown as WorkspaceRuntime;
+    const releases = new ReleaseService(store, runtime, hosting);
+    const r1 = await releases.create(tenantId, projectId, actorId);
+
+    const goLive = store.releases.goLive;
+    store.releases.goLive = async () => {
+        throw new Error("the database went away");
+    };
+    await assert.rejects(
+        releases.publish(tenantId, projectId, r1.number),
+        (err: ReleaseError) => err.status === 502 && /was published/.test(err.message),
+    );
+    assert.equal(host.deploys, 1);
+    assert.equal((await store.releases.get(tenantId, projectId, r1.number))?.state, "planned");
+
+    store.releases.goLive = goLive;
+    assert.equal((await releases.publish(tenantId, projectId, r1.number)).state, "live");
 });

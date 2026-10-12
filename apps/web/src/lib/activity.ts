@@ -15,6 +15,8 @@ export function plainFile(target: string | null | undefined): string {
             return folder ? `the ${words(folder)} page` : "the home page";
         }
         if (base === "404") return "the “not found” page";
+        // A file with no name before its ending (".html").
+        if (!words(base)) return "a page";
         return `the ${words(base)} page`;
     }
     if (ext === "css") return "the styles";
@@ -63,6 +65,12 @@ function kindOf(name: string): Kind {
     return "other";
 }
 
+const SIZES: Record<string, string | undefined> = { desktop: "on a desktop", tablet: "on a tablet", phone: "on a phone" };
+
+// A step that is over. The engine does not always say how a step ended ("unknown"): it is
+// counted as done, the same in the list of steps and in the one-line summary.
+const finished = (step: AgentToolEvent): boolean => step.state === "completed" || step.state === "unknown";
+
 // What a finished step was, in the past tense: "Wrote the home page".
 export function stepDone(step: AgentToolEvent): string {
     const file = plainFile(step.target);
@@ -77,10 +85,14 @@ export function stepDone(step: AgentToolEvent): string {
             return "Looked through your pages";
         case "check":
             return "Checked its work";
-        case "see":
-            return step.target
-                ? `Looked at ${plainFile(step.target.split("@")[0])} ${step.target.endsWith("@desktop") ? "on a desktop" : step.target.endsWith("@tablet") ? "on a tablet" : "on a phone"}`
-                : "Looked at the page";
+        case "see": {
+            if (!step.target) return "Looked at the page";
+            // "about.html@phone": the page, then the size it was looked at.
+            const at = step.target.lastIndexOf("@");
+            const page = plainFile(at < 0 ? step.target : step.target.slice(0, at));
+            const size = at < 0 ? undefined : SIZES[step.target.slice(at + 1)];
+            return size ? `Looked at ${page} ${size}` : `Looked at ${page}`;
+        }
         case "design":
             return step.name.includes("use_look")
                 ? "Changed the look"
@@ -118,7 +130,7 @@ export function stepItems(steps: AgentToolEvent[]): { text: string; said: boolea
             out.push({ label: s.said ?? "", n: 1, said: true });
             continue;
         }
-        if (s.name === "say" || (s.state !== "completed" && s.state !== "unknown")) continue;
+        if (s.name === "say" || !finished(s)) continue;
         const label = stepDone(s);
         const last = out.at(-1);
         if (last && !last.said && last.label === label) last.n++;
@@ -134,11 +146,12 @@ export function stepList(steps: AgentToolEvent[]): string[] {
 
 // One line for a finished reply: "Wrote 3 pages and the styles · saved your wording".
 export function summary(steps: AgentToolEvent[]): string {
-    const done = steps.filter((t) => t.state === "completed");
+    const done = steps.filter(finished);
     const count = (k: Kind[]) => done.filter((t) => k.includes(kindOf(t.name))).length;
     const parts: string[] = [];
-    const changed = new Set(done.filter(changedFiles).map((t) => plainFile(t.target)));
-    if (changed.size === 1) parts.push(`worked on ${[...changed][0]}`);
+    // Counted by file, not by what a file is called here: two pictures are two parts, not one "an image".
+    const changed = new Set(done.filter(changedFiles).map((t) => t.target ?? ""));
+    if (changed.size === 1) parts.push(`worked on ${plainFile([...changed][0])}`);
     else if (changed.size > 1) parts.push(`worked on ${changed.size} parts of the website`);
     if (count(["wording-save"])) parts.push("saved your wording");
     if (count(["see"])) parts.push("looked at the result");
@@ -150,6 +163,7 @@ export function summary(steps: AgentToolEvent[]): string {
 
 // "0:42"
 export function clock(ms: number): string {
-    const s = Math.max(0, Math.round(ms / 1000));
+    // A time that cannot be worked out reads as none, not as "NaN:NaN".
+    const s = Number.isFinite(ms) ? Math.max(0, Math.round(ms / 1000)) : 0;
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

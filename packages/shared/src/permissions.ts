@@ -38,60 +38,44 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
+const ADMIN_PERMISSIONS: readonly Permission[] = [
+    "org.read",
+    "org.manage",
+    "org.members",
+    "secrets.manage",
+    "project.read",
+    "project.create",
+    "project.manage",
+    "project.archive",
+    "project.delete",
+    "content.read",
+    "content.write",
+    "media.write",
+    "project.edit",
+    "session.open",
+    "release.read",
+    "release.publish",
+    "release.rollback",
+    "domain.manage",
+];
+
 // Which capabilities each organization role grants. Viewer is read-mostly,
 // editor can change content and code, admin adds management, owner is the
 // billing + membership authority.
 export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = {
     viewer: ["org.read", "project.read", "content.read", "release.read", "session.open"],
     editor: ["org.read", "project.read", "content.read", "content.write", "media.write", "project.edit", "session.open", "release.read"],
-    admin: [
-        "org.read",
-        "org.manage",
-        "org.members",
-        "secrets.manage",
-        "project.read",
-        "project.create",
-        "project.manage",
-        "project.archive",
-        "project.delete",
-        "content.read",
-        "content.write",
-        "media.write",
-        "project.edit",
-        "session.open",
-        "release.read",
-        "release.publish",
-        "release.rollback",
-        "domain.manage",
-    ],
-    owner: [
-        "org.delete",
-        "org.read",
-        "org.manage",
-        "org.members",
-        "secrets.manage",
-        "project.read",
-        "project.create",
-        "project.manage",
-        "project.archive",
-        "project.delete",
-        "content.read",
-        "content.write",
-        "media.write",
-        "project.edit",
-        "session.open",
-        "release.read",
-        "release.publish",
-        "release.rollback",
-        "domain.manage",
-    ],
+    admin: ADMIN_PERMISSIONS,
+    // Everything an admin may do, and deleting the studio.
+    owner: ["org.delete", ...ADMIN_PERMISSIONS],
 };
 
 // Platform operators (Authentik platform-admin) get these regardless of org role.
 export const OPERATOR_PERMISSIONS: readonly Permission[] = ["admin.tenants", "admin.audit"];
 
 export function hasPermission(role: OrgRole, permission: Permission): boolean {
-    return ROLE_PERMISSIONS[role].includes(permission);
+    // A role this version does not know (an old row, a newer server) may do nothing.
+    return (ROLE_PERMISSIONS as Record<string, readonly Permission[] | undefined>)[role]?.includes(permission) ?? false;
 }
 
 export function hasOperatorPermission(permission: Permission): boolean {

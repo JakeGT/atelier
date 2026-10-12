@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build the server, runtime, provisioner and egress images
+      - name: Build the server, runtime, provisioner, egress and deployer images
         run: for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:ci .; done
       - name: The runtime image has its tools
         run: docker run --rm --entrypoint sh atelier-runtime:ci -c 'git --version && opencode --version'
@@ -71,7 +71,7 @@ jobs:
         run: |
           docker run -d --name server-ci -e AUTH_MODE=off -e COOKIE_SECURE=false -e RUNTIME_MODE=local atelier-server:ci
           for i in $(seq 1 30); do docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz && break; sleep 1; done
-          docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'
+          docker exec server-ci wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"' || { docker logs server-ci; exit 1; }
           docker rm -f server-ci
 
   # The real images, wired as in production (role split, provisioner, egress proxy), with

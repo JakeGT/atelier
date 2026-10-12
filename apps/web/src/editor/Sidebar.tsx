@@ -55,7 +55,7 @@ export function Sidebar(props: SidebarProps) {
     };
     return (
         <aside className="side">
-            <div className="tabs" role="tablist">
+            <div className="tabs" role="tablist" aria-label="History, published versions, wording and pictures">
                 {TABS.map((t) => (
                     <button
                         key={t.id}
@@ -70,7 +70,7 @@ export function Sidebar(props: SidebarProps) {
                     </button>
                 ))}
             </div>
-            <div className="side-scroll">
+            <div className="side-scroll" role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label}>
                 {ABOUT[tab] && <p className="side-about">{ABOUT[tab]}</p>}
                 {tab === "versions" && <Versions {...props} />}
                 {tab === "releases" && <Releases {...props} />}
@@ -223,6 +223,8 @@ function Content({ documents, canEdit, onSaveDocument, contentHref }: SidebarPro
             className="btn btn-sm side-more"
             href={contentHref}
             onClick={(e) => {
+                // An ordinary click moves within the app; opening in a new tab or window is left to the browser.
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 e.preventDefault();
                 navigate(contentHref);
             }}
@@ -256,7 +258,13 @@ function Document({ doc, canEdit, onSave }: { doc: ContentDocument; canEdit: boo
     const changed = JSON.stringify(doc.draft) !== JSON.stringify(doc.published);
     return (
         <li>
-            <button type="button" className="doc-head" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Open to edit">
+            <button
+                type="button"
+                className="doc-head"
+                onClick={() => setOpen(true)}
+                aria-haspopup="dialog"
+                title={canEdit ? "Open to edit" : "Open to read"}
+            >
                 <PencilLine />
                 <span className="doc-name">
                     <strong>{documentName(doc)}</strong>

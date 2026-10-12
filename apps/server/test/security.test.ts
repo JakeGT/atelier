@@ -27,6 +27,29 @@ test("session expires after idle", async () => {
     assert.equal(await sessions.getUser(id), undefined);
 });
 
+test("someone at work under a short idle limit is not taken for idle", async () => {
+    // A tenth of a second of idleness allowed; a request every 40 ms for well over that.
+    const { sessions, user } = await setup({ idleMinutes: 0.1 / 60, maxHours: 24 });
+    const { id } = await sessions.createSession(user.id);
+    for (let i = 0; i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.ok(await sessions.getUser(id), `still signed in at request ${i}`);
+    }
+});
+
+test("session limits that are not numbers are refused", async () => {
+    await assert.rejects(setup({ idleMinutes: Number.NaN, maxHours: 24 }));
+    await assert.rejects(setup({ idleMinutes: 60, maxHours: -1 }));
+});
+
+test("a sign-in under way can be taken once, and comes back as it was given", async () => {
+    const { sessions } = await setup();
+    const flow = { state: "s", nonce: "n", codeVerifier: "v", next: "/" };
+    const id = sessions.createFlow(flow);
+    assert.deepEqual(sessions.takeFlow(id), flow);
+    assert.equal(sessions.takeFlow(id), undefined);
+});
+
 test("the stored session key is a hash, not the cookie value", async () => {
     const { store, sessions, user } = await setup();
     const { id } = await sessions.createSession(user.id);
@@ -70,4 +93,16 @@ test("agent tokens reject tampering, the wrong key, and expiry", () => {
     assert.equal(verifyAgentToken(`${forged}.${sig}`, "key-a"), null);
     assert.ok(payload);
     assert.equal(verifyAgentToken(signAgentToken({ ...claims, exp: 1 }, "key-a"), "key-a"), null);
+});
+
+test("agent tokens need a secret, and claims of the right shape", () => {
+    const claims = { tenantId: "t", projectId: "p", sessionId: "s", exp: Math.floor(Date.now() / 1000) + 60 };
+    assert.throws(() => signAgentToken(claims, ""));
+    assert.throws(() => verifyAgentToken("a.b", ""));
+    // Signed properly, but not the claims a caller would scope by.
+    const odd = (value: unknown) => signAgentToken(value as typeof claims, "key-a");
+    assert.equal(verifyAgentToken(odd({ ...claims, tenantId: { $ne: "" } }), "key-a"), null);
+    assert.equal(verifyAgentToken(odd({ exp: claims.exp }), "key-a"), null);
+    assert.equal(verifyAgentToken(odd(null), "key-a"), null);
+    assert.equal(verifyAgentToken(odd({ ...claims, exp: "9999999999" }), "key-a"), null);
 });

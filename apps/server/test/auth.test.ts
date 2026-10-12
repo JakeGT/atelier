@@ -276,3 +276,22 @@ test("after a step-up round trip the person can publish, even if the provider re
     const published = await t.app.request(`${releases}/1/publish`, { method: "POST", headers: await write() });
     assert.equal(published.status, 200);
 });
+
+test("signing out at the provider says which client is asking, so the person is sent back", async () => {
+    const opts = {
+        issuer: "https://idp.example/",
+        clientId: "atelier",
+        clientSecret: "secret",
+        publicOrigin: "https://atelier.example",
+        providerName: "idp",
+        adminGroup: "platform-admin",
+        trustEmail: true,
+        scopes: "openid email profile",
+    };
+    const oidc = OidcService.fromMetadata(opts, { issuer: opts.issuer, end_session_endpoint: "https://idp.example/end-session" });
+    const url = new URL((await oidc.logoutUrl()) ?? "");
+    assert.equal(url.searchParams.get("client_id"), "atelier");
+    assert.equal(url.searchParams.get("post_logout_redirect_uri"), "https://atelier.example");
+    // A provider with nowhere to sign out at: no redirect, and the person is simply signed out here.
+    assert.equal(await OidcService.fromMetadata(opts, { issuer: opts.issuer }).logoutUrl(), undefined);
+});

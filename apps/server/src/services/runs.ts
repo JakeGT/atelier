@@ -25,6 +25,8 @@ export interface RunState {
 // and reports runs without the fields added since; nothing downstream should have
 // to know that.
 export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status" | "startedAt">): RunState {
+    // A start time that cannot be read must not make the run itself unreadable.
+    const started = new Date(raw.startedAt).getTime();
     return {
         finishedAt: null,
         result: null,
@@ -32,7 +34,7 @@ export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status"
         checkpoint: null,
         lastActivityAt: raw.startedAt,
         // The earlier runtime stopped a run after fifteen minutes and could not be given more.
-        deadlineAt: new Date(new Date(raw.startedAt).getTime() + 15 * 60_000).toISOString(),
+        deadlineAt: new Date((Number.isNaN(started) ? Date.now() : started) + 15 * 60_000).toISOString(),
         canExtend: false,
         ...raw,
         steps: Array.isArray(raw.steps) ? raw.steps : [],
@@ -96,10 +98,17 @@ export class RunTracker {
             if (run.steps.length < MAX_STEPS) run.steps.push(s);
             run.lastActivityAt = new Date().toISOString();
         };
-        void job({ control, step })
+        // Called inside an async function, so a job that throws before its first await
+        // fails the run like any other, and cannot leave the workspace marked busy for good.
+        void (async () => job({ control, step }))()
             .then(
                 ({ result, checkpoint, status }) => Object.assign(run, { status: status ?? "done", result, checkpoint }),
-                (err: unknown) => Object.assign(run, { status: "failed", error: (err as Error).message }),
+                (err: unknown) => {
+                    // Whatever was thrown, the run says why it failed, and so does the log.
+                    const error = err instanceof Error ? err.message : String(err);
+                    console.error(`run ${run.id} failed: ${error}`);
+                    Object.assign(run, { status: "failed", error });
+                },
             )
             .finally(() => {
                 run.finishedAt = new Date().toISOString();

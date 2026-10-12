@@ -208,10 +208,17 @@ interface LoginSessionRow {
 
 const iso = (v: Ts | null): string | null => (v === null ? null : new Date(v).toISOString());
 const isoNow = (v: Ts): string => new Date(v).toISOString();
-const firstRow = <T>(rows: readonly T[]): T => {
+// `missing`: what to say when a write found nothing to change (the same words the
+// in-memory store uses), rather than the general complaint.
+const firstRow = <T>(rows: readonly T[], missing = "expected exactly one row"): T => {
     const row = rows[0];
-    if (!row) throw new Error("expected exactly one row");
+    if (!row) throw new Error(missing);
     return row;
+};
+// A unique constraint refused the write (optionally: one whose name contains `named`).
+const isUniqueViolation = (err: unknown, named = ""): boolean => {
+    const e = err as { code?: string; constraint_name?: string } | null;
+    return e?.code === "23505" && (e.constraint_name ?? "").includes(named);
 };
 
 const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of, flags";
@@ -443,7 +450,7 @@ export class PostgresStore implements Store {
                     return rows.length > 0;
                 } catch (err) {
                     // The unique index: this person already has a personal studio.
-                    if ((err as { code?: string }).code === "23505") return false;
+                    if (isUniqueViolation(err)) return false;
                     throw err;
                 }
             },
@@ -461,11 +468,13 @@ export class PostgresStore implements Store {
                     (tx) => tx<{ tenant_id: string; role: string }[]>`
                         SELECT tenant_id, role FROM memberships WHERE user_id = ${userId} ORDER BY created_at`,
                 );
+                // Each studio is read inside its own tenant, all at once: this runs on every request.
+                const found = await Promise.all(rows.map((row) => this.organizations.findById(row.tenant_id)));
                 const orgs: (Organization & { role: OrgRole })[] = [];
-                for (const row of rows) {
-                    const org = await this.organizations.findById(row.tenant_id);
+                rows.forEach((row, i) => {
+                    const org = found[i];
                     if (org) orgs.push({ ...org, role: row.role as OrgRole });
-                }
+                });
                 return orgs;
             },
             update: async (id, patch) =>
@@ -481,7 +490,7 @@ export class PostgresStore implements Store {
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(ORG_COLS)}`;
                     if (patch.status) await tx`UPDATE control.tenants SET status = ${patch.status} WHERE id = ${id}`;
-                    return rowToOrg(firstRow(rows));
+                    return rowToOrg(firstRow(rows, "organization not found"));
                 }),
             delete: async (id) => {
                 await this.withTenant(id, async (tx) => {
@@ -666,6 +675,8 @@ export class PostgresStore implements Store {
                 }),
             total: async (tenantId, kinds, since) =>
                 this.withTenant(tenantId, async (tx) => {
+                    // No kinds is nothing to add up (and `IN ()` is not SQL).
+                    if (kinds.length === 0) return 0;
                     const rows = await tx<{ units: string }[]>`
                         SELECT COALESCE(SUM(units), 0) AS units FROM usage_events
                         WHERE occurred_at >= ${since} AND kind IN ${tx(kinds as string[])}`;
@@ -674,14 +685,21 @@ export class PostgresStore implements Store {
         };
 
         this.projects = {
-            create: async (input) =>
-                this.withTenant(input.tenantId, async (tx) => {
-                    const rows = await tx<ProjectRow[]>`
-                        INSERT INTO projects (id, tenant_id, slug, name, template)
-                        VALUES (${input.id}, ${input.tenantId}, ${input.slug}, ${input.name}, ${input.template ?? null})
-                        RETURNING ${tx.unsafe(PROJECT_COLS)}`;
-                    return rowToProject(firstRow(rows));
-                }),
+            create: async (input) => {
+                try {
+                    return await this.withTenant(input.tenantId, async (tx) => {
+                        const rows = await tx<ProjectRow[]>`
+                            INSERT INTO projects (id, tenant_id, slug, name, template)
+                            VALUES (${input.id}, ${input.tenantId}, ${input.slug}, ${input.name}, ${input.template ?? null})
+                            RETURNING ${tx.unsafe(PROJECT_COLS)}`;
+                        return rowToProject(firstRow(rows));
+                    });
+                } catch (err) {
+                    // UNIQUE (tenant_id, slug): the studio already has a website at this address.
+                    if (isUniqueViolation(err, "slug")) throw new SlugTakenError();
+                    throw err;
+                }
+            },
             findById: async (tenantId, id) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<ProjectRow[]>`SELECT ${tx.unsafe(PROJECT_COLS)} FROM projects WHERE id = ${id}`;
@@ -713,7 +731,7 @@ export class PostgresStore implements Store {
                             production_ref = CASE WHEN ${hosting.productionRef !== undefined} THEN ${hosting.productionRef ?? null} ELSE production_ref END,
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(PROJECT_COLS)}`;
-                    return rowToProject(firstRow(rows));
+                    return rowToProject(firstRow(rows, "project not found"));
                 }),
             update: async (tenantId, id, patch) =>
                 this.withTenant(tenantId, async (tx) => {
@@ -730,7 +748,7 @@ export class PostgresStore implements Store {
                             status = CASE WHEN ${archive}::boolean IS NULL THEN status WHEN ${archive}::boolean THEN 'archived' ELSE 'active' END,
                             updated_at = now()
                         WHERE id = ${id} RETURNING ${tx.unsafe(PROJECT_COLS)}`;
-                    return rowToProject(firstRow(rows));
+                    return rowToProject(firstRow(rows, "project not found"));
                 }),
             delete: async (tenantId, id) => {
                 await this.withTenant(tenantId, (tx) => tx`DELETE FROM projects WHERE id = ${id}`);
@@ -842,7 +860,7 @@ export class PostgresStore implements Store {
                         UPDATE agent_sessions SET status = ${status}, workspace_id = COALESCE(${workspaceId ?? null}, workspace_id),
                             ended_at = CASE WHEN ${status} IN ('ended', 'failed') THEN now() ELSE ended_at END
                         WHERE id = ${id} RETURNING ${tx.unsafe(SESSION_COLS)}`;
-                    return rowToAgentSession(firstRow(rows));
+                    return rowToAgentSession(firstRow(rows, "agent session not found"));
                 }),
         };
 
@@ -939,6 +957,9 @@ export class PostgresStore implements Store {
                 }),
             goLive: async (tenantId, projectId, releaseId) =>
                 this.withTenant(tenantId, async (tx) => {
+                    // Lock the project row (as `create` does), so one website's goLive and takeDown
+                    // run one after another: two at once could otherwise both see nothing live.
+                    await tx`SELECT 1 FROM projects WHERE id = ${projectId} FOR UPDATE`;
                     const target = await tx`SELECT 1 FROM releases WHERE id = ${releaseId} AND project_id = ${projectId} FOR UPDATE`;
                     if (target.length === 0) throw new Error("release not found");
                     await tx`UPDATE releases SET state = 'superseded' WHERE project_id = ${projectId} AND state = 'live' AND id <> ${releaseId}`;
@@ -955,6 +976,7 @@ export class PostgresStore implements Store {
                 }),
             takeDown: async (tenantId, projectId) =>
                 this.withTenant(tenantId, async (tx) => {
+                    await tx`SELECT 1 FROM projects WHERE id = ${projectId} FOR UPDATE`;
                     const rows = await tx<ReleaseRow[]>`
                         UPDATE releases SET state = 'superseded' WHERE project_id = ${projectId} AND state = 'live'
                         RETURNING ${tx.unsafe(RELEASE_COLS)}`;
@@ -967,7 +989,7 @@ export class PostgresStore implements Store {
                     const rows = await tx<
                         ReleaseRow[]
                     >`UPDATE releases SET state = 'failed' WHERE id = ${releaseId} RETURNING ${tx.unsafe(RELEASE_COLS)}`;
-                    return rowToRelease(firstRow(rows));
+                    return rowToRelease(firstRow(rows, "release not found"));
                 }),
         };
 
@@ -1016,7 +1038,7 @@ export class PostgresStore implements Store {
                             VALUES (${input.id}, ${input.tenantId}, ${input.projectId}, ${input.hostname}, ${input.createdBy})`,
                     );
                 } catch (err) {
-                    if ((err as { code?: string }).code === "23505") throw new DomainTakenError();
+                    if (isUniqueViolation(err)) throw new DomainTakenError();
                     throw err;
                 }
             },
@@ -1055,7 +1077,7 @@ export class PostgresStore implements Store {
                         ON CONFLICT (user_id, dedupe) DO NOTHING
                         RETURNING id, kind, title, body, link, created_at, read_at`;
                     // A person's old notifications go as new ones arrive (kept 90 days).
-                    await tx`DELETE FROM notifications WHERE created_at < now() - interval '90 days'`;
+                    await tx`DELETE FROM notifications WHERE user_id = ${n.userId} AND created_at < now() - interval '90 days'`;
                     const r = rows[0];
                     return r ? rowToNotice(r) : null;
                 }),
@@ -1484,6 +1506,11 @@ export class PostgresStore implements Store {
             deleteForUser: async (userId) => {
                 await this.sql`DELETE FROM sessions WHERE user_id = ${userId}`;
             },
+            purgeExpired: async (idleBefore, createdBefore) =>
+                (
+                    await this
+                        .sql`DELETE FROM sessions WHERE last_seen_at < ${new Date(idleBefore)} OR created_at < ${new Date(createdBefore)}`
+                ).count,
         };
     }
 

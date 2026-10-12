@@ -162,6 +162,8 @@ export function workspaceRoutes(api: Api): void {
             const last = (await store.messages.list(org.id, project.id)).filter((m) => m.role === "user").at(-1);
             prompt = last ? `Carry on with this request from where you left off, and finish it:\n\n${last.text}` : "";
         }
+        // A person may write 20,000 characters. The rest is room for what is put around their words
+        // above ("Carry on with this request…", "Instead of answering your questions…").
         if (!prompt || prompt.length > 21_000) return c.json({ error: "prompt required (max 20000 characters)" }, 400);
 
         // The daily ceiling is a safety net against a runaway bill on the owner's
@@ -416,7 +418,7 @@ export function workspaceRoutes(api: Api): void {
                 // After a restart the server has forgotten who is being worked for: pick it up again.
                 if (!presence.run(project.id)) {
                     const who = pending.authorId ? await store.users.findById(pending.authorId) : null;
-                    presence.setRun(project.id, { runId: run.id, userId: who?.id ?? "", name: who?.name ?? "Someone" });
+                    presence.setRun(project.id, { runId: run.id, userId: pending.authorId ?? "", name: who?.name ?? "Someone" });
                 }
             } else if (run) await settle(tenantId, project.id, run);
             else if (run === null) {
@@ -434,10 +436,10 @@ export function workspaceRoutes(api: Api): void {
             if (!activeRun && run !== undefined) messages = await store.messages.list(tenantId, project.id);
         }
         // Names for the people in the conversation, so each request says who asked.
-        const authors: Record<string, string> = {};
-        for (const id of new Set(messages.map((m) => m.authorId).filter((x): x is string => x !== null))) {
-            authors[id] = (await store.users.findById(id))?.name ?? "Someone";
-        }
+        const ids = [...new Set(messages.map((m) => m.authorId).filter((x): x is string => x !== null))];
+        const authors: Record<string, string> = Object.fromEntries(
+            await Promise.all(ids.map(async (id) => [id, (await store.users.findById(id))?.name ?? "Someone"] as const)),
+        );
         // What the assistant is waiting to be told, once it has stopped to ask.
         const question = activeRun || project.archivedAt ? null : await store.questions.open(tenantId, project.id);
         return c.json({ messages, activeRun, authors, question, askLevel: project.askLevel, conversationAt: project.conversationAt });
@@ -512,7 +514,13 @@ export function workspaceRoutes(api: Api): void {
         const trying = claims.sessionId.startsWith("preview+look:") ? claims.sessionId.slice("preview+look:".length) : null;
         const tryLook = findLook(trying);
         const prefix = `/preview/${param(c, "token")}/`;
-        const rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
+        // An address that cannot be read as one names no file.
+        let rel: string;
+        try {
+            rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
+        } catch {
+            return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        }
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
         if (tryLook && rel === THEME_FILE) {

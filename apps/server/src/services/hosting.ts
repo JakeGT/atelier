@@ -79,7 +79,7 @@ export function normalizeHostname(raw: string): string | null {
         .replace(/^https?:\/\//, "")
         .replace(/[/?#].*$/, "")
         .replace(/\.$/, "");
-    return HOSTNAME.test(name) && !name.endsWith(".pages.dev") ? name : null;
+    return HOSTNAME.test(name) && name !== "pages.dev" && !name.endsWith(".pages.dev") ? name : null;
 }
 
 export class DeployerHosting implements Hosting {
@@ -117,6 +117,8 @@ export class DeployerHosting implements Hosting {
                 body?.kind === "site" ? "site" : "hosting",
                 res.status,
             );
+        // Every answer of the deployer's is JSON; one that is not did not come from it (a proxy's page, say).
+        if (body === null) throw new HostingError("the publishing service gave an answer that could not be read", "hosting", 502);
         return body as T;
     }
 
@@ -125,7 +127,7 @@ export class DeployerHosting implements Hosting {
         if (input.canonicalHost) query.set("canonical", input.canonicalHost);
         if (input.commit) query.set("commit", input.commit);
         if (input.label) query.set("label", input.label);
-        const path = `/sites/${input.site}/deployments?${query}`;
+        const path = `/sites/${encodeURIComponent(input.site)}/deployments?${query}`;
         const forms = Object.keys(input.forms ?? {}).length > 0;
         if (!input.content?.length && !input.media?.length && !forms) return this.call<DeployResult>("POST", path, { body: input.archive });
         const form = new FormData();
@@ -139,18 +141,19 @@ export class DeployerHosting implements Hosting {
     }
 
     async listDomains(site: string): Promise<HostedDomain[]> {
-        return (await this.call<{ domains: HostedDomain[] }>("GET", `/sites/${site}/domains`)).domains;
+        const { domains } = await this.call<{ domains?: HostedDomain[] }>("GET", `/sites/${encodeURIComponent(site)}/domains`);
+        return Array.isArray(domains) ? domains : [];
     }
 
     addDomain(site: string, domain: string, recheck = false): Promise<{ target: string }> {
-        return this.call<{ target: string }>("POST", `/sites/${site}/domains`, { json: { domain, recheck } });
+        return this.call<{ target: string }>("POST", `/sites/${encodeURIComponent(site)}/domains`, { json: { domain, recheck } });
     }
 
     async removeDomain(site: string, domain: string): Promise<void> {
-        await this.call("DELETE", `/sites/${site}/domains/${domain}`);
+        await this.call("DELETE", `/sites/${encodeURIComponent(site)}/domains/${encodeURIComponent(domain)}`);
     }
 
     async deleteSite(site: string): Promise<void> {
-        await this.call("DELETE", `/sites/${site}`);
+        await this.call("DELETE", `/sites/${encodeURIComponent(site)}`);
     }
 }

@@ -162,6 +162,10 @@ test("people see who else is here and who is typing; someone who leaves drops of
     assert.equal(presence.others("p", "b")[0]?.typing, false);
     now += 10_000;
     assert.deepEqual(presence.others("p", "b"), []);
+    // Someone who is not typing is not typing, whatever the clock reads.
+    const early = new Presence(() => 1_000);
+    early.seen("p", { id: "a", name: "A" }, false);
+    assert.equal(early.others("p", "b")[0]?.typing, false);
 });
 
 test("any change to the website moves the stamp, so other open editors reload; looking does not", async () => {

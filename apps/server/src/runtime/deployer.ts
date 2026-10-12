@@ -46,8 +46,13 @@ const BRANCH = /^[a-z0-9][a-z0-9-]{0,40}$/;
 export function deployerApp(opts: DeployerOptions): Hono {
     const { pages, prefix } = opts;
     const limits = opts.limits ?? DEFAULT_LIMITS;
+    // Without a secret every request would pass the check below, and without a prefix every
+    // Pages project in the account would be within reach: refuse to run like that.
+    if (opts.secret.length < 32) throw new Error("the deployer needs a secret of at least 32 characters");
+    if (!/^[a-z0-9]+-$/.test(prefix)) throw new Error("the deployer needs a project prefix: letters or digits, then a dash");
     const app = new Hono();
 
+    // Before the check below on purpose: answering "I am up" needs no secret.
     app.get("/healthz", (c) => c.json({ ok: true }));
 
     app.use("*", async (c, next) => {
@@ -65,7 +70,7 @@ export function deployerApp(opts: DeployerOptions): Hono {
     };
     const domainName = (raw: string): string | null => {
         const name = raw.trim().toLowerCase().replace(/\.$/, "");
-        return HOSTNAME.test(name) && !name.endsWith(".pages.dev") ? name : null;
+        return HOSTNAME.test(name) && name !== "pages.dev" && !name.endsWith(".pages.dev") ? name : null;
     };
     const failed = (c: Context, err: unknown) => {
         // `site`: a problem with the website, to show its owner. Otherwise the hosting side.
@@ -104,8 +109,8 @@ export function deployerApp(opts: DeployerOptions): Hono {
         if (!name || !BRANCH.test(branch) || (c.req.query("canonical") && !canonical) || (commit && !/^[0-9a-f]{40}$/.test(commit))) {
             return c.json({ error: "invalid request" }, 400);
         }
-        // Tar adds a header block per file and pads each to a block.
-        const cap = limits.maxTotalBytes + limits.maxFiles * 2048 + 1024 * 1024;
+        // Tar adds a header block per file and pads each to a block; the release's content comes on top.
+        const cap = limits.maxTotalBytes + limits.maxFiles * 2048 + 1024 * 1024 + CONTENT_CAP;
         if (Number(c.req.header("content-length") ?? 0) > cap) return c.json({ error: "the website is too large", kind: "site" }, 422);
         try {
             const chunks: Buffer[] = [];
@@ -114,7 +119,7 @@ export function deployerApp(opts: DeployerOptions): Hono {
             if (body) {
                 for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
                     size += chunk.length;
-                    if (size > cap + CONTENT_CAP) throw new SiteError("the website is too large");
+                    if (size > cap) throw new SiteError("the website is too large");
                     chunks.push(Buffer.from(chunk));
                 }
             }
@@ -123,17 +128,27 @@ export function deployerApp(opts: DeployerOptions): Hono {
             const media: { name: string; body: Buffer }[] = [];
             const type = c.req.header("content-type") ?? "";
             if (type.startsWith("multipart/form-data")) {
-                const form = await new Response(new Uint8Array(archive), { headers: { "content-type": type } }).formData();
-                const file = form.get("archive");
-                if (!(file instanceof Blob)) return c.json({ error: "invalid request" }, 400);
+                // The bytes as they are, not a second copy of a whole website.
+                const raw = new Uint8Array(archive.buffer as ArrayBuffer, archive.byteOffset, archive.byteLength);
+                const form = await new Response(raw, { headers: { "content-type": type } }).formData().catch(() => null);
+                const file = form?.get("archive");
+                if (!form || !(file instanceof Blob)) return c.json({ error: "invalid request" }, 400);
                 archive = Buffer.from(await file.arrayBuffer());
-                const documents = contentDocuments.safeParse(JSON.parse(String(form.get("content") ?? "[]")));
+                // A field that is not JSON is undefined, which none of the shapes below accept.
+                const field = (name: string, missing: string): unknown => {
+                    try {
+                        return JSON.parse(String(form.get(name) ?? missing));
+                    } catch {
+                        return undefined;
+                    }
+                };
+                const documents = contentDocuments.safeParse(field("content", "[]"));
                 if (!documents.success) return c.json({ error: "invalid request" }, 400);
-                const info = mediaInfo.safeParse(JSON.parse(String(form.get("media") ?? "[]")));
+                const info = mediaInfo.safeParse(field("media", "[]"));
                 if (!info.success) return c.json({ error: "invalid request" }, 400);
                 const byName = new Map(info.data.map((m) => [m.name, m]));
                 // Where each of the website's forms sends to: worked out by the control plane, which holds the key.
-                const forms = formActionMap.safeParse(JSON.parse(String(form.get("forms") ?? "{}")));
+                const forms = formActionMap.safeParse(field("forms", "{}"));
                 if (!forms.success) return c.json({ error: "invalid request" }, 400);
                 const lookup = lookupFrom(documents.data);
                 fill = (html, path) =>

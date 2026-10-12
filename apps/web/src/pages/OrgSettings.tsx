@@ -97,6 +97,7 @@ function useReauth() {
 
 function General({ org, session, onOrgsChanged }: { org: Org; session: Session; onOrgsChanged: () => Promise<Org[]> }) {
     const toast = useToast();
+    const fail = useReauth();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [name, setName] = useState(org.name);
     const [saving, setSaving] = useState(false);
@@ -110,7 +111,7 @@ function General({ org, session, onOrgsChanged }: { org: Org; session: Session; 
             await onOrgsChanged();
             toast("Saved.");
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         } finally {
             setSaving(false);
         }
@@ -276,7 +277,7 @@ function Models({ org, onOrgsChanged }: { org: Org; onOrgsChanged: () => Promise
             await onOrgsChanged();
             toast(model ? "Your assistant will use that model." : "Back to the assistant's own default.");
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         }
     }
 
@@ -398,8 +399,11 @@ function ConnectProvider({
         e.preventDefault();
         if (!key.trim() || busy) return;
         setBusy(true);
-        await onConnect(key.trim());
-        setBusy(false);
+        try {
+            await onConnect(key.trim());
+        } finally {
+            setBusy(false);
+        }
     }
     return (
         <Dialog onClose={onClose} wide>
@@ -456,6 +460,8 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
     const [email, setEmail] = useState("");
     const [role, setRole] = useState<Invitation["role"]>("editor");
     const [busy, setBusy] = useState(false);
+    // Whose role is being changed: their list waits, so a second choice cannot overtake the first.
+    const [changing, setChanging] = useState<string | null>(null);
 
     const load = useCallback(async () => {
         try {
@@ -480,13 +486,24 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
             toast("Added. This studio appears for them the next time they open Atelier.");
             await load();
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         } finally {
             setBusy(false);
         }
     }
 
-    const change = (m: Member, next: Role) => a.setRole(m.userId, next).then(load, fail);
+    async function change(m: Member, next: Role) {
+        if (changing) return;
+        setChanging(m.userId);
+        try {
+            await a.setRole(m.userId, next);
+            await load();
+        } catch (err) {
+            fail(err);
+        } finally {
+            setChanging(null);
+        }
+    }
 
     async function remove(m: Member) {
         const self = m.userId === session.id;
@@ -543,6 +560,7 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                                         <select
                                             className="select"
                                             value={m.role}
+                                            disabled={changing !== null}
                                             onChange={(e) => void change(m, e.target.value as Role)}
                                             aria-label={`Role for ${m.name || m.email}`}
                                         >
@@ -644,9 +662,7 @@ function Members({ org, session, onOrgsChanged }: { org: Org; session: Session; 
                                         <button
                                             type="button"
                                             className="btn btn-sm"
-                                            onClick={() =>
-                                                a.revokeInvitation(i.id).then(load, (err) => toast((err as Error).message, "error"))
-                                            }
+                                            onClick={() => a.revokeInvitation(i.id).then(load, fail)}
                                         >
                                             <Trash2 /> Withdraw
                                         </button>
@@ -709,9 +725,12 @@ function DailyLimit({ limit, onSave }: { limit: number | null; onSave: (limit: n
 
     async function save(next: number | null) {
         setBusy(true);
-        await onSave(next);
-        setBusy(false);
-        setEditing(false);
+        try {
+            await onSave(next);
+        } finally {
+            setBusy(false);
+            setEditing(false);
+        }
     }
 
     if (!editing) {
@@ -776,6 +795,7 @@ function DailyLimit({ limit, onSave }: { limit: number | null; onSave: (limit: n
 
 function UsagePanel({ org }: { org: Org }) {
     const toast = useToast();
+    const fail = useReauth();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [usage, setUsage] = useState<Usage | null>(null);
     const [projects, setProjects] = useState<Project[]>([]);
@@ -800,7 +820,7 @@ function UsagePanel({ org }: { org: Org }) {
             await load();
             toast(limit === null ? "The daily limit is removed." : "Daily limit saved.");
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         }
     }
 

@@ -5,13 +5,16 @@
 # platform the real stack lives in the infra repo at apps/atelier/compose.yml
 # (see docs/14).
 #
-#   for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:local ..; done
+#   for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:local ..; done
 #   mkdir -p secrets
 #   openssl rand -base64 24 > secrets/postgres_password
 #   printf 'postgres://atelier:%s@db:5432/atelier' "$(cat secrets/postgres_password)" > secrets/atelier_database_url
 #   openssl rand -base64 32 > secrets/atelier_secrets_key
 #   openssl rand -base64 32 > secrets/atelier_provisioner_secret
 #   printf 'the oidc client secret' > secrets/atelier_oidc_client_secret
+#   openssl rand -base64 32 > secrets/atelier_deployer_secret
+#   printf 'the cloudflare account id' > secrets/atelier_cloudflare_account_id
+#   printf 'the cloudflare api token' > secrets/atelier_cloudflare_api_token
 #   chmod 0400 secrets/*
 #   docker compose -f deploy/compose.example.yml up -d
 #
@@ -122,7 +125,7 @@ services:
             OIDC_PROVIDER_NAME: example
             OIDC_ADMIN_GROUP: platform-admin
             SIGNUP_MODE: invite
-        secrets: [atelier_database_url, atelier_secrets_key, atelier_provisioner_secret, atelier_oidc_client_secret]
+        secrets: [atelier_database_url, atelier_secrets_key, atelier_provisioner_secret, atelier_oidc_client_secret, atelier_deployer_secret]
         networks:
             data: {}
             control: {}

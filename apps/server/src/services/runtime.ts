@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type AgentRuntime, RunInterrupted } from "./agent.ts";
 import { takeCover } from "./cover.ts";
 import { type RunState, RunTracker, wholeRun } from "./runs.ts";
-import { type Checkpoint, Workspace } from "./workspace.ts";
+import { type Checkpoint, SHA_RE, Workspace } from "./workspace.ts";
 
 export type { RunState } from "./runs.ts";
 
@@ -78,6 +78,8 @@ export interface WorkspaceRuntime {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// How long a running workspace may go without answering before it is taken to be stuck, not busy.
+const STUCK_AFTER_MS = 4 * 60 * 60_000;
 export function assertProjectId(projectId: string): void {
     if (!UUID_RE.test(projectId)) throw new Error("invalid project id");
 }
@@ -131,6 +133,7 @@ export class LocalRuntime implements WorkspaceRuntime {
     }
 
     private tracker(projectId: string): RunTracker {
+        assertProjectId(projectId);
         let t = this.trackers.get(projectId);
         if (!t) {
             t = new RunTracker();
@@ -227,6 +230,15 @@ function unreachable(err: unknown): boolean {
     return code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "EHOSTUNREACH";
 }
 
+// What a workspace answered when it refused something, with the status it gave.
+class WorkspaceRefusal extends Error {
+    readonly status: number;
+    constructor(message: string, status: number) {
+        super(message);
+        this.status = status;
+    }
+}
+
 // Production: each project has its own runtime container (runtime/daemon.ts),
 // created on demand by the provisioner (runtime/provisioner.ts), which is the
 // only Atelier service with the Docker socket.
@@ -312,20 +324,36 @@ export class ContainerRuntime implements WorkspaceRuntime {
                 continue;
             }
             if (now - last < idleMs) continue;
-            // `touch: false`: asking whether it is busy must not count as using it.
-            const status = await this.call(w.projectId, "GET", "/status", undefined, 5_000, false)
-                .then((r) => (r.ok ? (r.json() as Promise<{ busy: boolean }>) : null))
-                .catch(() => null);
-            if (status?.busy) {
+            const busy = await this.busy(w.projectId);
+            // No answer in time is not "idle": it may be hard at work. It is asked again next time round.
+            // One that has answered nothing for hours is not at work, though: it is stuck, and is stopped
+            // like any other idle one (its files are kept), or it would hold its memory for good.
+            if (busy === "unknown" && now - last < Math.max(idleMs * 4, STUCK_AFTER_MS)) continue;
+            if (busy) {
                 this.lastUsed.set(w.projectId, now);
                 continue;
             }
+            // One that could not be stopped is tried again next time round.
             await this.stop(w.projectId).then(
                 () => stopped.push(w.projectId),
-                () => {},
+                (err: Error) => console.warn(`could not stop idle workspace ${w.projectId}: ${err.message}`),
             );
         }
         return stopped;
+    }
+
+    // Whether a workspace is in the middle of a job. "unknown" when it is there but
+    // did not answer (slow, or cut off): then nothing that would end a job may be done
+    // to it. Nothing listening at all means nothing is running, so not busy.
+    private async busy(projectId: string): Promise<boolean | "unknown"> {
+        try {
+            // `touch: false`: asking whether it is busy must not count as using it.
+            const res = await this.call(projectId, "GET", "/status", undefined, 5_000, false);
+            if (!res.ok) return false;
+            return ((await res.json()) as { busy?: boolean } | null)?.busy === true;
+        } catch (err) {
+            return unreachable(err) ? false : "unknown";
+        }
     }
 
     private call(projectId: string, method: string, path: string, body?: unknown, timeoutMs = 30_000, touch = true): Promise<Response> {
@@ -357,7 +385,7 @@ export class ContainerRuntime implements WorkspaceRuntime {
         if (res.status === 409) throw new RuntimeBusyError();
         if (!res.ok) {
             const err = (await res.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(err?.error ?? `workspace ${res.status}`);
+            throw new WorkspaceRefusal(err?.error ?? `workspace ${res.status}`, res.status);
         }
         return (await res.json()) as T;
     }
@@ -367,10 +395,8 @@ export class ContainerRuntime implements WorkspaceRuntime {
     // provisioner replaces a container whose definition has changed; its files are on
     // a volume and stay). One that is busy is left alone.
     private async bringUpToDate(projectId: string): Promise<void> {
-        const status = await this.call(projectId, "GET", "/status", undefined, 5_000, false)
-            .then((r) => (r.ok ? (r.json() as Promise<{ busy?: boolean }>) : null))
-            .catch(() => null);
-        if (status?.busy) return;
+        // Busy, or not known to be idle: replacing it now could end what it is doing.
+        if (await this.busy(projectId)) return;
         await this.ensure(projectId);
     }
 
@@ -381,19 +407,26 @@ export class ContainerRuntime implements WorkspaceRuntime {
     async getRun(projectId: string, runId: string) {
         if (!isUuid(runId)) return null;
         return this.json<RunState>(projectId, "GET", `/runs/${runId}`).then(wholeRun, (err: Error) => {
-            if (err.message === "not found") return null;
+            if (err instanceof WorkspaceRefusal && err.status === 404) return null;
             throw err;
         });
     }
     async stopRun(projectId: string, runId: string) {
         if (!isUuid(runId)) return false;
-        const res = await this.call(projectId, "POST", `/runs/${runId}/stop`, {});
-        return res.ok;
+        // A workspace that is not there has nothing running in it.
+        const res = await this.call(projectId, "POST", `/runs/${runId}/stop`, {}).catch((err) => {
+            if (unreachable(err)) return null;
+            throw err;
+        });
+        return res?.ok ?? false;
     }
     async extendRun(projectId: string, runId: string) {
         if (!isUuid(runId)) return null;
-        const res = await this.call(projectId, "POST", `/runs/${runId}/extend`, {});
-        return res.ok ? wholeRun((await res.json()) as RunState) : null;
+        const res = await this.call(projectId, "POST", `/runs/${runId}/extend`, {}).catch((err) => {
+            if (unreachable(err)) return null;
+            throw err;
+        });
+        return res?.ok ? wholeRun((await res.json()) as RunState) : null;
     }
     async listCheckpoints(projectId: string) {
         return (await this.json<{ checkpoints: Checkpoint[] }>(projectId, "GET", "/checkpoints")).checkpoints;
@@ -432,6 +465,8 @@ export class ContainerRuntime implements WorkspaceRuntime {
         return new Uint8Array(await res.arrayBuffer());
     }
     async exportTree(projectId: string, sha: string): Promise<Uint8Array> {
+        // It becomes part of the address asked for, so it must be a version's name and nothing else.
+        if (!SHA_RE.test(sha)) throw new Error("invalid commit sha");
         let res: Response;
         try {
             res = await this.call(projectId, "GET", `/export/${sha}`, undefined, 60_000);
@@ -445,6 +480,9 @@ export class ContainerRuntime implements WorkspaceRuntime {
         return new Uint8Array(await res.arrayBuffer());
     }
     async readFile(projectId: string, rel: string): Promise<PreviewFile | null> {
+        // "." and ".." would be worked out of the address before it is sent, and so
+        // could ask the workspace for something other than one of the website's files.
+        if (rel.split("/").some((part) => part === "." || part === "..")) return null;
         let res: Response;
         try {
             res = await this.call(projectId, "GET", `/files/${rel.split("/").map(encodeURIComponent).join("/")}`);

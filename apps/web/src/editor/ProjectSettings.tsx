@@ -32,7 +32,7 @@ export function ProjectSettings({ project, org, api, onClose, onSaved, askLevel,
 
     async function save(e: FormEvent) {
         e.preventDefault();
-        if (!name.trim() || busy) return;
+        if (!name.trim() || busy || archived) return;
         setBusy(true);
         try {
             const next = await api.updateProject(project.id, {
@@ -44,11 +44,13 @@ export function ProjectSettings({ project, org, api, onClose, onSaved, askLevel,
             onSaved(next);
         } catch (err) {
             toast((err as Error).message, "error");
+        } finally {
             setBusy(false);
         }
     }
 
     async function setArchived(next: boolean) {
+        if (busy) return;
         setBusy(true);
         try {
             if (next) {

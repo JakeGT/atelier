@@ -47,6 +47,28 @@ test("what is checked before publishing, said in the person's words", () => {
     ]);
     // A document that describes no fields has nothing to check.
     assert.deepEqual(contentProblems([{ kind: "page", slug: "home", draft: {}, fields: null }]), []);
+    // A picture alone is something; blank lines alone are nothing; an entry that is not a set of parts lacks what it must have.
+    const strict: ContentField[] = [
+        ...fields.slice(0, 2),
+        { key: "hours", label: "Opening hours", type: "list", required: true },
+        ...fields.slice(3),
+    ];
+    assert.deepEqual(
+        contentProblems([
+            {
+                kind: "page",
+                slug: "home",
+                fields: strict,
+                draft: {
+                    headline: "Okoro",
+                    story: '<figure><img src="media/kiln.webp" alt="The kiln"></figure>',
+                    hours: ["", "  "],
+                    services: [null],
+                },
+            },
+        ]),
+        ["“Opening hours” on the home page is empty", "“Name” is empty in entry 1 of “Services” on the home page"],
+    );
 });
 
 type Who = Awaited<ReturnType<typeof signIn>>;

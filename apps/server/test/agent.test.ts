@@ -189,3 +189,42 @@ test("a reply is only what was said last: ending on a step leaves no reply, and 
         ["First.", "bash", "Second.", "bash"],
     );
 });
+
+test("a file step never names a path that climbs out of the website, or a full path when the website's folder is not known", () => {
+    const target = (filePath: string, root?: string) =>
+        parseRunOutput(line({ type: "tool_use", part: { tool: "write", state: { status: "completed", input: { filePath } } } }), root)
+            .toolEvents[0]?.target;
+    assert.equal(target("css/site.css", "/site"), "css/site.css");
+    assert.equal(target("css/../../outside.txt", "/site"), null);
+    assert.equal(target("/site/../etc/passwd", "/site"), null);
+    assert.equal(target("/etc/passwd"), null);
+});
+
+test("words split across two pieces of output arrive whole, and a step that cannot be reported does not end the run", async () => {
+    // "é" is two bytes: the first is written, then, after a pause, the second.
+    const engine = fakeEngine(
+        [step("read", "index.html"), `printf '{"type":"text","part":{"text":"Caf\\303'`, "sleep 0.3", `printf '\\251 open"}}\\n'`].join(
+            "\n",
+        ),
+    );
+    const result = await runWith(engine, {
+        onStep: () => {
+            throw new Error("could not be reported");
+        },
+    });
+    assert.equal(result.text, "Café open");
+    assert.deepEqual(
+        result.toolEvents.map((t) => t.name),
+        ["read"],
+    );
+});
+
+test("the file carrying a run's token is gone once the run has ended", async () => {
+    const { readdirSync } = await import("node:fs");
+    const engine = fakeEngine(emit({ type: "text", part: { text: "ok" } }));
+    await runWith(engine);
+    assert.deepEqual(
+        readdirSync(join(engine.dir, "state")).filter((f) => f.endsWith(".json")),
+        [],
+    );
+});

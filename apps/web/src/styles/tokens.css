@@ -32,17 +32,19 @@
     --surface-raised: #ffffff;
     --ink: #17150f;
     --ink-2: #4b473d;
-    --ink-3: #8b8576;
+    /* Quiet text is still text: 4.5:1 or better on paper and on the surfaces. */
+    --ink-3: #6f6a5c;
     --line: rgba(23, 21, 15, 0.11);
     --line-strong: rgba(23, 21, 15, 0.2);
     --seal: #dc4326;
+    /* "Deep" is the seal that stands out more from the page: darker on paper, lighter at night. */
     --seal-deep: #b93117;
     --seal-wash: rgba(220, 67, 38, 0.1);
     --on-seal: #fff8f3;
     --live: #1d6b48;
     --live-wash: rgba(29, 107, 72, 0.12);
-    --draft: #a66a10;
-    --draft-wash: rgba(166, 106, 16, 0.13);
+    --draft: #8a5708;
+    --draft-wash: rgba(138, 87, 8, 0.13);
     --shadow-1: 0 1px 2px rgba(23, 21, 15, 0.06), 0 1px 1px rgba(23, 21, 15, 0.04);
     --shadow-2: 0 2px 4px rgba(23, 21, 15, 0.05), 0 12px 28px -8px rgba(23, 21, 15, 0.16);
     --shadow-3: 0 4px 8px rgba(23, 21, 15, 0.06), 0 32px 64px -16px rgba(23, 21, 15, 0.28);
@@ -58,7 +60,7 @@
     --surface-raised: #211f1a;
     --ink: #f3efe4;
     --ink-2: #bfb9aa;
-    --ink-3: #7f7a6c;
+    --ink-3: #8a8577;
     --line: rgba(243, 239, 228, 0.1);
     --line-strong: rgba(243, 239, 228, 0.2);
     --seal: #ff6b4a;

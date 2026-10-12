@@ -45,7 +45,8 @@ export function sniff(b: Uint8Array): Sniffed | null {
         const brand = ascii(b, 8, 12);
         if (brand === "avif" || brand === "avis") return { mime: "image/avif", kind: "image", ext: "avif" };
         if (brand.startsWith("M4A")) return { mime: "audio/mp4", kind: "audio", ext: "m4a" };
-        if (/^(isom|iso2|mp41|mp42|avc1|M4V |dash|qt {2})$/.test(brand)) return { mime: "video/mp4", kind: "video", ext: "mp4" };
+        if (/^(isom|iso[2-9]|mp41|mp42|avc1|M4V |M4VH|M4VP|mmp4|MSNV|dash|qt {2})$/.test(brand))
+            return { mime: "video/mp4", kind: "video", ext: "mp4" };
         return null;
     }
     if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return { mime: "video/webm", kind: "video", ext: "webm" };
@@ -81,14 +82,18 @@ const SVG_TAGS = new Set(
      pattern symbol use title desc marker filter feBlend feColorMatrix feComponentTransfer feComposite feFlood feGaussianBlur feMerge
      feMergeNode feMorphology feOffset feTurbulence feFuncR feFuncG feFuncB feFuncA feDropShadow`.split(/\s+/),
 );
-// url(#local) is a reference inside the drawing; any other url(…) fetches something.
-const fetches = (value: string): boolean => /url\(\s*(?!["']?#)/i.test(value) || /javascript:|data:|@import|expression\(/i.test(value);
+// url(#local) is a reference inside the drawing; any other url(…) fetches something. So can image-set("…")
+// and its like, which take an address without url(); and a backslash or a comment can spell "url" so that
+// it is not seen here, so a value holding either is not kept.
+const fetches = (value: string): boolean =>
+    /url\(\s*(?!["']?#)/i.test(value) || /javascript:|data:|@import|expression\(|image-set\(|\bimage\(|\bsrc\(|\\|\/\*/i.test(value);
 
 function cleanSvg(el: El, depth = 0): El | null {
     if (el.namespaceURI !== SVG_NS || !SVG_TAGS.has(el.tagName) || depth > 64) return null;
     const attrs = el.attrs.filter((a) => {
         const name = a.name.toLowerCase();
-        if (name.startsWith("on") || !/^[a-z][\w:.-]*$/i.test(a.name)) return false;
+        // A handler by any spelling: "onload", and "x:onload" in case something reads past the prefix.
+        if (/(^|:)on/.test(name) || !/^[a-z][\w:.-]*$/i.test(a.name)) return false;
         if (name === "href" || name === "xlink:href" || a.prefix === "xlink") return a.value.trim().startsWith("#");
         return !fetches(a.value);
     });
@@ -117,8 +122,12 @@ function cleanSvg(el: El, depth = 0): El | null {
     return out;
 }
 
+const MAX_SVG_CHARS = 2_000_000;
 export function sanitizeSvg(source: string): string {
-    const fragment = parseFragment(source.slice(0, 2_000_000));
+    // Part of a drawing is not that drawing: one too large to check is refused, not cut short.
+    if (source.length > MAX_SVG_CHARS)
+        throw new MediaError("that SVG is larger than 2 MB, the most a drawing can be. Save it smaller, or as a PNG.");
+    const fragment = parseFragment(source);
     const root = fragment.childNodes.find((n): n is El => "tagName" in n && n.tagName === "svg");
     const clean = root ? cleanSvg(root) : null;
     if (!clean) throw new MediaError("that SVG could not be read as a drawing");
@@ -222,7 +231,7 @@ export async function prepareUpload(original: string, bytes: Uint8Array): Promis
         };
     } catch (err) {
         if (err instanceof MediaError) throw err;
-        throw new MediaError("that image could not be read. It may be damaged, or far larger than a website needs.");
+        throw new MediaError("that image could not be read. It may be damaged, or far larger than a website needs.", { cause: err });
     }
 }
 

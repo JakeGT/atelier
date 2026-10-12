@@ -433,6 +433,13 @@ current host. What needs the VPS is P6, which is last.
   after publishing and on the messages page, and a form that sends nowhere is pointed out to the
   person and to the assistant; messages from visitors have a page of their own, with a count of
   new ones on the website's bar and on its card.
+- E5.16 Review findings (2026-10-12 on `triagent-findings`): an automatic review of `main` left 1,366
+  findings in Triagent; each was checked against the current code and fixed, closed with its
+  reason, or left for the owner (17 are flagged there). The fixes that matter: an invited person
+  could write themselves into any studio at the database (migration 0025); the assistant's network
+  proxy could be passed with private addresses written as IPv6; a link in a website's files could
+  make its page server read outside them; start-up refuses a half-made configuration instead of
+  carrying on. Not deployed: it carries a migration and stricter start-up checks.
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

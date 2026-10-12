@@ -57,20 +57,31 @@ export class ReleaseService {
         this.prefix = prefix;
     }
 
+    // The website's current version. With hosting, not being able to ask the workspace
+    // is said as that: it must not be taken for "nothing has been built yet".
+    private async head(projectId: string): Promise<string | null> {
+        try {
+            return await this.runtime.head(projectId);
+        } catch (err) {
+            if (!this.hosting) return null;
+            console.error(`could not read the current version of ${projectId}: ${(err as Error)?.message}`);
+            throw new ReleaseError("the website's files could not be reached just now; try again in a moment", 502);
+        }
+    }
+
     async create(tenantId: string, projectId: string, actorId: string): Promise<Release> {
-        const codeSha = await this.runtime.head(projectId).catch(() => null);
+        const codeSha = await this.head(projectId);
         if (this.hosting && !codeSha)
             throw new ReleaseError("there is nothing to publish yet: ask your assistant to build the website first", 409);
-        const docs = await this.store.content.list(tenantId, projectId);
+        // The wording that is checked is the wording that is pinned: one list for both.
+        const drafts = (await this.store.content.list(tenantId, projectId)).filter((d) => d.draft !== null);
         // What the wording must satisfy is checked here, when it is about to go public.
-        const problems = contentProblems(docs.filter((d) => d.draft !== null));
+        const problems = contentProblems(drafts);
         if (problems.length > 0) {
             const more = problems.length > 4 ? `; and ${problems.length - 4} more` : "";
             throw new ReleaseError(`before this can be published: ${problems.slice(0, 4).join("; ")}${more}`, 422);
         }
-        const documents = docs
-            .filter((d) => d.draft !== null)
-            .map((d) => ({ documentId: d.id, kind: d.kind, slug: d.slug, rev: d.rev, content: d.draft ?? {} }));
+        const documents = drafts.map((d) => ({ documentId: d.id, kind: d.kind, slug: d.slug, rev: d.rev, content: d.draft ?? {} }));
         return this.store.releases.create({ id: randomUUID(), tenantId, projectId, codeSha, actorId, rollbackOf: null, documents });
     }
 
@@ -87,6 +98,9 @@ export class ReleaseService {
         if (!["superseded", "rolled_back"].includes(target.state)) {
             throw new ReleaseError(`only a previously live release can be rolled back to (release ${number} is ${target.state})`, 409);
         }
+        // Checked before the new release is made, so a deployment already under way does not leave one behind that never ran.
+        if (this.hosting && this.deploying.has(projectId))
+            throw new ReleaseError("this website is already being published; try again in a moment", 409);
         const documents = await this.store.releases.manifest(tenantId, target.id);
         const release = await this.store.releases.create({
             id: randomUUID(),
@@ -149,7 +163,7 @@ export class ReleaseService {
         const hosting = this.hosting;
         if (!hosting) throw new ReleaseError("a link to show someone needs hosting, which is not set up on this server", 409);
         const project = await this.store.projects.findById(tenantId, projectId);
-        const head = project ? await this.runtime.head(projectId).catch(() => null) : null;
+        const head = project ? await this.head(projectId) : null;
         if (!project || !head) throw new ReleaseError("there is nothing to show yet: ask your assistant to build the website first", 409);
         if (this.deploying.has(projectId)) throw new ReleaseError("this website is being published; try again in a moment", 409);
         this.deploying.add(projectId);
@@ -303,6 +317,8 @@ export class ReleaseService {
                 this.deploying.delete(projectId);
                 throw err;
             });
+        // Whether the host has taken this release and is serving it.
+        let served = false;
         try {
             const project = await this.store.projects.findById(tenantId, projectId);
             if (!project || !release.codeSha) throw new HostingError("there is nothing to publish yet", "site", 422);
@@ -325,19 +341,35 @@ export class ReleaseService {
                 forms: this.formsFor(tenantId, projectId, archive, false),
                 ...(await this.mediaFor(tenantId, projectId, archive, content)),
             });
+            served = true;
             await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
             await this.attachDomains(tenantId, projectId, site);
             await this.store.projects.setHosting(tenantId, projectId, { hostingRef: site, productionRef: result.siteUrl });
             return await this.store.releases.goLive(tenantId, projectId, release.id);
         } catch (err) {
+            if (served) {
+                // The host is serving this release, but writing that down here failed. Calling it
+                // failed, or saying the earlier version is still live, would both be untrue. The
+                // release stays planned, so publishing it again (the same files) puts the record right.
+                console.error(
+                    `release ${release.number} of ${projectId} is live at the host but was not recorded: ${(err as Error)?.message}`,
+                );
+                throw new ReleaseError(
+                    "the website was published, but that could not be recorded here; publish it again to put this right",
+                    502,
+                );
+            }
             // The previous release stays live: nothing changed at the host or in `published`.
             const site = err instanceof HostingError && err.kind === "site";
             const message = site
                 ? (err as Error).message
                 : "the website could not be published just now; the version that was live is still live";
             if (!site) console.error(`deploy failed for ${projectId}: ${(err as Error).message}`);
-            await this.store.deployments.finish(tenantId, deployment.id, { state: "failed", error: message }).catch(() => {});
-            await this.store.releases.markFailed(tenantId, release.id).catch(() => {});
+            // Recording the failure must not hide it; but if it cannot be recorded, that is worth knowing.
+            const unrecorded = (e: unknown) =>
+                console.error(`could not record the failed deploy of ${projectId}: ${(e as Error)?.message}`);
+            await this.store.deployments.finish(tenantId, deployment.id, { state: "failed", error: message }).catch(unrecorded);
+            await this.store.releases.markFailed(tenantId, release.id).catch(unrecorded);
             throw new ReleaseError(message, site ? 422 : 502);
         } finally {
             this.deploying.delete(projectId);

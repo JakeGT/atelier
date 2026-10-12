@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MediaProvider } from "./editor/Media";
 import type { Org, Project, PublicConfig, Session } from "./lib/api";
 import { api, can, orgApi } from "./lib/api";
-import { navigate, usePath, useTheme } from "./lib/hooks";
+import { navigate, remember, remembered, usePath, useTheme } from "./lib/hooks";
 import { Content } from "./pages/Content";
 import { Editor } from "./pages/Editor";
 import { Landing } from "./pages/Landing";
@@ -35,6 +35,13 @@ type Route =
 
 const SLUG = "([a-z0-9-]+)";
 const TABS: SettingsTab[] = ["general", "models", "members", "usage", "activity"];
+// Made once, not each time the page is drawn.
+const ORG = new RegExp(`^/o/${SLUG}/?$`);
+const SETTINGS = new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`);
+const MESSAGES = new RegExp(`^/o/${SLUG}/p/${SLUG}/(?:content/)?messages/?$`);
+const CONTENT = new RegExp(`^/o/${SLUG}/p/${SLUG}/content/?$`);
+const EDITOR = new RegExp(`^/o/${SLUG}/p/${SLUG}/?$`);
+const LEGACY = new RegExp(`^/p/${SLUG}/?$`);
 
 function match(path: string): Route {
     if (path === "/") return { name: "landing" };
@@ -46,19 +53,19 @@ function match(path: string): Route {
         return { name: "operator", tab: "studios" };
     if (path === "/admin/activity") return { name: "operator", tab: "activity" };
     if (path === "/admin/reports") return { name: "operator", tab: "reports" };
-    let m = path.match(new RegExp(`^/o/${SLUG}/?$`));
+    let m = path.match(ORG);
     if (m?.[1]) return { name: "org", org: m[1] };
-    m = path.match(new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`));
+    m = path.match(SETTINGS);
     if (m?.[1]) return { name: "settings", org: m[1], tab: TABS.includes(m[2] as SettingsTab) ? (m[2] as SettingsTab) : "general" };
     // Messages from visitors have a page of their own (they used to be a tab of the Content page).
-    m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/(?:content/)?messages/?$`));
+    m = path.match(MESSAGES);
     if (m?.[1] && m[2]) return { name: "messages", org: m[1], project: m[2] };
-    m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/content/?$`));
+    m = path.match(CONTENT);
     if (m?.[1] && m[2]) return { name: "content", org: m[1], project: m[2] };
-    m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/?$`));
+    m = path.match(EDITOR);
     if (m?.[1] && m[2]) return { name: "editor", org: m[1], project: m[2] };
     // Links from before organisations were in the URL.
-    m = path.match(new RegExp(`^/p/${SLUG}/?$`));
+    m = path.match(LEGACY);
     if (m?.[1]) return { name: "legacy-editor", project: m[1] };
     return { name: "missing" };
 }
@@ -72,11 +79,15 @@ export function App() {
     const [session, setSession] = useState<Session | null | undefined>(undefined);
     const [config, setConfig] = useState<PublicConfig | null>(null);
     const [orgs, setOrgs] = useState<Org[] | null>(null);
+    // Whether this person is signed in could not be found out (no connection, the server
+    // restarting). That is not the same as being signed out, and nobody is sent to sign in for it.
+    const [unreachable, setUnreachable] = useState(false);
 
     useEffect(() => {
         api.session()
             .then(setSession)
-            .catch(() => setSession(null));
+            .catch(() => setUnreachable(true));
+        // Without it the sign-in page still works; it only cannot name who signs people in.
         api.config()
             .then(setConfig)
             .catch(() => {});
@@ -91,7 +102,8 @@ export function App() {
                     return list;
                 })
                 .catch(() => {
-                    setOrgs([]);
+                    // Studios already known stay: one failed look does not make them disappear.
+                    setOrgs((known) => known ?? []);
                     return [] as Org[];
                 }),
         [],
@@ -124,8 +136,8 @@ export function App() {
         if (route.name !== "studio" && route.name !== "legacy-editor") return;
         if (!session.onboarded) return;
         // The studio last used, else their own.
-        const last = localStorage.getItem(LAST_ORG);
-        // (A suspended studio is not somewhere to land.)
+        const last = remembered(LAST_ORG);
+        // (A suspended studio is not somewhere to land, unless there is no other: then it says it is suspended.)
         const open = orgs.filter((o) => o.status !== "suspended");
         const org = open.find((o) => o.slug === last) ?? open.find((o) => o.personalOf === session.id) ?? open[0] ?? orgs[0];
         if (!org) return;
@@ -134,10 +146,11 @@ export function App() {
 
     const orgSlug = "org" in route ? route.org : null;
     const org = orgSlug ? orgs?.find((o) => o.slug === orgSlug) : undefined;
+    const stayed = org && !org.visiting ? org.slug : null;
     useEffect(() => {
         // A studio being visited is not "where this person was last": their own is.
-        if (org && !org.visiting) localStorage.setItem(LAST_ORG, org.slug);
-    }, [org]);
+        if (stayed) remember(LAST_ORG, stayed);
+    }, [stayed]);
 
     const boot = (
         <div className="boot">
@@ -145,15 +158,18 @@ export function App() {
         </div>
     );
     const common = { theme, onToggleTheme: toggleTheme };
+    const nothing = <Missing title="There's nothing" body="The link may be out of date." />;
+    const unreached = <Unreached />;
 
     let page: React.ReactNode;
     if (route.name === "landing") {
         // The front page is public: it renders at once and adapts when the session arrives.
-        page = <Landing session={session} config={config} {...common} />;
+        // (If Atelier cannot be reached it stays as it is for someone signed out: its buttons lead on from there.)
+        page = <Landing session={session === undefined && unreachable ? null : session} config={config} {...common} />;
     } else if (route.name === "missing") {
-        page = <Missing title="There's nothing" body="The link may be out of date." />;
+        page = nothing;
     } else if (session === undefined) {
-        page = boot;
+        page = unreachable ? unreached : boot;
     } else if (route.name === "login") {
         page = session ? boot : <Login config={config} {...common} />;
     } else if (session === null || orgs === null) {
@@ -170,13 +186,10 @@ export function App() {
         );
     } else if (route.name === "operator") {
         // Not an operator: there is nothing here, the same as any address that does not exist.
-        page = session.admin ? (
-            <Operator session={session} tab={route.tab} {...common} />
-        ) : (
-            <Missing title="There's nothing" body="The link may be out of date." />
-        );
+        page = session.admin ? <Operator session={session} tab={route.tab} {...common} /> : nothing;
     } else if (route.name === "studio" || route.name === "legacy-editor") {
-        page = boot;
+        // Everyone has a studio, so none at all means they could not be fetched: said, not waited on for ever.
+        page = orgs.length === 0 ? unreached : boot;
     } else if (!org) {
         // Not a member, or no such organisation: the same answer either way.
         page = <Missing title="That studio isn't" body="It may have been removed, or you may not be a member." />;
@@ -220,15 +233,25 @@ function ProjectRoute(props: {
     const orgSlug = props.org.slug;
     const mediaApi = useMemo(() => orgApi(orgSlug), [orgSlug]);
 
+    // The websites could not be fetched: not the same as this one not being there.
+    const [failed, setFailed] = useState(false);
+
     useEffect(() => {
+        // Only the answer for the website now asked for is used; one that arrives late for another is dropped.
+        let current = true;
         setProject(undefined);
+        setFailed(false);
         const a = orgApi(orgSlug);
         // An archived website still opens (read-only), so look there too.
         Promise.all([a.listProjects(), a.listProjects(true).catch(() => [] as Project[])])
-            .then(([live, archived]) => setProject([...live, ...archived].find((p) => p.slug === props.slug) ?? null))
-            .catch(() => setProject(null));
+            .then(([live, archived]) => current && setProject([...live, ...archived].find((p) => p.slug === props.slug) ?? null))
+            .catch(() => current && setFailed(true));
+        return () => {
+            current = false;
+        };
     }, [props.slug, orgSlug]);
 
+    if (failed) return <Unreached />;
     if (project === undefined) {
         return (
             <div className="boot">
@@ -270,6 +293,28 @@ function Missing({ title, body, whole }: { title: string; body: string; whole?: 
                 </p>
                 <button type="button" className="btn btn-primary" style={{ marginTop: 28 }} onClick={() => navigate("/studio")}>
                     Back to your studio
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// Atelier did not answer. Nothing is wrong with what the person asked for, so they are not told
+// it is missing, nor sent to sign in: they are told, and offered another go.
+function Unreached() {
+    return (
+        <div className="boot">
+            <div style={{ textAlign: "center" }}>
+                <Wordmark />
+                <h1 className="display" style={{ fontSize: 56, marginTop: 24 }}>
+                    Atelier <em>can't be reached.</em>
+                </h1>
+                <p className="muted" style={{ marginTop: 12, maxWidth: 520, marginInline: "auto" }}>
+                    This is usually a connection that has dropped, or Atelier being updated, and passes in a moment. Nothing of yours has
+                    changed.
+                </p>
+                <button type="button" className="btn btn-primary" style={{ marginTop: 28 }} onClick={() => window.location.reload()}>
+                    Try again
                 </button>
             </div>
         </div>

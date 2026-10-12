@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { parseModel } from "./providers.ts";
 
 // One thing the assistant did: the tool it used and, for file tools, which file
@@ -138,12 +140,15 @@ export class OpenCodeAgent implements AgentRuntime {
 
     async run(input: AgentRunInput): Promise<AgentResult> {
         const { stateDir } = this.opts;
-        const configPath = join(stateDir, "opencode.json");
+        // Named after the workspace: where one engine serves several websites (the local
+        // runtime), two runs at once must not read each other's token or instructions.
+        const key = createHash("sha256").update(input.workspaceDir).digest("hex").slice(0, 16);
+        const configPath = join(stateDir, `opencode-${key}.json`);
         await mkdir(stateDir, { recursive: true, mode: 0o700 });
         // Instructions live beside the config, outside the workspace: the agent
         // cannot rewrite its own rules, and they are never committed or previewed.
         const byok = input.model ? (parseModel(input.model)?.provider ?? null) : null;
-        const instructionsPath = join(stateDir, "ATELIER.md");
+        const instructionsPath = join(stateDir, `ATELIER-${key}.md`);
         await writeFile(instructionsPath, input.instructions, { mode: 0o600 });
         await writeFile(
             configPath,
@@ -208,8 +213,8 @@ export class OpenCodeAgent implements AgentRuntime {
                       HTTP_PROXY: this.opts.egressProxy,
                       https_proxy: this.opts.egressProxy,
                       http_proxy: this.opts.egressProxy,
-                      NO_PROXY: "atelier-server,localhost,127.0.0.1",
-                      no_proxy: "atelier-server,localhost,127.0.0.1",
+                      NO_PROXY: noProxy(input.apiUrl),
+                      no_proxy: noProxy(input.apiUrl),
                   }
                 : {}),
         };
@@ -218,6 +223,9 @@ export class OpenCodeAgent implements AgentRuntime {
         const parser = new RunParser(input.workspaceDir, input.onStep);
         const outcome = await runProcess(this.opts.command ?? "opencode", args, env, input.workspaceDir, control, (line) =>
             parser.line(line),
+        ).finally(() =>
+            // The config carries this run's token, and is written again for the next run.
+            rm(configPath, { force: true }).catch(() => {}),
         );
         if (outcome.ended !== "exited") throw new RunInterrupted(outcome.ended, parser.result());
         if (parser.error) throw new Error(parser.error);
@@ -231,6 +239,22 @@ export class OpenCodeAgent implements AgentRuntime {
         return parser.result();
     }
 }
+
+// The hosts reached directly rather than through the egress proxy: the control plane,
+// wherever this run was told it is.
+function noProxy(apiUrl: string): string {
+    const hosts = ["atelier-server", "localhost", "127.0.0.1"];
+    try {
+        const host = new URL(apiUrl).hostname;
+        if (host && !hosts.includes(host)) hosts.unshift(host);
+    } catch {
+        // Not an address: nothing to add.
+    }
+    return hosts.join(",");
+}
+
+// How much of what the engine wrote to its error output is kept: only the start is ever shown.
+const MAX_STDERR_BYTES = 64 * 1024;
 
 interface ProcessOutcome {
     ended: "exited" | "stopped" | "timed_out";
@@ -255,7 +279,18 @@ function runProcess(
         // tools, the content server): otherwise they linger and hold the output open.
         const child = spawn(command, args, { env, cwd, stdio: ["ignore", "pipe", "pipe"], detached: true });
         const err: Buffer[] = [];
+        let errBytes = 0;
+        // Output arrives in pieces that can end part-way through a character.
+        const decoder = new StringDecoder("utf8");
         let pending = "";
+        // A line that cannot be handled must not end the server: this runs inside an event handler.
+        const handle = (line: string) => {
+            try {
+                onLine(line);
+            } catch (e) {
+                console.error("agent output line failed", e);
+            }
+        };
         let ended: ProcessOutcome["ended"] = "exited";
         let settled = false;
         const killAll = () => {
@@ -269,7 +304,8 @@ function runProcess(
             if (settled) return;
             settled = true;
             clearInterval(watch);
-            if (pending.trim()) onLine(pending);
+            pending += decoder.end();
+            if (pending.trim()) handle(pending);
             child.stdout.destroy();
             child.stderr.destroy();
             resolve({ ended, code, stderr: Buffer.concat(err).toString("utf8") });
@@ -286,10 +322,10 @@ function runProcess(
             }
         }, 1000);
         child.stdout.on("data", (b: Buffer) => {
-            pending += b.toString("utf8");
+            pending += decoder.write(b);
             let nl = pending.indexOf("\n");
             while (nl !== -1) {
-                onLine(pending.slice(0, nl));
+                handle(pending.slice(0, nl));
                 pending = pending.slice(nl + 1);
                 nl = pending.indexOf("\n");
             }
@@ -297,7 +333,10 @@ function runProcess(
             if (pending.length > 8 * 1024 * 1024) pending = "";
         });
         child.stderr.on("data", (b: Buffer) => {
-            if (err.length < 256) err.push(b);
+            if (errBytes >= MAX_STDERR_BYTES) return;
+            const kept = b.subarray(0, MAX_STDERR_BYTES - errBytes);
+            err.push(kept);
+            errBytes += kept.length;
         });
         child.on("error", (e) => {
             clearInterval(watch);
@@ -376,8 +415,10 @@ class RunParser {
         if (!FILE_TOOLS.has(name)) return null;
         const raw = evt.part?.state?.input?.filePath ?? evt.part?.state?.input?.path;
         if (typeof raw !== "string" || !raw) return null;
-        const rel = raw.startsWith(`${this.root}/`) ? raw.slice(this.root.length + 1) : raw.startsWith("/") ? null : raw;
-        return rel && !rel.startsWith("..") ? rel.slice(0, 200) : null;
+        // With no website folder known, a full path cannot be placed in it and is not passed on.
+        const rel = this.root && raw.startsWith(`${this.root}/`) ? raw.slice(this.root.length + 1) : raw.startsWith("/") ? null : raw;
+        // A path that climbs out of the website, wherever in it the climb is, is not a file of the website.
+        return rel && !rel.split(/[\\/]/).includes("..") ? rel.slice(0, 200) : null;
     }
 
     result(): AgentResult {

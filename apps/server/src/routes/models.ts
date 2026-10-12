@@ -144,18 +144,32 @@ export function modelRoutes(api: Api): void {
         // started under it cannot spend on past it without limit.
         const org = await store.organizations.findById(claims.tenantId);
         if (!org) return refuse(c, 401, "missing or expired token");
+        // A suspended studio's assistants are stopped; one that could not be stopped spends nothing more.
+        if (org.status !== "active") return refuse(c, 401, "missing or expired token");
         const used = await store.usage.total(org.id, ["agent.input_tokens", "agent.output_tokens"], startOfUtcDay());
         const ceiling = limits(org).dailyTokenLimit;
         if (ceiling !== null && used >= ceiling) return refuse(c, 429, "this studio has reached today's usage limit for the assistant");
 
         const sealed = await store.providerKeys.getSealed(claims.tenantId, provider.id);
         const key = sealed ? box.open(sealed, providerKeyAddress(claims.tenantId, provider.id)) : null;
+        // A key that is there but cannot be opened (the server's own key changed, say) is a different thing to put right.
+        if (sealed && !key)
+            return refuse(
+                c,
+                403,
+                `The ${provider.name} API key for this studio can no longer be read. Add it again in the studio's settings.`,
+            );
         if (!key) return refuse(c, 403, `No ${provider.name} API key is connected for this studio. Add one in the studio's settings.`);
 
         // Only ever this provider's own API: the path is appended to its base address.
+        // The address has been tidied by now ("%2e%2e" counts as ".."), so it is checked to be
+        // still under this provider, and to hold nothing that could be read as a step up or out
+        // further along: dots, slashes or backslashes, written plainly or encoded.
         const url = new URL(c.req.url);
-        const rest = url.pathname.slice(`/internal/model/${provider.id}`.length);
-        if (!rest.startsWith("/") || rest.includes("..") || rest.includes("//") || rest.includes("\\")) return refuse(c, 404, "bad path");
+        const under = `/internal/model/${provider.id}`;
+        const rest = url.pathname.startsWith(`${under}/`) ? url.pathname.slice(under.length) : "";
+        if (!rest.startsWith("/") || rest.includes("..") || rest.includes("//") || rest.includes("\\") || /%(2e|2f|5c)/i.test(rest))
+            return refuse(c, 404, "bad path");
         const target = `${upstreamFor(provider, config.providerUpstreams)}${rest}${url.search}`;
 
         const headers = new Headers();
@@ -184,7 +198,10 @@ export function modelRoutes(api: Api): void {
         const out = new Headers();
         for (const [name, value] of upstream.headers) {
             // fetch has already decoded the body, so its encoding and length no longer apply.
-            if (!HOP.has(name) && name !== "content-encoding" && name !== "content-length" && name !== "set-cookie") out.set(name, value);
+            // A redirect is handed back without where it points: whatever followed it would take
+            // the workspace's token to another address.
+            if (!HOP.has(name) && name !== "content-encoding" && name !== "content-length" && name !== "set-cookie" && name !== "location")
+                out.set(name, value);
         }
         return new Response(upstream.body, { status: upstream.status, headers: out });
     });

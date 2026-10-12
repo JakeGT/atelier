@@ -12,6 +12,8 @@ export class SecretBox {
     private readonly key: Buffer;
 
     constructor(secretsKey: string) {
+        // An empty key would still derive one, which anyone could derive too.
+        if (!secretsKey) throw new Error("a secrets key is required to seal stored secrets");
         this.key = Buffer.from(hkdfSync("sha256", secretsKey, "atelier", "stored-secrets:v1", 32));
     }
 
@@ -25,14 +27,17 @@ export class SecretBox {
 
     // Returns null if the value was tampered with, belongs elsewhere, or was sealed under another key.
     open(sealed: string, address: string): string | null {
-        const [version, iv, tag, body] = sealed.split(".");
-        if (version !== VERSION || !iv || !tag || body === undefined) return null;
+        const parts = sealed.split(".");
+        const [version, iv, tag, body] = parts;
+        if (parts.length !== 4 || version !== VERSION || !iv || !tag || body === undefined) return null;
         try {
             const decipher = createDecipheriv("aes-256-gcm", this.key, Buffer.from(iv, "base64url"));
             decipher.setAAD(Buffer.from(address));
             decipher.setAuthTag(Buffer.from(tag, "base64url"));
             return Buffer.concat([decipher.update(Buffer.from(body, "base64url")), decipher.final()]).toString("utf8");
         } catch {
+            // Worth knowing about (the server's key was changed, say); the address names no secret.
+            console.warn(`a stored secret at ${address} did not open`);
             return null;
         }
     }

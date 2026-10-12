@@ -6,6 +6,7 @@ import { validInstructions } from "../services/instructions.ts";
 import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
 import type { ProjectPatch } from "../store/types.ts";
+import { SlugTakenError } from "../store/types.ts";
 import { type Api, type Ctx, ORG, PROJECT, param, SLUG_RE, slugify } from "./kit.ts";
 import { STUDIO_PREFIX } from "./templates.ts";
 
@@ -79,12 +80,12 @@ export function projectRoutes(api: Api): void {
         return c.json({ ok: true });
     });
 
-    // A project needs only a name; the slug is derived (and made unique) unless given.
     // Starter templates a new website can begin from.
     route("get", "/api/v1/templates", "signed-in", async (c) =>
         c.json({ templates: templates.map(({ id, name, description }) => ({ id, name, description })) }),
     );
 
+    // A project needs only a name; the slug is derived (and made unique) unless given.
     route("post", `${ORG}/projects`, "project.create", async (c) => {
         const org = c.get("org");
         const body = await c.req.json().catch(() => null);
@@ -102,7 +103,8 @@ export function projectRoutes(api: Api): void {
                 return c.json({ error: "slug must be lowercase letters, digits and hyphens" }, 400);
             if (existing.some((p) => p.slug === slug)) return c.json({ error: "slug already in use" }, 409);
         } else {
-            const base = slugify(name).slice(0, 48) || "site";
+            // Cutting it short can leave a hyphen at the end, which an address may not have.
+            const base = slugify(name).slice(0, 48).replace(/-+$/, "") || "site";
             slug = base;
             for (let n = 2; existing.some((p) => p.slug === slug); n++) slug = `${base}-${n}`;
         }
@@ -115,7 +117,12 @@ export function projectRoutes(api: Api): void {
               ? findLook(template.slice(LOOK_PREFIX.length)) !== undefined
               : templates.some((t) => t.id === template);
         if (template && !known) return c.json({ error: "that template isn't available" }, 400);
-        const made = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template });
+        // Two requests at once can both pass the check above; the store then refuses the second.
+        const made = await store.projects.create({ id: randomUUID(), tenantId: org.id, slug, name, template }).catch((err) => {
+            if (err instanceof SlugTakenError) return null;
+            throw err;
+        });
+        if (!made) return c.json({ error: "slug already in use" }, 409);
         // How much the assistant should ask, chosen with the website (it builds the first page straight away).
         const created =
             isAskLevel(body?.askLevel) && body.askLevel !== made.askLevel
@@ -160,6 +167,8 @@ export function projectRoutes(api: Api): void {
             if (model && !validModelRef(model)) return c.json({ error: "choose a model from a supported provider" }, 400);
             patch.agentModel = model || null;
         }
+        // Nothing to change is not a change: nothing is written, and nothing recorded.
+        if (Object.keys(patch).length === 0) return c.json({ project: c.get("project") });
         const project = await store.projects.update(c.get("org").id, c.get("project").id, patch);
         await audit(c, "project.update", `project:${project.id}`, { fields: Object.keys(patch) });
         return c.json({ project });
@@ -170,7 +179,10 @@ export function projectRoutes(api: Api): void {
         const project = await store.projects.update(c.get("org").id, c.get("project").id, { archived });
         if (archived) {
             await api.covers.quiet(project.id);
-            await runtime.stop(project.id).catch(() => {});
+            // It is archived either way; a workspace that would not stop is left for the idle sweep, and said in the log.
+            await runtime
+                .stop(project.id)
+                .catch((err: Error) => console.error(`could not stop workspace for ${project.id}: ${err.message}`));
         }
         await audit(c, archived ? "project.archive" : "project.restore", `project:${project.id}`);
         return c.json({ project });
@@ -203,10 +215,14 @@ export function projectRoutes(api: Api): void {
             return c.json({ error: "the website's workspace could not be removed; try again in a moment" }, 502);
         }
         // Its uploaded files go with it. One that cannot be removed now is only a stray
-        // object in storage, so it does not stop the deletion.
+        // object in storage, so it does not stop the deletion; nor does not being able to list them.
         if (storage) {
             await storage.delete(coverKey(project.tenantId, project.id)).catch(() => {});
-            for (const asset of await store.media.list(project.tenantId, project.id, true)) {
+            const assets = await store.media.list(project.tenantId, project.id, true).catch((err: Error) => {
+                console.warn(`stray media files of ${project.id}: ${err.message}`);
+                return [];
+            });
+            for (const asset of assets) {
                 for (const name of filesOf(asset)) {
                     await storage
                         .delete(storageKey(asset, name))

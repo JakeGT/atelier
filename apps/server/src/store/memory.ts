@@ -144,6 +144,7 @@ export class MemoryStore implements Store {
             for (const [k, m] of this.membershipMap) if (m.tenantId === id) this.membershipMap.delete(k);
             for (const [k, i] of this.invitationMap) if (i.tenantId === id) this.invitationMap.delete(k);
             for (const k of [...this.providerKeyMap.keys()]) if (k.startsWith(`${id}\0`)) this.providerKeyMap.delete(k);
+            for (const [k, t] of this.templateMap) if (t.tenantId === id) this.templateMap.delete(k);
             this.orgMap.delete(id);
         },
         listAll: async () => {
@@ -160,7 +161,7 @@ export class MemoryStore implements Store {
                     tokens: this.usageLog
                         .filter((e) => e.tenantId === org.id && e.at >= since && e.kind.endsWith("_tokens"))
                         .reduce((n, e) => n + e.units, 0),
-                    owners: members.filter((m) => m.role === "owner").map((m) => users.find((u) => u.id === m.userId)?.email ?? ""),
+                    owners: members.filter((m) => m.role === "owner").flatMap((m) => users.find((u) => u.id === m.userId)?.email ?? []),
                     createdAt: this.orgCreated.get(org.id) ?? now(),
                 };
             });
@@ -325,6 +326,9 @@ export class MemoryStore implements Store {
 
     projects: ProjectStore = {
         create: async (input) => {
+            // Mirror UNIQUE (tenant_id, slug).
+            if ([...this.projectMap.values()].some((p) => p.tenantId === input.tenantId && p.slug === input.slug))
+                throw new SlugTakenError();
             const p: Project = {
                 id: input.id,
                 tenantId: input.tenantId,
@@ -405,6 +409,11 @@ export class MemoryStore implements Store {
             for (const [k, v] of this.agentSessionMap) if (v.projectId === id) this.agentSessionMap.delete(k);
             for (const [k, v] of this.deploymentMap) if (v.projectId === id) this.deploymentMap.delete(k);
             for (let i = this.messageLog.length - 1; i >= 0; i--) if (this.messageLog[i]?.projectId === id) this.messageLog.splice(i, 1);
+            for (const [hostname, d] of this.domainMap) if (d.projectId === id) this.domainMap.delete(hostname);
+            for (const [k, m] of this.mediaMap) if (m.projectId === id) this.mediaMap.delete(k);
+            for (const [k, r] of this.projectRoles) if (r.projectId === id) this.projectRoles.delete(k);
+            for (let i = this.questionLog.length - 1; i >= 0; i--) if (this.questionLog[i]?.projectId === id) this.questionLog.splice(i, 1);
+            for (let i = this.formLog.length - 1; i >= 0; i--) if (this.formLog[i]?.projectId === id) this.formLog.splice(i, 1);
         },
         findById: async (tenantId, id) => {
             const p = this.projectMap.get(id);
@@ -609,13 +618,13 @@ export class MemoryStore implements Store {
             const release = this.releaseMap.get(releaseId);
             if (!release || release.tenantId !== tenantId || release.projectId !== projectId) throw new Error("release not found");
             for (const r of this.releaseMap.values()) {
-                if (r.projectId === projectId && r.state === "live" && r.id !== releaseId)
+                if (r.tenantId === tenantId && r.projectId === projectId && r.state === "live" && r.id !== releaseId)
                     this.releaseMap.set(r.id, { ...r, state: "superseded" });
             }
             const shipped = new Map((this.manifestMap.get(releaseId) ?? []).map((d) => [d.documentId, d]));
             const at = now();
             for (const doc of this.contentMap.values()) {
-                if (doc.projectId !== projectId) continue;
+                if (doc.tenantId !== tenantId || doc.projectId !== projectId) continue;
                 const d = shipped.get(doc.id);
                 this.contentMap.set(doc.id, { ...doc, published: d ? d.content : null, publishedAt: d ? at : null });
             }
@@ -631,7 +640,8 @@ export class MemoryStore implements Store {
             const down: Release = { ...live, state: "superseded" };
             this.releaseMap.set(live.id, down);
             for (const doc of this.contentMap.values()) {
-                if (doc.projectId === projectId) this.contentMap.set(doc.id, { ...doc, published: null, publishedAt: null });
+                if (doc.tenantId === tenantId && doc.projectId === projectId)
+                    this.contentMap.set(doc.id, { ...doc, published: null, publishedAt: null });
             }
             return down;
         },
@@ -684,6 +694,9 @@ export class MemoryStore implements Store {
                 .filter(([, d]) => d.tenantId === tenantId && d.projectId === projectId)
                 .map(([hostname, d]) => ({ hostname, createdAt: d.createdAt })),
         add: async (input) => {
+            // Mirror the composite FK: the project must belong to the tenant.
+            const project = this.projectMap.get(input.projectId);
+            if (!project || project.tenantId !== input.tenantId) throw new Error("project not found");
             if (this.domainMap.has(input.hostname)) throw new DomainTakenError();
             this.domainMap.set(input.hostname, { tenantId: input.tenantId, projectId: input.projectId, createdAt: now() });
         },
@@ -943,6 +956,15 @@ export class MemoryStore implements Store {
         },
         deleteForUser: async (userId) => {
             for (const [k, s] of this.loginSessionMap) if (s.userId === userId) this.loginSessionMap.delete(k);
+        },
+        purgeExpired: async (idleBefore, createdBefore) => {
+            let gone = 0;
+            for (const [k, s] of this.loginSessionMap) {
+                if (s.lastSeenAt >= idleBefore && s.createdAt >= createdBefore) continue;
+                this.loginSessionMap.delete(k);
+                gone++;
+            }
+            return gone;
         },
     };
 

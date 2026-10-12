@@ -1,5 +1,6 @@
-import type { Organization, Permission } from "@atelier/shared";
+import type { Organization, Permission, Project } from "@atelier/shared";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { HTTPException } from "hono/http-exception";
 import type { Config } from "../config.ts";
 import {
     type ApiVariables,
@@ -72,6 +73,15 @@ export const PROJECT = `${ORG}/projects/:projectId`;
 // Routes are registered through a helper, so params are not typed per path.
 export const param = (c: Context, name: string): string => c.req.param(name) ?? "";
 
+// What an assistant's token opens: its own website, for as long as that website is in use and
+// its studio is. Archiving or deleting the website, or suspending the studio, ends it at once.
+export async function agentProject(store: Store, claims: { tenantId: string; projectId: string } | null): Promise<Project | null> {
+    if (!claims) return null;
+    const project = await store.projects.findById(claims.tenantId, claims.projectId);
+    if (!project || project.archivedAt) return null;
+    return (await store.organizations.findById(claims.tenantId))?.status === "active" ? project : null;
+}
+
 export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const slugify = (s: string): string =>
     s
@@ -95,7 +105,14 @@ export function createApi(deps: ApiDeps) {
 
     app.use("/api/v1/*", requireSession(sessions, config.cookieSecure));
     const csrf = requireCsrf(sessions, config.publicOrigin, config.cookieSecure);
-    app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" ? next() : csrf(c, next)));
+    // Reading needs no token (HEAD is answered by the GET handlers); so a GET must never change anything that matters.
+    app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" || c.req.method === "HEAD" ? next() : csrf(c, next)));
+    // Something a handler did not expect: the details go to the log, and the person is told only that it was us.
+    app.onError((err, c) => {
+        if (err instanceof HTTPException) return err.getResponse();
+        console.error(`${c.req.method} ${c.req.path} failed:`, err);
+        return c.json({ error: "something went wrong on our side; try again in a moment" }, 500);
+    });
 
     const presence = new Presence();
     // Pictures of each website's home page, for its card: retaken a few seconds after a change.
@@ -120,7 +137,7 @@ export function createApi(deps: ApiDeps) {
         // Not the heartbeat itself, and not how much the assistant asks: that changes nothing a
         // website shows, and travels with the heartbeat instead of making every editor reload.
         const quiet = c.req.path.endsWith("/pulse") || c.req.path.endsWith("/asking");
-        if (c.req.method === "GET" || c.res.status >= 400 || quiet) return;
+        if (c.req.method === "GET" || c.req.method === "HEAD" || c.res.status >= 400 || quiet) return;
         presence.touch(c.get("project").id);
         // What the website shows may have changed (wording, a look, a restored version, a picture): its card
         // gets a new picture. Not for things that change nothing on it, or that only start work whose end will.
@@ -134,12 +151,14 @@ export function createApi(deps: ApiDeps) {
     function route(method: Method, path: string, requirement: Requirement, ...rest: [...MiddlewareHandler<Env>[], Handler]) {
         declared.push({ method: method.toUpperCase(), path, permission: requirement });
         const chain: MiddlewareHandler<Env>[] = [];
-        if (path.includes(":org")) chain.push(org);
+        // Whole parts of the path, so a parameter that only begins the same way is not mistaken for these.
+        const parts = path.split("/");
+        if (parts.includes(":org")) chain.push(org);
         // A website is loaded before the check: the person's role may be different on it
         // (per-website roles). Not found and not allowed both answer 404, as before.
-        if (path.includes(":projectId")) chain.push(project);
+        if (parts.includes(":projectId")) chain.push(project);
         chain.push(requirePermission(requirement));
-        if (path.includes(":projectId")) chain.push(announce);
+        if (parts.includes(":projectId")) chain.push(announce);
         const on = app.on as unknown as (m: string, p: string, ...h: MiddlewareHandler<Env>[]) => void;
         on(method.toUpperCase(), path, ...chain, ...(rest as MiddlewareHandler<Env>[]));
     }
@@ -174,8 +193,9 @@ export function createApi(deps: ApiDeps) {
             store.audit.record({ tenantId: c.get("org").id, actorId: c.get("user").id, action, target, detail: detail ?? null }),
         runtimeError: (c: Ctx, err: unknown) => {
             if (err instanceof RuntimeBusyError) return c.json({ error: err.message }, 409);
-            console.error(`workspace error: ${(err as Error).message}`);
-            return c.json({ error: (err as Error).message }, 502);
+            // What went wrong is for the log: it names containers, addresses and files, which mean nothing to a person.
+            console.error(`workspace error: ${err instanceof Error ? err.message : String(err)}`);
+            return c.json({ error: "the website's workspace could not be reached just now; try again in a moment" }, 502);
         },
         // An organisation's ceilings: its own, or the server defaults. The daily token
         // ceiling is null (none) unless the studio or the operator set one.

@@ -254,9 +254,15 @@ export class CloudflarePages {
         } catch (err) {
             if (!(err instanceof PagesError) || err.status !== 404) throw err;
         }
-        return this.call<{ subdomain: string }>("POST", `/accounts/${this.opts.accountId}/pages/projects`, {
-            json: { name, production_branch: "main" },
-        });
+        try {
+            return await this.call<{ subdomain: string }>("POST", `/accounts/${this.opts.accountId}/pages/projects`, {
+                json: { name, production_branch: "main" },
+            });
+        } catch (err) {
+            // Someone else made it in the meantime (two first publishes at once): then it is there.
+            if (!(err instanceof PagesError) || err.status !== 409) throw err;
+            return this.call<{ subdomain: string }>("GET", this.project(name));
+        }
     }
 
     // Uploads what Cloudflare does not already hold, then creates the deployment.
@@ -302,7 +308,8 @@ export class CloudflarePages {
         form.append("_headers", new File([headersFile(site.headers, opts.canonicalHost, opts.label)], "_headers"));
         if (site.redirects) form.append("_redirects", new File([site.redirects], "_redirects"));
         const deployment = await this.call<{ id: string; url: string }>("POST", `${this.project(name)}/deployments`, { body: form });
-        return { id: deployment.id, url: deployment.url, files: site.files.length, uploaded: missing.length };
+        const uploaded = buckets.reduce((count, bucket) => count + bucket.length, 0);
+        return { id: deployment.id, url: deployment.url, files: site.files.length, uploaded };
     }
 
     async listDomains(name: string): Promise<PagesDomain[]> {

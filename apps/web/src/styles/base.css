@@ -77,6 +77,16 @@ textarea {
     border-radius: 4px;
 }
 
+/* Fields show focus with their border and a ring instead of this outline. Where the system
+   forces its own colours (high contrast) rings and tinted borders are lost, so there every
+   focused control gets a plain outline back. */
+@media (forced-colors: active) {
+    :focus-visible {
+        /* biome-ignore lint/complexity/noImportantStyles: must win over every field's own "outline: 0" */
+        outline: 2px solid Highlight !important;
+    }
+}
+
 /* ---- type ------------------------------------------------------------------- */
 
 .display {
@@ -922,7 +932,7 @@ textarea {
     display: flex;
     flex-direction: column;
     width: min(680px, 100%);
-    max-height: min(640px, calc(100vh - 2 * min(12vh, 110px)));
+    max-height: min(640px, calc(100dvh - 2 * min(12vh, 110px)));
     border: 1px solid var(--line);
     border-radius: var(--radius-xl);
     background: var(--surface-raised);
@@ -955,6 +965,11 @@ textarea {
     background: none;
     font-size: 17px;
     outline: 0;
+}
+
+/* The search box has no edge of its own: the line under it darkens while it is being typed in. */
+.picker-search:focus-within {
+    border-bottom-color: var(--ink);
 }
 
 .picker-search input::placeholder {
@@ -1019,6 +1034,13 @@ textarea {
     min-height: 180px;
     padding: 6px 8px 10px;
     overflow-y: auto;
+}
+
+/* A window too short for it all (a phone on its side): the list gives way, so the picker stays whole. */
+@media (max-height: 480px) {
+    .picker-list {
+        min-height: 0;
+    }
 }
 
 .picker-head {
@@ -1255,7 +1277,7 @@ textarea {
 
 /* A dialog taller than the window scrolls inside itself; its buttons are never out of reach. */
 .dialog {
-    max-height: calc(100vh - 48px);
+    max-height: calc(100dvh - 48px);
     overflow-y: auto;
 }
 
@@ -1274,7 +1296,7 @@ textarea {
     margin: 18px 0 0;
     padding: 0;
     list-style: none;
-    max-height: 52vh;
+    max-height: 52dvh;
     overflow-y: auto;
 }
 
@@ -1359,7 +1381,7 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
+    min-height: 100dvh;
     color: var(--ink);
 }
 

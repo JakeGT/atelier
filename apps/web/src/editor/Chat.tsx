@@ -86,10 +86,17 @@ export function Chat(props: ChatProps) {
     const [ending, setEnding] = useState(false);
     const ideasRef = useClickOutside(useCallback(() => setIdeasOpen(false), []));
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the conversation grows or the work moves on
+    // Whether the person is at the end of the conversation, or has scrolled up to read.
+    const atEnd = useRef(true);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the conversation grows
     useEffect(() => {
         scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-    }, [messages.length, busy, steps, ending, begun]);
+    }, [messages.length, busy, ending, begun]);
+    // Each step of the work keeps the end in view, but does not pull back someone who is reading further up.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: when the work moves on
+    useEffect(() => {
+        if (atEnd.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    }, [steps]);
 
     // Grow the composer with its content, up to a limit.
     // biome-ignore lint/correctness/useExhaustiveDependencies: resize when the text changes
@@ -127,7 +134,14 @@ export function Chat(props: ChatProps) {
 
     return (
         <section className="chat">
-            <div className="chat-scroll" ref={scroller}>
+            <div
+                className="chat-scroll"
+                ref={scroller}
+                onScroll={(e) => {
+                    const el = e.currentTarget;
+                    atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+                }}
+            >
                 {loading ? (
                     <div className="chat-loading">
                         <Dots />
@@ -200,7 +214,17 @@ export function Chat(props: ChatProps) {
                                 onAnswer={(list) => props.onAnswer?.(list)}
                             />
                         )}
-                        {run && <Working run={run} whose={theirs} canAct={ready} onStop={props.onStop} onMoreTime={props.onMoreTime} />}
+                        {run && (
+                            // Keyed by the request, so "Stopping…" never carries over to the next one.
+                            <Working
+                                key={run.id}
+                                run={run}
+                                whose={theirs}
+                                canAct={ready}
+                                onStop={props.onStop}
+                                onMoreTime={props.onMoreTime}
+                            />
+                        )}
                         {props.onNewConversation &&
                             anythingSaid &&
                             !busy &&
@@ -431,7 +455,10 @@ function Working({
                     {whose && <span className="working-whose">{whose}'s request · </span>}
                     {headline}
                 </span>
-                <span className="mono muted">{clock(now - new Date(run.startedAt).getTime())}</span>
+                {/* Not read out: it changes every second, and this card announces what changes in it. */}
+                <span className="mono muted" aria-hidden="true">
+                    {clock(now - new Date(run.startedAt).getTime())}
+                </span>
             </div>
             {note && <p className="working-note">{note}</p>}
             {lastStep && (
@@ -460,8 +487,18 @@ function Working({
                 <p className="working-time">
                     <Clock />
                     <span>
-                        This is a long one. It will be paused in {clock(left)} so it can't run on unnoticed; what it has done will be kept
-                        and you can carry on from there.
+                        {/* The time left is shown but read out once in words, not second by second. Once it has
+                            run out (the pause follows within moments), no figure is given. */}
+                        This is a long one. It will be paused{" "}
+                        {left > 0 ? (
+                            <>
+                                in <span aria-hidden="true">{clock(left)}</span>
+                                <span className="sr-only">a few minutes</span>
+                            </>
+                        ) : (
+                            "any moment now"
+                        )}{" "}
+                        so it can't run on unnoticed; what it has done will be kept and you can carry on from there.
                     </span>
                     {canAct && run.canExtend && (
                         <button type="button" className="btn btn-sm" onClick={onMoreTime}>

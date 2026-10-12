@@ -102,7 +102,7 @@ export async function signIn(t: TestApp, opts: { email?: string; role?: OrgRole;
     const api = `/api/v1/orgs/${org.slug}`;
     const { id, csrf } = await t.sessions.createSession(user.id, opts.authTime);
     const read = { cookie: `${cookieName("session", t.config.cookieSecure)}=${id}` };
-    const write = { ...read, "x-atelier-csrf": csrf, origin: "http://localhost:8080", "content-type": "application/json" };
+    const write = { ...read, "x-atelier-csrf": csrf, origin: t.config.publicOrigin, "content-type": "application/json" };
     return { user, org, api, read, write, csrf };
 }
 

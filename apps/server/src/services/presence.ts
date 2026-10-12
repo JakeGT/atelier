@@ -48,7 +48,8 @@ export class Presence {
         }
         const t = this.now();
         // Not typing any more clears it at once (they sent, or emptied the box).
-        here.set(user.id, { name: user.name, at: t, typingAt: typing ? t : 0 });
+        // "Never" rather than 0, which is a time like any other to a clock that starts there.
+        here.set(user.id, { name: user.name, at: t, typingAt: typing ? t : Number.NEGATIVE_INFINITY });
     }
 
     // Everyone with the website open, the asker excluded.

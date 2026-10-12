@@ -16,7 +16,8 @@ export interface RetentionPolicy {
     removedMediaDays: number;
     // What visitors sent through a website's forms.
     formDays: number;
-    // The activity record.
+    // The activity record. Not applied by runRetention: only the database's owner may
+    // delete from it, so main.ts does that when the server starts.
     auditDays: number;
 }
 
@@ -28,6 +29,8 @@ export const DEFAULT_RETENTION: RetentionPolicy = {
     formDays: 365,
     auditDays: 730,
 };
+
+const said = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const daysAgo = (days: number, now: Date): Date => new Date(now.getTime() - days * 86_400_000);
 
@@ -50,15 +53,21 @@ export async function runRetention(
             report.messages += await store.messages.purgeBefore(studio.id, daysAgo(policy.messageDays, now));
             report.revisions += await store.content.pruneRevisions(studio.id, daysAgo(policy.revisionDays, now), policy.revisionsKept);
             report.forms += await store.forms.purgeBefore(studio.id, daysAgo(policy.formDays, now));
+            // Without storage the files cannot be deleted, so their records stay too: they are what keeps track of them.
             if (!storage) continue;
             for (const asset of await store.media.removedBefore(studio.id, daysAgo(policy.removedMediaDays, now))) {
-                // The files first: a record without files is harmless, files without a record are lost track of.
-                for (const name of filesOf(asset)) await storage.delete(storageKey(asset, name));
-                await store.media.purge(studio.id, asset.id);
-                report.files += 1;
+                // One file that cannot be deleted today must not keep the others waiting behind it.
+                try {
+                    // The files first: a record without files is harmless, files without a record are lost track of.
+                    for (const name of filesOf(asset)) await storage.delete(storageKey(asset, name));
+                    await store.media.purge(studio.id, asset.id);
+                    report.files += 1;
+                } catch (err) {
+                    console.warn(`retention could not delete removed file ${asset.id} of studio ${studio.id}: ${said(err)}`);
+                }
             }
         } catch (err) {
-            console.warn(`retention failed for studio ${studio.id}: ${(err as Error).message}`);
+            console.warn(`retention failed for studio ${studio.id}: ${said(err)}`);
         }
     }
     return report;

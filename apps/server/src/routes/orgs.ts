@@ -48,13 +48,20 @@ export function orgRoutes(api: Api): void {
         if ((await store.organizations.listForUser(user.id)).filter((o) => o.role === "owner").length >= 10) {
             return c.json({ error: "you already own the maximum number of organisations" }, 409);
         }
-        const base = slugify(name).slice(0, 40) || "studio";
+        // Cutting it short can leave a hyphen at the end, which an address may not have.
+        const base = slugify(name).slice(0, 40).replace(/-+$/, "") || "studio";
         // Try the plain slug, then with a short random suffix (other organisations'
         // slugs are invisible here, so the unique constraint is the arbiter).
         for (const slug of [base, `${base}-${randomBytes(2).toString("hex")}`, `${base}-${randomBytes(4).toString("hex")}`]) {
             try {
                 const org = await store.organizations.create({ id: randomUUID(), slug, name });
-                await store.memberships.add({ tenantId: org.id, userId: user.id, role: "owner" });
+                // A studio without its owner is one nobody can open or remove: if they cannot be added, it is taken back.
+                await store.memberships.add({ tenantId: org.id, userId: user.id, role: "owner" }).catch(async (err) => {
+                    await store.organizations
+                        .delete(org.id)
+                        .catch((gone: Error) => console.error(`could not remove ownerless studio ${org.id}: ${gone.message}`));
+                    throw err;
+                });
                 await store.audit.record({
                     tenantId: org.id,
                     actorId: user.id,
@@ -190,6 +197,9 @@ export function orgRoutes(api: Api): void {
     });
 
     route("delete", `${ORG}/invitations/:id`, "org.members", async (c) => {
+        // Only an invitation that is there is taken back, and recorded as taken back.
+        if (!(await store.invitations.list(c.get("org").id)).some((i) => i.id === param(c, "id")))
+            return c.json({ error: "not found" }, 404);
         await store.invitations.revoke(c.get("org").id, param(c, "id"));
         await audit(c, "invitation.revoke", `invitation:${param(c, "id")}`);
         return c.json({ ok: true });

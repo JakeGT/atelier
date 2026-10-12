@@ -72,13 +72,27 @@ test("R2 storage: signed requests to the bucket's path; missing is null; keys ar
     assert.equal(await r2.get(key), null);
     for (const bad of ["../x", `${T}/../${P}/a.jpg`, `${T}/${P}/../../etc`, "a/b/c.jpg"])
         await assert.rejects(r2.put(bad, new Uint8Array(), "x"), /invalid media key/);
+    // A store reached through a gateway with a path of its own keeps that path, and signs it.
+    const behind = new R2Storage({
+        accountId: "a",
+        bucket: "b",
+        accessKeyId: "id",
+        secretAccessKey: "s",
+        endpoint: "https://gw.test/s3/",
+        fetch: fake,
+    });
+    await behind.put(key, new Uint8Array([4]), "image/jpeg");
+    assert.equal(seen.at(-1)?.url, `https://gw.test/s3/b/${key}`);
     const disk = new DiskStorage("/tmp/atelier-media-test");
     await assert.rejects(disk.put(`${T}/${P}/..`, new Uint8Array(), "x"), /invalid media key/);
     await disk.put(key, new Uint8Array([9]), "image/jpeg");
     assert.deepEqual([...((await disk.get(key)) ?? [])], [9]);
     await disk.delete(key);
     assert.equal(await disk.get(key), null);
+    // A disk that cannot be read is a failure, not a missing file.
+    await assert.rejects(new DiskStorage("/dev/null").get(key), /ENOTDIR/);
     assert.equal(new MemoryStorage().kind, "memory");
+    await assert.rejects(new MemoryStorage().get("../x"), /invalid media key/);
 });
 
 test("what a file is comes from its bytes, not its name", async () => {
@@ -127,6 +141,14 @@ test("an SVG is reduced to drawing", () => {
     assert.match(out, /<use xlink:href="#ok"><\/use>/);
     assert.match(out, /<linearGradient id="g">/);
     assert.throws(() => sanitizeSvg("<p>not a drawing</p>"), MediaError);
+    // An address spelt so that it does not read as url(…), and a handler behind a prefix, go too.
+    const sly = sanitizeSvg(
+        `<svg viewBox="0 0 1 1"><rect id="a" style="fill:u\\72l(https://evil.test/a)"/><rect id="b" style="background:image-set('https://evil.test/b' 1x)"/><rect id="c" xlink:onload="x()" width="1"/></svg>`,
+    );
+    for (const gone of ["evil.test", "style", "onload"]) assert.ok(!sly.includes(gone), gone);
+    assert.match(sly, /<rect id="c" width="1">/);
+    // A drawing too large to check is refused whole rather than cut off part-way.
+    assert.throws(() => sanitizeSvg(`<svg>${"<g></g>".repeat(300_000)}</svg>`), /larger than 2 MB/);
 });
 
 test("a bound image shows the library file, with its description and sizes", () => {

@@ -41,7 +41,7 @@ export function requireSession(sessions: SessionStore, secureCookies: boolean) {
 // per-session CSRF token (issued via /auth/session). The agent routes are token-
 // authenticated and do not use this.
 export function requireCsrf(sessions: SessionStore, publicOrigin: string, secureCookies: boolean) {
-    return async (c: Context, next: Next) => {
+    return async (c: ApiContext, next: Next) => {
         const origin = c.req.header("origin");
         if (origin && !sameOrigin(origin, publicOrigin)) return c.json({ error: "origin mismatch" }, 403);
         const sid = readCookie(c, "session", secureCookies);
@@ -75,7 +75,10 @@ export async function studiosFor(
 export function loadOrg(store: Store) {
     return async (c: ApiContext, next: Next) => {
         const slug = c.req.param("org") ?? "";
-        const orgs = await studiosFor(store, c.get("user"));
+        // Only after requireSession. Without a person there is nothing to look up.
+        const user = c.get("user");
+        if (!user) return c.json({ error: "unauthorized" }, 401);
+        const orgs = await studiosFor(store, user);
         const org = orgs.find((o) => o.slug === slug);
         if (!org || org.status === "archived") return c.json({ error: "not found" }, 404);
         // A suspended studio is shown as suspended to its members, and does nothing until restored.
@@ -91,14 +94,18 @@ export function loadOrg(store: Store) {
 export function allowed(user: SessionUser, role: OrgRole | null, requirement: Requirement): boolean {
     if (requirement === "signed-in") return true;
     if (user.admin && hasOperatorPermission(requirement)) return true;
-    return role !== null && hasPermission(role, requirement);
+    return role != null && hasPermission(role, requirement);
 }
 
-// The single enforcement point for the shared permission table. Forbidden and
-// not-a-member both answer 404, so existence does not leak (docs/06 §1).
+// The single enforcement point for the shared permission table: a studio role's
+// capabilities, and the operator's own for whoever runs the platform. Who is in a studio
+// at all is decided before this, by loadOrg. Forbidden and not-a-member both answer 404,
+// so existence does not leak (docs/06 §1).
 export function requirePermission(requirement: Requirement) {
     return async (c: ApiContext, next: Next) => {
-        if (!allowed(c.get("user"), c.get("role"), requirement)) return c.json({ error: "not found" }, 404);
+        // Nobody signed in (requireSession did not run) is never allowed, whatever is asked.
+        const user = c.get("user");
+        if (!user || !allowed(user, c.get("role"), requirement)) return c.json({ error: "not found" }, 404);
         await next();
     };
 }
@@ -108,17 +115,23 @@ export function requirePermission(requirement: Requirement) {
 // /auth/login?prompt=login and resuming afterwards.
 export function requireRecentAuth(minutes: number) {
     return async (c: ApiContext, next: Next) => {
-        if (Date.now() - c.get("authTime") > minutes * 60_000) return c.json({ error: "reauth_required" }, 401);
+        // A missing time must not pass: compared as it is, it would count as recent.
+        const authTime = c.get("authTime");
+        if (!Number.isFinite(authTime) || Date.now() - authTime > minutes * 60_000) return c.json({ error: "reauth_required" }, 401);
         await next();
     };
 }
+
+const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 // Loads :projectId within the caller's organisation; a project elsewhere (or
 // nowhere) is a 404 before any handler runs.
 export function loadProject(store: Store) {
     return async (c: ApiContext, next: Next) => {
         const projectId = c.req.param("projectId") ?? "";
-        const project = /^[0-9a-f-]{36}$/.test(projectId) ? await store.projects.findById(c.get("org").id, projectId) : null;
+        // Only after loadOrg. Anything that is not an id is not looked up: the database would refuse it.
+        const org = c.get("org");
+        const project = org && PROJECT_ID.test(projectId) ? await store.projects.findById(org.id, projectId) : null;
         if (!project) return c.json({ error: "not found" }, 404);
         c.set("project", project);
         // On this website the person may have a different role from the one they have in

@@ -277,3 +277,44 @@ test("a picture field shows any real picture: the library's, a file of the websi
         assert.ok(!inList.includes("<img"), bad);
     }
 });
+
+test("an element whose text is read as code or raw markup is never filled, nor copied as a list's pattern", () => {
+    const run = "</xmp></noscript></iframe></noembed></noframes></script><script>alert(1)</script>";
+    const fill = (body: string) =>
+        fillHtml(
+            page(body),
+            lookupFrom([
+                {
+                    kind: "page",
+                    slug: "home",
+                    content: { x: run, lines: ["alert(1)", run], parts: [{ a: run }], story: `<p>ok</p>${run}` },
+                },
+            ]),
+        );
+    for (const tag of ["xmp", "noscript", "iframe", "noembed", "noframes", "script", "style"]) {
+        assert.ok(!fill(`<${tag} data-content="page/home#x">a</${tag}>`).includes("alert(1)"), tag);
+        assert.ok(!fill(`<${tag} data-content-rich="page/home#story">a</${tag}>`).includes("alert(1)"), `${tag} rich`);
+        assert.ok(
+            !fill(`<ul data-content-list="page/home#parts"><li><${tag} data-item="a">a</${tag}></li></ul>`).includes("alert(1)"),
+            `${tag} part`,
+        );
+    }
+    // A script that happens to come first in a list is not what its entries are copies of.
+    const list = fill('<div data-content-list="page/home#lines"><script>var a;</script><p>first</p></div>');
+    assert.ok(!list.includes("<script>") && list.includes("<p>alert(1)</p>"), list);
+    // Elsewhere the same value is shown as the text it is.
+    assert.match(fill('<p data-content="page/home#x">a</p>'), /<p data-content="page\/home#x">&lt;\/xmp&gt;/);
+});
+
+test("an entry whose own element is a link with nowhere to go is left out, not shown as the first entry; only stored fields are looked up", () => {
+    const out = fillHtml(
+        page(
+            '<nav data-content-list="page/home#links"><a data-item-href="to" href="first.html">First</a></nav><p data-content="page/home#constructor">kept</p>',
+        ),
+        lookupFrom([{ kind: "page", slug: "home", content: { links: [{ to: "about.html" }, { to: "" }, { to: "javascript:alert(1)" }] } }]),
+    );
+    assert.match(out, /<nav data-content-list="page\/home#links"><a data-item-href="to" href="about.html">First<\/a><\/nav>/);
+    assert.match(out, /<p data-content="page\/home#constructor">kept<\/p>/);
+    // Attribute names are read whatever their case.
+    assert.match(fillHtml(page('<h1 DATA-CONTENT="page/home#headline">x</h1>'), lookup), /Okoro &lt;Ceramics&gt; &amp; Sons/);
+});

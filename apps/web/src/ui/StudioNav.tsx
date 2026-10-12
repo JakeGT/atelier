@@ -1,10 +1,10 @@
-import { Check, ChevronsUpDown, Plus, Settings, Wrench } from "lucide-react";
+import { Check, ChevronsUpDown, LayoutGrid, Plus, Settings, Wrench } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
 import type { Org, Session } from "../lib/api";
 import { api, can } from "../lib/api";
 import { navigate, type Theme, useClickOutside } from "../lib/hooks";
-import { Dialog, Dots, UserMenu, useToast, Wordmark } from "./kit";
+import { Dialog, Dots, menuKeys, UserMenu, useToast, Wordmark } from "./kit";
 
 interface StudioNavProps {
     session: Session;
@@ -33,7 +33,8 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                 <span className="nav-slash" aria-hidden="true">
                     /
                 </span>
-                <div className="menu-wrap" ref={ref}>
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: the keys are for the button and the menu inside it */}
+                <div className="menu-wrap" ref={ref} onKeyDown={(e) => open && menuKeys(e, () => setOpen(false))}>
                     <button
                         type="button"
                         className="org-switch"
@@ -63,7 +64,7 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                                         <span className="mono muted">
                                             {o.personalOf === session.id
                                                 ? "Your personal studio"
-                                                : `Shared · you are ${ROLE_LABEL[o.role].toLowerCase()}`}
+                                                : `Shared · you are ${ROLE_LABEL[o.role]?.toLowerCase() ?? "a member"}`}
                                         </span>
                                     </span>
                                     {o.id === org.id && <Check />}
@@ -104,7 +105,16 @@ export function StudioNav({ session, org, orgs, onOrgsChanged, theme, onToggleTh
                     session={session}
                     theme={theme}
                     onToggleTheme={onToggleTheme}
-                    items={session.admin ? [{ label: "Operator console", icon: <Wrench />, onClick: () => navigate("/admin") }] : []}
+                    // The two sections are in the menu as well: on a phone there is no room for them in the bar.
+                    items={[
+                        { label: "Websites", icon: <LayoutGrid />, onClick: () => navigate(`/o/${org.slug}`) },
+                        {
+                            label: "Studio settings",
+                            icon: <Settings />,
+                            onClick: () => navigate(`/o/${org.slug}/settings/${can.manage(org.role) ? "general" : "members"}`),
+                        },
+                        ...(session.admin ? [{ label: "Operator console", icon: <Wrench />, onClick: () => navigate("/admin") }] : []),
+                    ]}
                 />
             </nav>
 
@@ -132,9 +142,13 @@ function NewStudio({ onClose, onOrgsChanged }: { onClose: () => void; onOrgsChan
             setBusy(false);
         }
     }
+    // Once the studio is being made it will be made and gone to: backing out is not offered half-way.
+    const close = () => {
+        if (!busy) onClose();
+    };
 
     return (
-        <Dialog onClose={onClose}>
+        <Dialog onClose={close}>
             <form onSubmit={create}>
                 <p className="eyebrow">New shared studio</p>
                 <h2>A separate room.</h2>
@@ -153,7 +167,7 @@ function NewStudio({ onClose, onOrgsChanged }: { onClose: () => void; onOrgsChan
                     />
                 </label>
                 <div className="dialog-actions">
-                    <button type="button" className="btn" onClick={onClose}>
+                    <button type="button" className="btn" onClick={close} disabled={busy}>
                         Cancel
                     </button>
                     <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>

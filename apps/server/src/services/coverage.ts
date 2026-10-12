@@ -1,5 +1,5 @@
-import { type DefaultTreeAdapterTypes, parse } from "parse5";
-import { boundRefs } from "./fill.ts";
+import { type DefaultTreeAdapterTypes, parse, parseFragment } from "parse5";
+import { boundRefs, parseRef } from "./fill.ts";
 
 // What a visitor can read on a page that a person cannot edit themselves: text
 // (and pictures) outside every element bound to content. The assistant is told
@@ -59,7 +59,10 @@ const isElement = (n: Node): n is Element => "tagName" in n;
 const attr = (el: Element, name: string): string | undefined => el.attrs.find((a) => a.name === name)?.value;
 const squeeze = (s: string): string => s.replace(/\s+/g, " ").trim();
 
-const opted = (el: Element): boolean => el.attrs.some((a) => BINDINGS.includes(a.name) || a.name === "data-content-skip");
+// Connected to content, or set aside. A mark that names no field (a slip in how it is written)
+// connects nothing: the page keeps its own wording there, so it is reported like any other.
+const opted = (el: Element): boolean =>
+    el.attrs.some((a) => a.name === "data-content-skip" || (BINDINGS.includes(a.name) && parseRef(a.value) !== null));
 
 // A block's own wording: its text and the text of the inline elements in it, but
 // not of the blocks inside it (reported on their own) nor of anything connected.
@@ -171,11 +174,18 @@ export interface PageCoverage {
     examples: LooseText[];
 }
 
+// The page's title as a person reads it ("Tom & Co", not "Tom &amp; Co").
+function pageTitle(html: string): string {
+    const written = /<title[^>]*>([^<]{1,200})<\/title>/i.exec(html)?.[1] ?? "";
+    const first = written.includes("&") ? parseFragment(written).childNodes[0] : undefined;
+    return (first?.nodeName === "#text" ? (first as DefaultTreeAdapterTypes.TextNode).value : written).trim();
+}
+
 export function pageCoverage(path: string, html: string, examples = 6): PageCoverage {
     const loose = looseText(html);
     return {
         path,
-        title: /<title[^>]*>([^<]{1,200})<\/title>/i.exec(html)?.[1]?.trim() ?? "",
+        title: pageTitle(html),
         refs: [...new Set(boundRefs(html).map((r) => r.ref))],
         loose: loose.length,
         examples: loose.slice(0, examples),

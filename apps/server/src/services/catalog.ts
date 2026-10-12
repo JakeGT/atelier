@@ -53,30 +53,38 @@ const RECENT_DAYS = 400;
 
 // The assistant edits files with tools, so a model must support tool calls and
 // produce text. Deprecated and alpha models are left out.
-function usable(m: RawModel): boolean {
-    if (!m.id || !m.tool_call) return false;
+function usable(m: RawModel): m is RawModel & { id: string } {
+    if (!m || typeof m.id !== "string" || !m.id || !m.tool_call) return false;
     if (m.status === "deprecated" || m.status === "alpha") return false;
     const out = m.modalities?.output;
-    if (out && !(out.length === 1 && out[0] === "text")) return false;
+    if (Array.isArray(out) && !(out.length === 1 && out[0] === "text")) return false;
     return !NOT_FOR_BUILDING.test(m.id);
 }
+
+// The catalog is somebody else's file, read as it comes: a field that is not what it should be
+// is left out, so that one odd model does not cost the whole catalog.
+const text = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+const amount = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+// Dates are compared as text below, which is only right for year-month-day.
+const day = (v: unknown): string | null => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
 
 export function buildCatalog(raw: RawCatalog, providers: readonly Provider[] = PROVIDERS, now = new Date()): CatalogModel[] {
     const models: CatalogModel[] = [];
     for (const provider of providers) {
-        const list = Object.values(raw[provider.id]?.models ?? {}).filter(usable);
+        const listed = raw?.[provider.id]?.models;
+        const list = Object.values(listed && typeof listed === "object" ? listed : {}).filter(usable);
         const mine: CatalogModel[] = list.map((m) => ({
             ref: `${provider.id}/${m.id}`,
             provider: provider.id,
-            id: m.id ?? "",
-            name: m.name ?? m.id ?? "",
-            family: m.family ?? null,
-            releaseDate: m.release_date?.slice(0, 10) ?? null,
-            contextWindow: m.limit?.context ?? null,
-            costIn: m.cost?.input ?? null,
-            costOut: m.cost?.output ?? null,
+            id: m.id,
+            name: text(m.name) ?? m.id,
+            family: text(m.family),
+            releaseDate: day(m.release_date),
+            contextWindow: amount(m.limit?.context),
+            costIn: amount(m.cost?.input),
+            costOut: amount(m.cost?.output),
             reasoning: m.reasoning === true,
-            vision: m.modalities?.input?.includes("image") === true,
+            vision: Array.isArray(m.modalities?.input) && m.modalities.input.includes("image"),
             recommended: false,
             tier: null,
         }));
