@@ -37,6 +37,8 @@ import type {
     MessageStore,
     Notice,
     NotificationStore,
+    OperatorVisit,
+    OperatorVisitStore,
     OrganizationStore,
     ProjectMemberStore,
     ProjectRole,
@@ -376,6 +378,7 @@ export class PostgresStore implements Store {
     notifications: NotificationStore;
     audit: AuditStore;
     feedback: FeedbackStore;
+    operatorVisits: OperatorVisitStore;
     loginSessions: LoginSessionStore;
 
     constructor(databaseUrl: string) {
@@ -1342,6 +1345,35 @@ export class PostgresStore implements Store {
                 }),
             purge: async (tenantId, id) => {
                 await this.withTenant(tenantId, (tx) => tx`DELETE FROM media_assets WHERE id = ${id} AND deleted_at IS NOT NULL`);
+            },
+        };
+
+        interface VisitRow {
+            user_id: string;
+            studio_id: string;
+            started_at: Ts;
+            until: Ts;
+        }
+        const rowToVisit = (r: VisitRow): OperatorVisit => ({
+            userId: r.user_id,
+            studioId: r.studio_id,
+            startedAt: isoNow(r.started_at),
+            until: isoNow(r.until),
+        });
+        // Not tenant-scoped (like the audit log): only operator code reads or writes it.
+        this.operatorVisits = {
+            start: async (userId, studioId, until) => {
+                const rows = await this.sql<VisitRow[]>`
+                    INSERT INTO operator_visits (user_id, studio_id, until) VALUES (${userId}, ${studioId}, ${until})
+                    ON CONFLICT (user_id, studio_id) DO UPDATE SET until = EXCLUDED.until
+                    RETURNING *`;
+                return rowToVisit(firstRow(rows));
+            },
+            end: async (userId, studioId) =>
+                (await this.sql`DELETE FROM operator_visits WHERE user_id = ${userId} AND studio_id = ${studioId}`).count > 0,
+            active: async (userId, at = new Date()) => {
+                const rows = await this.sql<VisitRow[]>`SELECT * FROM operator_visits WHERE user_id = ${userId} AND until > ${at}`;
+                return rows.map(rowToVisit);
             },
         };
 

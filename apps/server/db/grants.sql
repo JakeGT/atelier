@@ -31,6 +31,9 @@ BEGIN
     GRANT SELECT, INSERT ON audit_log TO atelier_runtime;
     REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM atelier_runtime;
 
+    -- Operators' visits to studios: started, ended and read by operator code only.
+    GRANT SELECT, INSERT, UPDATE, DELETE ON operator_visits TO atelier_runtime;
+
     -- Reports about Atelier itself: written by anyone, read and closed by operator routes.
     GRANT SELECT, INSERT, UPDATE ON feedback_reports TO atelier_runtime;
     REVOKE DELETE, TRUNCATE ON feedback_reports FROM atelier_runtime;

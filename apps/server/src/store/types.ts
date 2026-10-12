@@ -381,6 +381,22 @@ export interface DomainStore {
 }
 
 // Append-only. Not tenant-scoped: entries outlive what they describe.
+// An operator inside a studio they do not belong to, until a set time.
+export interface OperatorVisit {
+    userId: string;
+    studioId: string;
+    startedAt: string;
+    until: string;
+}
+export interface OperatorVisitStore {
+    // Starts a visit, or moves the end of one already under way.
+    start(userId: string, studioId: string, until: Date): Promise<OperatorVisit>;
+    // Ends it. False if there was none.
+    end(userId: string, studioId: string): Promise<boolean>;
+    // This operator's visits that have not run out.
+    active(userId: string, now?: Date): Promise<OperatorVisit[]>;
+}
+
 // A report about Atelier itself, for whoever runs it.
 export interface FeedbackReport {
     id: string;
@@ -451,6 +467,7 @@ export interface Store {
     notifications: NotificationStore;
     audit: AuditStore;
     feedback: FeedbackStore;
+    operatorVisits: OperatorVisitStore;
     loginSessions: LoginSessionStore;
     close(): Promise<void>;
 }

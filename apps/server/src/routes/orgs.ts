@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { INVITABLE_ROLES, ORG_ROLES, type OrgRole } from "@atelier/shared";
+import { studiosFor } from "../middleware/auth.ts";
 import { acceptInvitations, ensurePersonalStudio } from "../services/bootstrap.ts";
 import { validModelRef } from "../services/providers.ts";
 import { SlugTakenError } from "../store/types.ts";
@@ -28,7 +29,9 @@ export function orgRoutes(api: Api): void {
                 orgs = await store.organizations.listForUser(user.id);
             }
         }
-        return c.json({ orgs });
+        // An operator's visits to other studios are listed with their own, marked as visits.
+        const visits = user.admin ? (await studiosFor(store, user)).filter((o) => o.visiting) : [];
+        return c.json({ orgs: [...orgs, ...visits] });
     });
 
     // The introduction has been finished or skipped: do not show it again.

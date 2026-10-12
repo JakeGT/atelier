@@ -1061,3 +1061,23 @@ test("a website records when its cover was taken", { skip }, async () => {
     await store.projects.setCover(a.tenantId, a.projectId, at);
     assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, at.toISOString());
 });
+
+test("an operator's visit to a studio is kept until it ends or runs out", { skip }, async () => {
+    const a = await studio("visit-a");
+    const b = await studio("visit-b");
+    const until = new Date(Date.now() + 60_000);
+    const visit = await store.operatorVisits.start(b.userId, a.tenantId, until);
+    assert.equal(visit.until, until.toISOString());
+    assert.deepEqual(
+        (await store.operatorVisits.active(b.userId)).map((v) => v.studioId),
+        [a.tenantId],
+    );
+    assert.equal((await store.operatorVisits.active(a.userId)).length, 0);
+    // Asking again moves the end; it does not make a second visit.
+    await store.operatorVisits.start(b.userId, a.tenantId, new Date(Date.now() + 120_000));
+    assert.equal((await store.operatorVisits.active(b.userId)).length, 1);
+    assert.equal((await store.operatorVisits.active(b.userId, new Date(Date.now() + 180_000))).length, 0);
+    assert.equal(await store.operatorVisits.end(b.userId, a.tenantId), true);
+    assert.equal(await store.operatorVisits.end(b.userId, a.tenantId), false);
+    assert.equal((await store.operatorVisits.active(b.userId)).length, 0);
+});

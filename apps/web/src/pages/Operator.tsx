@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Download, PauseCircle, PlayCircle, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, Download, LogIn, PauseCircle, PlayCircle, Undo2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { AuditEntry, FeedbackReport, OperatorOverview, Session, StudioSummary } from "../lib/api";
@@ -308,6 +308,23 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
         }
     }
 
+    // Going in: for an hour, as an admin of the studio, with its owners told why.
+    const [reason, setReason] = useState("");
+    async function enter() {
+        setBusy(true);
+        try {
+            const visit = await api.operatorEnter(studio.id, reason.trim());
+            // A fresh start, so the studio is among the ones this session can open.
+            window.location.assign(`/o/${visit.slug}`);
+        } catch (err) {
+            if (err instanceof ReauthRequired) {
+                toast("Please confirm your sign-in, then try that again.", "error");
+                setTimeout(reauthenticate, 1400);
+            } else toast((err as Error).message, "error");
+            setBusy(false);
+        }
+    }
+
     function save(e: FormEvent) {
         e.preventDefault();
         const max = websites.trim() === "" ? null : Number(websites);
@@ -369,6 +386,29 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
                 <p className="field-help">
                     Leave a limit empty to use the default. A studio's owner can also set a daily token limit of their own.
                 </p>
+
+                {!suspended && (
+                    <div className="operator-enter">
+                        <p className="eyebrow">Go into this studio</p>
+                        <p className="field-help">
+                            To help someone, you can open their studio for 60 minutes. Inside you can do what an admin of the studio can
+                            (you cannot delete or export it). Its owners are told at once, with your reason, and everything you do is
+                            written to the studio's activity.
+                        </p>
+                        <label className="field-line">
+                            <span>Why you are going in (the owners see this)</span>
+                            <input
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value)}
+                                maxLength={300}
+                                placeholder="The preview is blank; looking into it"
+                            />
+                        </label>
+                        <button type="button" className="btn" disabled={busy || reason.trim().length < 3} onClick={() => void enter()}>
+                            <LogIn /> Open {studio.name} for 60 minutes
+                        </button>
+                    </div>
+                )}
 
                 <div className="dialog-actions dialog-actions-split">
                     {suspended ? (

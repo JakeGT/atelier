@@ -418,6 +418,8 @@ current host. What needs the VPS is P6, which is last.
   asked for and built 2026-10-11 on `feedback-reports`).
 - E5.11 Website covers (asked for and built 2026-10-11 on `website-covers`):
   a picture of each website's home page on its card, retaken after every change.
+- E5.12 Operators can go into a studio for a limited time, in the open
+  (ADR-0021, asked for and built 2026-10-11 on `operator-access`).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

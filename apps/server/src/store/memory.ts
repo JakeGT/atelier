@@ -36,6 +36,8 @@ import type {
     MessageStore,
     Notice,
     NotificationStore,
+    OperatorVisit,
+    OperatorVisitStore,
     OrganizationStore,
     ProjectMemberStore,
     ProjectRole,
@@ -850,6 +852,23 @@ export class MemoryStore implements Store {
         purge: async (tenantId, id) => {
             if (this.mediaMap.get(id)?.tenantId === tenantId) this.mediaMap.delete(id);
         },
+    };
+
+    private readonly visits = new Map<string, OperatorVisit>();
+    operatorVisits: OperatorVisitStore = {
+        start: async (userId, studioId, until) => {
+            const visit = {
+                userId,
+                studioId,
+                startedAt: this.visits.get(`${userId}:${studioId}`)?.startedAt ?? now(),
+                until: until.toISOString(),
+            };
+            this.visits.set(`${userId}:${studioId}`, visit);
+            return { ...visit };
+        },
+        end: async (userId, studioId) => this.visits.delete(`${userId}:${studioId}`),
+        active: async (userId, at = new Date()) =>
+            [...this.visits.values()].filter((v) => v.userId === userId && new Date(v.until) > at).map((v) => ({ ...v })),
     };
 
     private readonly reports: FeedbackReport[] = [];
