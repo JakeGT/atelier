@@ -338,6 +338,7 @@ export class MemoryStore implements Store {
                 agentInstructions: null,
                 agentModel: null,
                 askLevel: 1,
+                coverAt: null,
                 archivedAt: null,
                 createdAt: now(),
             };
@@ -347,6 +348,10 @@ export class MemoryStore implements Store {
         clearTemplate: async (tenantId, id) => {
             const p = this.projectMap.get(id);
             if (p && p.tenantId === tenantId) this.projectMap.set(id, { ...p, template: null });
+        },
+        setCover: async (tenantId, id, at) => {
+            const p = this.projectMap.get(id);
+            if (p && p.tenantId === tenantId) this.projectMap.set(id, { ...p, coverAt: at.toISOString() });
         },
         setHosting: async (tenantId, id, hosting) => {
             const p = this.projectMap.get(id);

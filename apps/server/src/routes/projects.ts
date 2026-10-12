@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { findLook, LOOK_PREFIX } from "../design/looks.ts";
 import { isAskLevel } from "../services/asking.ts";
+import { coverKey } from "../services/cover.ts";
 import { validInstructions } from "../services/instructions.ts";
 import { filesOf, storageKey } from "../services/media.ts";
 import { validModelRef } from "../services/providers.ts";
@@ -122,6 +123,20 @@ export function projectRoutes(api: Api): void {
 
     route("get", PROJECT, "project.read", async (c) => c.json({ project: c.get("project") }));
 
+    // The picture of the website's home page, for its card. `?v=` is when it was taken, so it can be kept.
+    route("get", `${PROJECT}/cover`, "project.read", async (c) => {
+        const project = c.get("project");
+        const body = project.coverAt && storage ? await storage.get(coverKey(project.tenantId, project.id)).catch(() => null) : null;
+        if (!body) return c.json({ error: "not found" }, 404);
+        return new Response(new Uint8Array(body), {
+            headers: {
+                "content-type": "image/webp",
+                "cache-control": "private, max-age=31536000, immutable",
+                "x-content-type-options": "nosniff",
+            },
+        });
+    });
+
     // Rename, and what the assistant should know about this website.
     route("patch", PROJECT, "project.manage", async (c) => {
         const body = await c.req.json().catch(() => null);
@@ -180,6 +195,7 @@ export function projectRoutes(api: Api): void {
         // Its uploaded files go with it. One that cannot be removed now is only a stray
         // object in storage, so it does not stop the deletion.
         if (storage) {
+            await storage.delete(coverKey(project.tenantId, project.id)).catch(() => {});
             for (const asset of await store.media.list(project.tenantId, project.id, true)) {
                 for (const name of filesOf(asset)) {
                     await storage

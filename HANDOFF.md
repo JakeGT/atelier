@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.27` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #15. Sixteen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`, [#29](https://github.com/JakeGT/atelier/pull/29) `fast-gallery`, [#30](https://github.com/JakeGT/atelier/pull/30) `asking-visible`, [#31](https://github.com/JakeGT/atelier/pull/31) `page-transitions`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
+> Last updated 2026-10-10. Status: **`p5.28` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #15. Seventeen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`, [#29](https://github.com/JakeGT/atelier/pull/29) `fast-gallery`, [#30](https://github.com/JakeGT/atelier/pull/30) `asking-visible`, [#31](https://github.com/JakeGT/atelier/pull/31) `page-transitions`, [#32](https://github.com/JakeGT/atelier/pull/32) `website-covers`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.27` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.28` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -218,6 +218,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 ## Moving between pages (branch `page-transitions`)
 
 - `navigate()` and browser back/forward change the page inside a view transition (`lib/hooks.ts` `eased`; styles in `base.css` under "moving between pages"): the old page fades back, the new one fades up. Skipped for reduced motion and in browsers without view transitions. Page containers fade in when their data arrives.
+
+## Website covers (branch `website-covers`)
+
+- Each website's card on the studio page shows a picture of its home page. `services/cover.ts`: the control plane (`Covers`, in `routes/kit.ts`) asks for one a few seconds after any change (the `announce` middleware, and a finished assistant request); the workspace takes it (`takeCover`, daemon `POST /cover`, with its Chromium and the saved wording and media fetched through the agent API); it is kept beside the website's media as `_cover.webp` and `projects.cover_at` (migration 0022) records when. Served at `GET …/projects/:id/cover`.
+- A website that has not changed since this shipped gets its picture the next time it is opened in the editor. No home page: the drawn cover stays.
+- Off where there is no browser (tests; a dev machine without `CHROMIUM_PATH`).
 
 ## Known gaps
 

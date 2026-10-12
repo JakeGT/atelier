@@ -227,6 +227,8 @@ export function workspaceRoutes(api: Api): void {
         const base = { tenantId, projectId, sessionId: null, runId: run.id, authorId: null };
         presence.clearRun(projectId, run.id);
         presence.touch(projectId);
+        // The assistant changed the website: its card gets a new picture.
+        if (run.checkpoint) api.covers.changed(tenantId, projectId);
         if (run.status === "done" && run.result) {
             await store.messages.add({ ...base, role: "assistant", text: run.result.text, tools: run.result.toolEvents });
         } else if (run.status === "stopped" || run.status === "timed_out") {

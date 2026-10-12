@@ -106,6 +106,7 @@ interface ProjectRow {
     template: string | null;
     agent_instructions: string | null;
     ask_level: number;
+    cover_at: Ts | null;
     agent_model: string | null;
     archived_at: Ts | null;
     created_at: Ts;
@@ -212,7 +213,7 @@ const firstRow = <T>(rows: readonly T[]): T => {
 const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of, flags";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
-    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, ask_level, archived_at, created_at";
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, ask_level, cover_at, archived_at, created_at";
 const CONTENT_COLS =
     "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, fields, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
@@ -266,6 +267,7 @@ const rowToProject = (r: ProjectRow): Project => ({
     agentInstructions: r.agent_instructions,
     agentModel: r.agent_model,
     askLevel: r.ask_level,
+    coverAt: iso(r.cover_at),
     archivedAt: iso(r.archived_at),
     createdAt: isoNow(r.created_at),
 });
@@ -692,6 +694,9 @@ export class PostgresStore implements Store {
                 }),
             clearTemplate: async (tenantId, id) => {
                 await this.withTenant(tenantId, (tx) => tx`UPDATE projects SET template = NULL WHERE id = ${id}`);
+            },
+            setCover: async (tenantId, id, at) => {
+                await this.withTenant(tenantId, (tx) => tx`UPDATE projects SET cover_at = ${at} WHERE id = ${id}`);
             },
             setHosting: async (tenantId, id, hosting) =>
                 this.withTenant(tenantId, async (tx) => {

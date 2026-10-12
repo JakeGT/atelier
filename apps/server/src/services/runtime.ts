@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type AgentRuntime, RunInterrupted } from "./agent.ts";
+import { takeCover } from "./cover.ts";
 import { type RunState, RunTracker, wholeRun } from "./runs.ts";
 import { type Checkpoint, Workspace } from "./workspace.ts";
 
@@ -57,6 +58,8 @@ export interface WorkspaceRuntime {
     seed(projectId: string, files: { path: string; content: string }[], message: string): Promise<string | null>;
     // Writes files into a website (replacing any of the same name) as a new version.
     write(projectId: string, files: { path: string; content: string }[], message: string): Promise<string | null>;
+    // A picture of the website's home page as the preview shows it, or null if it has none.
+    cover(projectId: string, access: { apiUrl: string; agentToken: string }): Promise<Uint8Array | null>;
     // One saved version's files as a tar archive (what publishing ships).
     exportTree(projectId: string, sha: string): Promise<Uint8Array>;
     // Stops the workspace; its files and history stay, and it starts again on next use.
@@ -184,6 +187,10 @@ export class LocalRuntime implements WorkspaceRuntime {
         const out = await this.tracker(projectId).exclusive(() => this.ws(projectId).write(files, message));
         if (out === "busy") throw new RuntimeBusyError();
         return out;
+    }
+
+    async cover(projectId: string, access: { apiUrl: string; agentToken: string }) {
+        return takeCover(this.ws(projectId).dir, access.apiUrl, access.agentToken);
     }
 
     async stop(): Promise<void> {}
@@ -397,6 +404,22 @@ export class ContainerRuntime implements WorkspaceRuntime {
         // A workspace on an earlier runtime does not know how to do this yet.
         await this.bringUpToDate(projectId).catch((err: Error) => console.warn(`could not refresh workspace ${projectId}: ${err.message}`));
         return (await this.json<{ sha: string | null }>(projectId, "POST", "/write", { files, message })).sha;
+    }
+    async cover(projectId: string, access: { apiUrl: string; agentToken: string }): Promise<Uint8Array | null> {
+        // A workspace on an earlier runtime cannot take one: an idle one is moved to this runtime first.
+        await this.bringUpToDate(projectId).catch((err: Error) => console.warn(`could not refresh workspace ${projectId}: ${err.message}`));
+        let res: Response;
+        try {
+            res = await this.call(projectId, "POST", "/cover", access, 60_000);
+        } catch (err) {
+            if (!unreachable(err)) throw err;
+            await this.ensure(projectId);
+            res = await this.call(projectId, "POST", "/cover", access, 60_000);
+        }
+        // No home page yet; or a workspace on an earlier runtime, which cannot take one.
+        if (res.status === 204 || res.status === 404) return null;
+        if (!res.ok) throw new Error(`workspace ${res.status}`);
+        return new Uint8Array(await res.arrayBuffer());
     }
     async exportTree(projectId: string, sha: string): Promise<Uint8Array> {
         let res: Response;

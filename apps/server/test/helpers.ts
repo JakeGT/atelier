@@ -9,6 +9,7 @@ import { type AgentRunInput, type AgentRuntime, RunInterrupted } from "../src/se
 import { ensurePersonalStudio } from "../src/services/bootstrap.ts";
 import type { ModelCatalog } from "../src/services/catalog.ts";
 import { cookieName } from "../src/services/cookies.ts";
+import type { CoverTaker } from "../src/services/cover.ts";
 import type { Hosting } from "../src/services/hosting.ts";
 import type { MediaStorage } from "../src/services/mediaStorage.ts";
 import type { Mailer } from "../src/services/notifier.ts";
@@ -70,6 +71,8 @@ export async function makeApp(
         providerFetch?: typeof fetch;
         hosting?: Hosting | null;
         storage?: MediaStorage | null;
+        coverTaker?: CoverTaker;
+        coverDelayMs?: number;
         mailer?: Mailer | null;
     } = {},
 ) {
