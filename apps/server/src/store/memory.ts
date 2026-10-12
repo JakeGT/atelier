@@ -37,6 +37,8 @@ import type {
     ProviderKeyStore,
     ReleaseStore,
     Store,
+    StudioTemplate,
+    StudioTemplateStore,
     UsageStore,
     UsageTotals,
     UserStore,
@@ -721,6 +723,23 @@ export class MemoryStore implements Store {
             [...this.projectRoles.values()]
                 .filter((r) => r.tenantId === tenantId && r.userId === userId && this.projectMap.has(r.projectId))
                 .map(({ projectId, role }) => ({ projectId, role })),
+    };
+
+    private readonly templateMap = new Map<string, StudioTemplate>();
+    studioTemplates: StudioTemplateStore = {
+        create: async ({ createdBy: _by, ...t }) => {
+            const made = { ...t, createdAt: now() };
+            this.templateMap.set(made.id, made);
+            return made;
+        },
+        list: async (tenantId) => [...this.templateMap.values()].filter((t) => t.tenantId === tenantId),
+        get: async (tenantId, id) => {
+            const t = this.templateMap.get(id);
+            return t && t.tenantId === tenantId ? t : null;
+        },
+        remove: async (tenantId, id) => {
+            if (this.templateMap.get(id)?.tenantId === tenantId) this.templateMap.delete(id);
+        },
     };
 
     private readonly mediaMap = new Map<string, MediaAsset>();

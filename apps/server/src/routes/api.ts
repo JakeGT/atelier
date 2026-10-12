@@ -9,6 +9,7 @@ import { orgRoutes } from "./orgs.ts";
 import { projectRoutes } from "./projects.ts";
 import { releaseRoutes } from "./releases.ts";
 import { studioRoutes } from "./studio.ts";
+import { templateRoutes } from "./templates.ts";
 import { workspaceRoutes } from "./workspace.ts";
 
 export type { DeclaredRoute } from "./kit.ts";
@@ -29,5 +30,6 @@ export function apiRoutes(deps: ApiDeps): { app: import("hono").Hono<Env>; decla
     adminRoutes(api);
     notificationRoutes(api);
     studioRoutes(api);
+    templateRoutes(api);
     return { app: api.app, declared: api.declared };
 }

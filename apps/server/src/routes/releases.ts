@@ -93,6 +93,20 @@ export function releaseRoutes(api: Api): void {
         }
     });
 
+    // A link to show someone the website as it is, before (or instead of) publishing it.
+    route("post", `${PROJECT}/share`, "release.publish", stepUp, async (c) => {
+        const refused = refuseArchived(c);
+        if (refused) return refused;
+        try {
+            const { url } = await releases.share(c.get("org").id, c.get("project").id);
+            await audit(c, "release.share", `project:${c.get("project").id}`);
+            return c.json({ url }, 201);
+        } catch (err) {
+            if (err instanceof ReleaseError) return c.json({ error: err.message }, err.status);
+            throw err;
+        }
+    });
+
     route("post", `${PROJECT}/releases/:number/publish`, "release.publish", stepUp, releaseAction("publish"));
     route("post", `${PROJECT}/releases/:number/rollback`, "release.rollback", stepUp, releaseAction("rollback"));
 }

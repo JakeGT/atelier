@@ -218,3 +218,125 @@ test("being added to a studio: an e-mail when invited, and word in the app when 
     await get(t, cy, "/api/v1/orgs");
     assert.equal((await inbox(t, cy)).filter((n) => n.kind === "studio.joined").length, 1);
 });
+
+test("templates: built-in ones can be looked at; a website can be saved as the studio's own and started from, with its wording and pictures", async () => {
+    const w = world();
+    const t = await makeApp({}, undefined, w);
+    const owner = await signIn(t);
+    const { org, api, project, p } = await studioWithWebsite(t, owner);
+    // A picture the page uses.
+    const sharp = (await import("sharp")).default;
+    const form = new FormData();
+    form.append(
+        "file",
+        new File(
+            [
+                (await sharp({ create: { width: 60, height: 40, channels: 3, background: "#c63" } })
+                    .jpeg()
+                    .toBuffer()) as Uint8Array<ArrayBuffer>,
+            ],
+            "Pot.jpg",
+        ),
+    );
+    form.append("alt", "A pot");
+    const { "content-type": _json, ...headers } = owner.write;
+    const { asset } = await json<{ asset: { name: string; path: string } }>(
+        await t.app.request(`${p}/media`, { method: "POST", headers, body: form }),
+    );
+    await send(t, owner, "PUT", `${p}/content/page/home`, { headline: "Welcome", photo: asset.path });
+    await send(t, owner, "PUT", `${p}/content/page/home/fields`, {
+        fields: [
+            { key: "headline", label: "Headline", type: "text" },
+            { key: "photo", label: "Photo", type: "image" },
+        ],
+    });
+
+    type Listed = { id: string; name: string; own: boolean; previewUrl: string };
+    const list = async (who = owner) => (await json<{ templates: Listed[] }>(await get(t, who, `${api}/templates`))).templates;
+    const builtIn = await list();
+    assert.ok(builtIn.length >= 4 && builtIn.every((x) => !x.own));
+    // Looking at one: its own pages and styles, sandboxed; nothing else.
+    const cafe = builtIn.find((x) => x.id === "cafe");
+    const page = await t.app.request(cafe?.previewUrl ?? "");
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-security-policy") ?? "", /^sandbox;/);
+    assert.match(await page.text(), /<html/i);
+    assert.equal((await t.app.request(`${cafe?.previewUrl}../../etc/passwd`)).status, 404);
+    assert.equal((await t.app.request("/template-preview/not-a-token/index.html")).status, 403);
+
+    // Saving this website as a template: editors cannot, a name is needed.
+    const editor = await signIn(t, { tenantId: org.id, role: "editor" });
+    assert.equal((await send(t, editor, "POST", `${p}/template`, { name: "Shop" })).status, 404);
+    assert.equal((await send(t, owner, "POST", `${p}/template`, { name: " " })).status, 400);
+    const saved = await json<{ template: Listed }>(
+        await send(t, owner, "POST", `${p}/template`, { name: "Our shop layout", description: "Headline and a photo" }),
+    );
+    assert.match(saved.template.id, /^studio:[0-9a-f-]{36}$/);
+    const mine = (await list()).find((x) => x.own);
+    assert.equal(mine?.name, "Our shop layout");
+    // Its preview shows the wording it was saved with, and its picture.
+    assert.match(await (await t.app.request(`${mine?.previewUrl}index.html`)).text(), />Welcome<\/h1>/);
+    assert.equal((await t.app.request(`${mine?.previewUrl}media/${asset.name}`)).status, 200);
+    // Another studio does not see it and cannot start from it.
+    const other = await signIn(t);
+    assert.ok(!(await json<{ templates: Listed[] }>(await get(t, other, `${other.api}/templates`))).templates.some((x) => x.own));
+    assert.equal((await send(t, other, "POST", `${other.api}/projects`, { name: "Copy", template: saved.template.id })).status, 400);
+
+    // A new website from it: files, wording with its labels, and the picture, in its own library.
+    const { project: made } = await json<{ project: Project }>(
+        await send(t, owner, "POST", `${api}/projects`, { name: "Second shop", template: saved.template.id }),
+    );
+    const q = `${api}/projects/${made.id}`;
+    assert.equal((await send(t, owner, "POST", `${q}/sessions`)).status, 201);
+    const docs = (
+        await json<{ documents: { draft: Record<string, unknown>; fields: { label: string }[] }[] }>(await get(t, owner, `${q}/content`))
+    ).documents;
+    assert.deepEqual(docs[0]?.draft, { headline: "Welcome", photo: asset.path });
+    assert.deepEqual(
+        docs[0]?.fields.map((f) => f.label),
+        ["Headline", "Photo"],
+    );
+    const { url } = await json<{ url: string }>(await get(t, owner, `${q}/preview-url`));
+    assert.match(await (await t.app.request(`${url}index.html`)).text(), />Welcome<\/h1>/);
+    assert.equal((await t.app.request(`${url}media/${asset.name}`)).status, 200);
+    assert.equal((await json<{ assets: unknown[] }>(await get(t, owner, `${q}/media`))).assets.length, 1);
+    // The template outlives the website it came from being changed, and can be removed.
+    await send(t, owner, "PUT", `${p}/content/page/home`, { headline: "Changed later" });
+    assert.match(await (await t.app.request(`${mine?.previewUrl}index.html`)).text(), />Welcome<\/h1>/);
+    assert.equal((await send(t, editor, "DELETE", `${api}/templates/${saved.template.id}`)).status, 404);
+    assert.equal((await send(t, owner, "DELETE", `${api}/templates/${saved.template.id}`)).status, 200);
+    assert.ok(!(await list()).some((x) => x.own));
+    void project;
+});
+
+test("a link to show someone: the website as it is now goes to a preview address; nothing is published", async () => {
+    const w = world();
+    const deploys: DeployInput[] = [];
+    const hosting: Hosting = {
+        ...w.hosting,
+        deploy: async (input) => {
+            deploys.push(input);
+            return { id: "d", url: "https://abc123.site.pages.dev", siteUrl: "https://site.pages.dev", files: 1, uploaded: 1 };
+        },
+    };
+    const t = await makeApp({}, undefined, { ...w, hosting });
+    const owner = await signIn(t);
+    const { org, p } = await studioWithWebsite(t, owner);
+    const editor = await signIn(t, { tenantId: org.id, role: "editor" });
+    assert.equal((await send(t, editor, "POST", `${p}/share`)).status, 404);
+    const res = await send(t, owner, "POST", `${p}/share`);
+    assert.equal(res.status, 201);
+    assert.equal((await json<{ url: string }>(res)).url, "https://abc123.site.pages.dev");
+    // A preview, carrying the wording as it is now (not yet published).
+    assert.equal(deploys[0]?.branch, "preview");
+    assert.deepEqual(deploys[0]?.content, [{ kind: "page", slug: "home", content: { headline: "Welcome" } }]);
+    // Nothing went live and no release was made.
+    assert.deepEqual((await json<{ releases: unknown[] }>(await get(t, owner, `${p}/releases`))).releases, []);
+    const { documents } = await json<{ documents: { published: unknown }[] }>(await get(t, owner, `${p}/content`));
+    assert.equal(documents[0]?.published, null);
+    // Without hosting it says so.
+    const bare = await makeApp();
+    const solo = await signIn(bare);
+    const { project } = await json<{ project: Project }>(await send(bare, solo, "POST", `${solo.api}/projects`, { name: "X" }));
+    assert.equal((await send(bare, solo, "POST", `${solo.api}/projects/${project.id}/share`)).status, 409);
+});

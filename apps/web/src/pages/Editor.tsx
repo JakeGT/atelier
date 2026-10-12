@@ -5,6 +5,7 @@ import {
     ChevronDown,
     CloudOff,
     Copy,
+    ExternalLink,
     Eye,
     Globe,
     History,
@@ -354,6 +355,25 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             resuming,
         );
 
+    // A link to show someone before publishing.
+    const [shared, setShared] = useState<string | null>(null);
+    const [sharing, setSharing] = useState(false);
+    const share = async () => {
+        setSharing(true);
+        try {
+            const url = await a.share(pid);
+            setConfirmPublish(false);
+            setShared(url);
+        } catch (err) {
+            if (err instanceof ReauthRequired) {
+                toast("Please confirm your sign-in, then ask for the link again.", "error");
+                setTimeout(reauthenticate, 1400);
+            } else toast((err as Error).message, "error");
+        } finally {
+            setSharing(false);
+        }
+    };
+
     const publish = (resuming = false) => {
         setConfirmPublish(false);
         return act(
@@ -655,12 +675,51 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                             <span>{live ? `Release ${live.number}` : "Nothing yet"}</span>
                         </li>
                     </ul>
+                    <p className="field-help share-first">
+                        Want someone to see it first?{" "}
+                        <button type="button" className="link" onClick={() => void share()} disabled={sharing}>
+                            {sharing ? "Making a link…" : "Get a link to show them, without publishing"}
+                        </button>
+                    </p>
                     <div className="dialog-actions">
                         <button type="button" className="btn" onClick={() => setConfirmPublish(false)}>
                             Not yet
                         </button>
                         <button type="button" className="btn btn-seal" onClick={() => void publish()}>
                             <Rocket /> Publish
+                        </button>
+                    </div>
+                </Dialog>
+            )}
+
+            {shared && (
+                <Dialog onClose={() => setShared(null)}>
+                    <p className="eyebrow">Not published</p>
+                    <h2>A link to show someone</h2>
+                    <p>
+                        Anyone with this link sees the website exactly as it is in your preview now. It is not your public address, search
+                        engines are told not to list it, and it does not change when you make more changes: get a new link to show a newer
+                        version.
+                    </p>
+                    <p className="mono field-static share-link">{shared}</p>
+                    <div className="dialog-actions">
+                        <button type="button" className="btn" onClick={() => setShared(null)}>
+                            Close
+                        </button>
+                        <a className="btn" href={shared} target="_blank" rel="noreferrer">
+                            <ExternalLink /> Open it
+                        </a>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() =>
+                                void navigator.clipboard.writeText(shared).then(
+                                    () => toast("The link is copied."),
+                                    () => toast("Select the link and copy it.", "error"),
+                                )
+                            }
+                        >
+                            <Copy /> Copy the link
                         </button>
                     </div>
                 </Dialog>

@@ -236,7 +236,9 @@ Goal: one real deploy target + custom domain per project.
   Cloudflare itself through the production deployer (2026-10-10): deploy,
   redeploy, redeploy an earlier version, delete. Custom domains have not been
   exercised against Cloudflare (that needs a real domain).
-- **Deferred:** preview deployments as a feature; a sandboxed build (needed
+- **Preview deployments** were deferred here and built on `gallery-previews`
+  (2026-10-10) as "a link to show someone".
+- **Deferred:** a sandboxed build (needed
   only once frameworks are allowed); the content snapshot in the published
   site (P5); the remote git mirror of project code (ADR-0009), so workspace
   volumes are still not backed up.
@@ -307,8 +309,9 @@ give the operator control. (No billing.)
 - **Also done here, from E5.0 (step a):** each item in the editor's Wording
   panel opens a pop-up with room to edit.
 - **Not done:** per-tenant feature flags beyond those two switches; cost in
-  money (only tokens are known; prices belong to each studio's provider); a
-  template gallery with previews; templates supplied by a studio.
+  money (only tokens are known; prices belong to each studio's provider).
+- **Done later (`gallery-previews`, 2026-10-10):** a template gallery with
+  live previews, and templates a studio saves from its own websites.
 
 **E4.1 was brought forward** (branch `p4-byok`, 2026-10-10, at the owner's
 request, ahead of P3): provider keys per studio, the key-holding model proxy

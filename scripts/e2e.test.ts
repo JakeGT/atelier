@@ -359,6 +359,18 @@ test("the assistant can look at a page: a real browser runs inside the workspace
     assert.match(seen.outline[0] ?? "", /^h1 'Hello' at left 32px, top 24px/);
 });
 
+test("a link to show someone: a preview deployment through the real deployer, with the live website untouched", async () => {
+    const before = (await pagesState()).sites[site]?.files["/index.html"];
+    inside(ws.container, `printf '<h1>not published yet</h1>' > /workspace/index.html`);
+    assert.ok(commit(ws.container).ok);
+    const res = await call("POST", `/projects/${ws.id}/share`);
+    assert.equal(res.status, 201, await res.clone().text());
+    const { url } = (await res.json()) as { url: string };
+    assert.match(url, /^https:\/\/dep-\d+\./);
+    // What visitors see has not changed.
+    assert.equal((await pagesState()).sites[site]?.files["/index.html"], before);
+});
+
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
     const tokenOf = (name: string) =>
         inspect<Inspect>(name)
@@ -390,7 +402,7 @@ test("archiving stops the workspace; deleting removes it and its files", async (
     await json(await call("POST", `/projects/${ws.id}/sessions`));
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
     // (Rolling back changed what is live, not the working files.)
-    assert.match(inside(ws.container, "cat /workspace/index.html").out, /<title>Seen<\/title>/);
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /not published yet/);
 
     await json(await call("POST", `/projects/${ws.id}/archive`));
     // Archived, the published website is still up; deleting takes it down.
