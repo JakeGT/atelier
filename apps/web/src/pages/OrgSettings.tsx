@@ -1,4 +1,4 @@
-import { Download, ExternalLink, LogOut, Mail, Trash2, X } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, LogOut, Mail, Trash2, X } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuditEntry, Invitation, Member, MonthUsage, Org, Project, ProviderInfo, Role, Session, Usage } from "../lib/api";
@@ -46,6 +46,9 @@ export function OrgSettings({ session, org, orgs, tab, onOrgsChanged, theme, onT
                 section="settings"
             />
             <main className="studio-main settings">
+                <button type="button" className="btn btn-ghost btn-sm settings-back" onClick={() => navigate(`/o/${org.slug}`)}>
+                    <ArrowLeft /> Back to the studio
+                </button>
                 <p className="eyebrow">{org.name}</p>
                 <h1 className="display">
                     Studio <em>settings.</em>
