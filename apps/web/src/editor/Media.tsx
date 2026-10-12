@@ -495,7 +495,15 @@ export function PictureField({
                 {asset ? (
                     <Thumb asset={asset} />
                 ) : (
-                    <span className="muted">{value ? `This ${word} is no longer in the library` : `No ${word} chosen`}</span>
+                    <span className="muted">
+                        {!value
+                            ? `No ${word} chosen`
+                            : value.startsWith("media/")
+                              ? `This ${word} is no longer in the library`
+                              : /^https?:\/\//.test(value)
+                                ? `A ${word} from another website`
+                                : `One of the website's own files`}
+                    </span>
                 )}
             </div>
             <div>
@@ -503,6 +511,13 @@ export function PictureField({
                     <p className="media-alt">{asset.decorative ? "Decoration only" : asset.alt || "No description yet"}</p>
                 )}
                 {asset && kind === "video" && <p className="media-alt">{asset.name}</p>}
+                {!asset && value && !value.startsWith("media/") && (
+                    <p className="media-alt">
+                        <span className="mono">{value}</span>
+                        <br />
+                        Put there by your assistant. Choosing one from your library replaces it.
+                    </p>
+                )}
                 {!readOnly && scope && (
                     <button type="button" className="btn btn-sm" onClick={() => setChoosing(true)}>
                         <ImagePlus /> {value ? `Choose a different ${word}` : `Choose a ${word}`}

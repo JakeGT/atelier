@@ -142,8 +142,9 @@ test("a bound image shows the library file, with its description and sizes", () 
         /<img data-content-image="page\/home#photo" src="\.\.\/media\/shop-abc123\.jpg" alt="The &quot;shop&quot; <front>" class="hero" width="2000" height="1000" srcset="\.\.\/media\/shop-abc123-480\.webp 480w, \.\.\/media\/shop-abc123\.jpg 2000w" sizes="100vw">/,
     );
     assert.match(out, /<img src="media\/untouched\.jpg">/);
-    // Only a library path is ever placed: nothing else a field holds can become an address.
-    for (const bad of ["javascript:alert(1)", "https://evil.test/x.png", "media/../secret.png", "media/a b.png", 7]) {
+    // Only the address of a picture is ever placed (the library's, the website's own, or one elsewhere):
+    // never a script, and never something that is not an address at all.
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "media/a b.png", 7]) {
         const kept = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { photo: bad } }]), { media });
         assert.match(kept, /src="old\.jpg" alt="old"/);
     }

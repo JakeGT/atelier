@@ -221,3 +221,48 @@ test("a bar's length is a value of its own, so each entry of a list can have a d
     const odd = fillHtml(page, lookupFrom([{ kind: "page", slug: "home", content: { progress: "50%;background:url(x)" } }]));
     assert.match(odd, /data-content-percent="page\/home#progress" style="background:red"/);
 });
+
+test("a picture field shows any real picture: the library's, a file of the website's own, or one at another address", () => {
+    const page = (inner: string) => `<!doctype html><html><head></head><body>${inner}</body></html>`;
+    const fill = (html: string, draft: Record<string, unknown>, base = "") =>
+        fillHtml(page(html), lookupFrom([{ kind: "page", slug: "home", content: draft }]), { base });
+    // On its own.
+    assert.match(
+        fill('<img data-content-image="page/home#mark" src="old.png" srcset="old.png 2x" alt="Mark">', { mark: "img/mark.svg" }),
+        /src="img\/mark\.svg" alt="Mark">/,
+    );
+    assert.match(
+        fill('<img data-content-image="page/home#mark" src="old.png">', { mark: "img/mark.svg" }, "../"),
+        /src="\.\.\/img\/mark\.svg"/,
+    );
+    assert.match(
+        fill('<img data-content-image="page/home#mark" src="old.png">', { mark: "https://example.com/a/b.jpg?w=2" }, "../"),
+        /src="https:\/\/example\.com\/a\/b\.jpg\?w=2"/,
+    );
+    // In a list: every entry shows its own, and only an entry with none goes without.
+    const list = fill(
+        '<ul data-content-list="page/home#team"><li><img data-item-image="photo" src="first.svg" alt=""><b data-item="name">x</b></li></ul>',
+        {
+            team: [
+                { name: "Ada", photo: "img/ada.svg" },
+                { name: "Bo", photo: "https://example.com/bo.png" },
+                { name: "Cy", photo: "media/cy-1a2b3c.jpg" },
+                { name: "Di" },
+            ],
+        },
+    );
+    assert.match(list, /<li><img data-item-image="photo" src="img\/ada\.svg" alt=""><b data-item="name">Ada<\/b><\/li>/);
+    assert.match(list, /src="https:\/\/example\.com\/bo\.png"/);
+    assert.match(list, /src="media\/cy-1a2b3c\.jpg"/);
+    assert.match(list, /<li><b data-item="name">Di<\/b><\/li>/);
+    // Never something that is not the address of a file.
+    for (const bad of ["javascript:alert(1)", "data:image/svg+xml,<svg onload=x>", 'x" onerror="y', "a b.png", ""]) {
+        const out = fill('<img data-content-image="page/home#mark" src="old.png">', { mark: bad });
+        assert.match(out, /src="old\.png"/, bad);
+        const inList = fill(
+            '<ul data-content-list="page/home#team"><li><img data-item-image="photo" src="first.svg"><b data-item="name">x</b></li></ul>',
+            { team: [{ name: "Ada", photo: bad }] },
+        );
+        assert.ok(!inList.includes("<img"), bad);
+    }
+});
