@@ -164,7 +164,10 @@ export function projectRoutes(api: Api): void {
     // Archiving hides a website and stops its workspace; nothing is deleted.
     const setArchived = (archived: boolean) => async (c: Ctx) => {
         const project = await store.projects.update(c.get("org").id, c.get("project").id, { archived });
-        if (archived) await runtime.stop(project.id).catch(() => {});
+        if (archived) {
+            await api.covers.quiet(project.id);
+            await runtime.stop(project.id).catch(() => {});
+        }
         await audit(c, archived ? "project.archive" : "project.restore", `project:${project.id}`);
         return c.json({ project });
     };
@@ -187,6 +190,7 @@ export function projectRoutes(api: Api): void {
             }
         }
         try {
+            await api.covers.quiet(project.id);
             await runtime.destroy(project.id);
         } catch (err) {
             console.error(`could not remove workspace for ${project.id}: ${(err as Error).message}`);

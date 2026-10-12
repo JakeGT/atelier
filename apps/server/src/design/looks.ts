@@ -25,6 +25,18 @@ const HUMANIST = `"Avenir Next", Avenir, "Gill Sans", "Trebuchet MS", "Segoe UI"
 const CONDENSED = `"Arial Narrow", "Helvetica Neue Condensed", "Roboto Condensed", Impact, "Franklin Gothic Medium", system-ui, sans-serif`;
 const MONO = `ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace`;
 
+// The same stacks by name, for a look made for one website.
+export const STACKS: Record<string, { name: string; stack: string }> = {
+    serif: { name: "A classic book serif (Palatino, Iowan)", stack: SERIF },
+    georgia: { name: "Georgia", stack: GEORGIA },
+    didone: { name: "A high-contrast fashion serif where the device has one (Didot, Bodoni), otherwise Georgia", stack: DIDONE },
+    sans: { name: "The device's own sans-serif", stack: SANS },
+    grotesk: { name: "Helvetica or Arial", stack: GROTESK },
+    humanist: { name: "A friendly humanist sans (Avenir, Gill Sans)", stack: HUMANIST },
+    condensed: { name: "A narrow, tall sans for big headlines", stack: CONDENSED },
+    mono: { name: "A typewriter face", stack: MONO },
+};
+
 export const LOOKS: Look[] = [
     {
         id: "editorial",

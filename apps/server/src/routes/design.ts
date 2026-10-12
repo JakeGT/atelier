@@ -1,5 +1,6 @@
 import { LAYOUTS } from "../design/layouts.ts";
 import { findLook, KIT_FILE, LOOKS, lookOf, THEME_FILE } from "../design/looks.ts";
+import { OWN, OWN_FILE, readOwnLook } from "../design/ownLook.ts";
 import { thumbFile, thumbUrl } from "../design/thumbs.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { kitFiles, sampleFile } from "../services/designKit.ts";
@@ -54,15 +55,21 @@ export function designRoutes(api: Api): void {
         const look = theme ? lookOf(Buffer.from(theme.body).toString("utf8")) : null;
         const own = (id: string): string =>
             `/preview/${signAgentToken({ tenantId: project.tenantId, projectId: project.id, sessionId: `preview+look:${id}`, exp: Math.floor(Date.now() / 1000) + TTL_S }, previewKey)}/`;
+        // The look made for this website, whether it is wearing it now or has put it by.
+        const saved = project.archivedAt ? null : await runtime.readFile(project.id, OWN_FILE).catch(() => null);
+        const made = saved ? readOwnLook(Buffer.from(saved.body).toString("utf8")) : null;
         return c.json({
             // Null: the website was not built with the kit, so its look cannot be switched directly.
             look,
-            looks: LOOKS.map((l) => ({
-                id: l.id,
-                name: l.name,
-                description: l.description,
-                previewUrl: look ? own(l.id) : sample(l.id, null),
-            })),
+            looks: [
+                ...(made && look ? [{ id: OWN, name: made.name, description: made.description, previewUrl: own(OWN), own: true }] : []),
+                ...LOOKS.map((l) => ({
+                    id: l.id,
+                    name: l.name,
+                    description: l.description,
+                    previewUrl: look ? own(l.id) : sample(l.id, null),
+                })),
+            ],
         });
     });
 
@@ -73,7 +80,7 @@ export function designRoutes(api: Api): void {
         if (project.archivedAt) return c.json({ error: "this website is archived; restore it first" }, 409);
         const body = (await c.req.json().catch(() => null)) as { look?: unknown } | null;
         const look = findLook(typeof body?.look === "string" ? body.look : null);
-        if (!look) return c.json({ error: "choose one of the looks" }, 400);
+        if (!look && body?.look !== OWN) return c.json({ error: "choose one of the looks" }, 400);
         try {
             const theme = await runtime.readFile(project.id, THEME_FILE).catch(() => null);
             if (!theme || !lookOf(Buffer.from(theme.body).toString("utf8"))) {
@@ -84,7 +91,27 @@ export function designRoutes(api: Api): void {
                     409,
                 );
             }
-            const sha = await runtime.write(project.id, kitFiles(look), `Changed the look to ${look.name}`);
+            if (!look) {
+                // Back to the look made for this website: the copy it keeps becomes its theme again.
+                const saved = await runtime.readFile(project.id, OWN_FILE).catch(() => null);
+                const made = saved ? readOwnLook(Buffer.from(saved.body).toString("utf8")) : null;
+                if (!saved || !made) return c.json({ error: "this website has no look of its own" }, 409);
+                const sha = await runtime.write(
+                    project.id,
+                    // Its theme, and the kit's own files brought up to date with it.
+                    [
+                        { path: THEME_FILE, content: Buffer.from(saved.body).toString("base64") },
+                        ...kitFiles(LOOKS[0] as (typeof LOOKS)[number]).filter((f) => f.path !== THEME_FILE),
+                    ],
+                    `Changed the look to ${made.name}`,
+                );
+                await audit(c, "project.look", `project:${project.id}`, { look: OWN });
+                return c.json({ ok: true, look: OWN, sha });
+            }
+            // Leaving a look made for this website: it is kept as it is now, to come back to.
+            const wearing = Buffer.from(theme.body).toString("utf8");
+            const keep = lookOf(wearing) === OWN ? [{ path: OWN_FILE, content: Buffer.from(wearing).toString("base64") }] : [];
+            const sha = await runtime.write(project.id, [...keep, ...kitFiles(look)], `Changed the look to ${look.name}`);
             await audit(c, "project.look", `project:${project.id}`, { look: look.id });
             return c.json({ ok: true, look: look.id, sha });
         } catch (err) {

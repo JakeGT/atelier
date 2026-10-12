@@ -1629,6 +1629,27 @@
     max-width: 70ch;
 }
 
+/* Asking for a look of the website's own: across the top of the looks, words on the left, the button on the right. */
+.design-own {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin-top: 16px;
+    padding: 14px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+    background: var(--surface);
+}
+
+.design-own > span {
+    display: grid;
+    gap: 2px;
+    flex: 1 1 280px;
+    min-width: 0;
+}
+
 .gallery > li .muted.design-place {
     font-size: 11px;
     min-height: 0;

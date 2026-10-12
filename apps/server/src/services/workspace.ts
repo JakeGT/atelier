@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { OWN_FILE } from "../design/ownLook.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -118,7 +119,9 @@ export class Workspace {
         for (const f of files) {
             const target = resolve(join(base, f.path));
             const parts = f.path.split("/");
-            if (!target.startsWith(`${base}/`) || parts.some((p) => p === ".." || p.startsWith(".") || p === "")) {
+            // Hidden paths are refused, but for the one the platform keeps itself: the website's own look.
+            const hidden = f.path !== OWN_FILE && parts.some((p) => p.startsWith("."));
+            if (!target.startsWith(`${base}/`) || hidden || parts.some((p) => p === ".." || p === "")) {
                 throw new Error(`invalid template path: ${f.path}`);
             }
             await mkdir(dirname(target), { recursive: true });

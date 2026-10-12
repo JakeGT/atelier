@@ -107,6 +107,7 @@ export function createApi(deps: ApiDeps) {
             ),
         }),
         ...(deps.coverDelayMs === undefined ? {} : { delayMs: deps.coverDelayMs }),
+        busy: (projectId) => Boolean(presence.run(projectId)),
     });
     // A successful change to a website tells everyone who has it open to reload what they show.
     const announce: MiddlewareHandler<Env> = async (c, next) => {
@@ -119,7 +120,7 @@ export function createApi(deps: ApiDeps) {
         // What the website shows may have changed (wording, a look, a restored version, a picture): its card
         // gets a new picture. Not for things that change nothing on it, or that only start work whose end will.
         if (
-            !/\/(messages|submissions(\/.*)?|template|share|releases(\/.*)?|domains(\/.*)?|members(\/.*)?)$/.test(c.req.path) &&
+            !/\/(messages|submissions(\/.*)?|template|share|archive|releases(\/.*)?|domains(\/.*)?|members(\/.*)?)$/.test(c.req.path) &&
             c.req.method !== "DELETE"
         )
             covers.changed(c.get("org").id, c.get("project").id);

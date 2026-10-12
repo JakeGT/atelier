@@ -420,6 +420,9 @@ current host. What needs the VPS is P6, which is last.
   a picture of each website's home page on its card, retaken after every change.
 - E5.12 Operators can go into a studio for a limited time, in the open
   (ADR-0021, asked for and built 2026-10-11 on `operator-access`).
+- E5.13 The assistant is limited only where safety requires it: a look of the website's own, any
+  font, no steering to ready-made designs; page previews made reliable
+  (ADR-0022, asked for and built 2026-10-11 on `own-look`).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown

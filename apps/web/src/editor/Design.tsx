@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, LayoutPanelTop, Monitor, Palette, Smartphone, Wind } from "lucide-react";
+import { ArrowLeft, Check, LayoutPanelTop, Monitor, Palette, Smartphone, Sparkles, Wind } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { DesignLayout, DesignLook, OrgApi, Project } from "../lib/api";
 import { Dialog, Dots, useToast } from "../ui/kit";
@@ -114,6 +114,15 @@ export function DesignDialog({
             setBusy(false);
         }
     };
+    // A look nobody else has: asked for in words, so the request is started for the person to finish.
+    const askForOwn = () => {
+        onAsk(
+            looks?.some((l) => l.own)
+                ? "Change this website's own look: "
+                : "Make a look for this website alone, instead of a ready-made one. I would like it to feel like this: ",
+        );
+        onClose();
+    };
     const add = (layout: DesignLayout) => {
         onAsk(`Add the “${layout.name}” section to the home page, in the place that suits it best, with wording written for this website.`);
         onClose();
@@ -219,9 +228,26 @@ export function DesignDialog({
                     <>
                         <p className="muted design-about">
                             {hasKit
-                                ? "A look is a whole design: colours, lettering, corners and spacing. Each picture below is your own website in that look. Changing it changes every page at once and none of your words."
+                                ? "A look is a whole design: colours, lettering, corners and spacing. Each picture below is your own website in that look. Changing it changes every page at once and none of your words. These are places to start: your assistant can make a look that is yours alone."
                                 : "A look is a whole design: colours, lettering, corners and spacing. This website was built with its own styling, so its look cannot be switched in one step; your assistant can restyle it in any of these."}
                         </p>
+                        {canEdit && (
+                            <div className="design-own">
+                                <span>
+                                    <strong>
+                                        {looks.some((l) => l.own) ? "Want to change your own look?" : "None of these quite right?"}
+                                    </strong>
+                                    <span className="muted">
+                                        Describe the colours, the lettering or the feeling you want, and your assistant designs it for this
+                                        website.
+                                    </span>
+                                </span>
+                                <button type="button" className="btn btn-sm btn-primary" onClick={askForOwn}>
+                                    <Sparkles />{" "}
+                                    {looks.some((l) => l.own) ? "Ask my assistant to change it" : "Ask my assistant for a look of my own"}
+                                </button>
+                            </div>
+                        )}
                         <ul className="gallery">
                             {looks.map((l) => (
                                 <li key={l.id} className={l.id === current ? "on" : ""}>
@@ -229,8 +255,11 @@ export function DesignDialog({
                                     <strong>
                                         {l.name}
                                         {l.id === current && <span className="chip chip-seal">Wearing now</span>}
+                                        {l.own && l.id !== current && <span className="chip">Made for this website</span>}
                                     </strong>
-                                    <span className="muted">{l.description}</span>
+                                    <span className="muted">
+                                        {l.own && l.id === current ? `Made for this website. ${l.description}` : l.description}
+                                    </span>
                                     <span className="gallery-actions">
                                         {canEdit && l.id !== current && (
                                             <button

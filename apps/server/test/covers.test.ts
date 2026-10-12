@@ -124,3 +124,50 @@ test("no home page, or a workspace that cannot take pictures: the card keeps wha
     await wait(40);
     assert.equal(asked, 0);
 });
+
+test("a cover waits while the assistant is at work, and is not taken for a website being put away", async () => {
+    const t = await makeApp();
+    const who = await signIn(t);
+    const { project } = await json<{ project: Project }>(await send(t, who, "POST", `${who.api}/projects`, { name: "W" }));
+    const org = who.org;
+    const store = t.store;
+    const storage = new MemoryStorage();
+    let working = true;
+    let taken = 0;
+    let release: () => void = () => {};
+    const covers = new Covers({
+        store,
+        storage,
+        taker: {
+            cover: async () => {
+                taken++;
+                await new Promise<void>((r) => {
+                    release = r;
+                });
+                return new Uint8Array([1]);
+            },
+        },
+        access: () => ({ apiUrl: "", agentToken: "" }),
+        delayMs: 5,
+        busy: () => working,
+    });
+    // While the assistant works, nothing is taken; once it has finished, the picture that was owed is.
+    assert.equal(await covers.refresh(org.id, project.id), false);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(taken, 0);
+    working = false;
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(taken, 1);
+    // Putting the website away waits for the picture being taken, and no other follows.
+    covers.changed(org.id, project.id);
+    let quiet = false;
+    const done = covers.quiet(project.id).then(() => {
+        quiet = true;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(quiet, false);
+    release();
+    await done;
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(taken, 1);
+});
