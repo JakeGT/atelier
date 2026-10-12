@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 
 // ---- routing: a tiny History-API router ("/", "/login", "/studio", "/p/:slug") ------
 
@@ -6,14 +7,31 @@ const listeners = new Set<() => void>();
 const notify = () => {
     for (const l of listeners) l();
 };
-window.addEventListener("popstate", notify);
+
+// Going from one page to another is eased: the page that is leaving fades back as the next
+// one arrives (styles/base.css, "moving between pages"). The browser does the blending; where
+// it cannot, or the person has asked their device for less movement, the page simply changes.
+type Transitioning = Document & { startViewTransition?: (update: () => void) => unknown };
+function eased(update: () => void): void {
+    const doc = document as Transitioning;
+    if (!doc.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        update();
+        return;
+    }
+    // The new page must be on screen by the time this returns, for the browser to picture it.
+    doc.startViewTransition(() => flushSync(update));
+}
+window.addEventListener("popstate", () => eased(notify));
 
 export function navigate(path: string, opts: { replace?: boolean } = {}): void {
     if (path === window.location.pathname + window.location.search) return;
+    // The address changes at once (whatever asked can rely on it); what is shown follows, eased.
     if (opts.replace) window.history.replaceState(null, "", path);
     else window.history.pushState(null, "", path);
-    window.scrollTo(0, 0);
-    notify();
+    eased(() => {
+        window.scrollTo(0, 0);
+        notify();
+    });
 }
 
 export function usePath(): string {

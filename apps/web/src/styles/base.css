@@ -551,6 +551,43 @@ textarea {
     color: var(--ink-3);
 }
 
+/* ---- moving between pages ----------------------------------------------------------
+   The page that is leaving fades back and settles a little; the next one fades up into
+   place. Unhurried, and the same everywhere, so moving about the studio feels like one
+   place rather than a series of jumps. (lib/hooks.ts starts it; reduced motion skips it.) */
+
+::view-transition-old(root) {
+    animation: page-leave 0.22s var(--ease) both;
+}
+
+::view-transition-new(root) {
+    animation: page-arrive 0.42s var(--ease) both;
+}
+
+@keyframes page-leave {
+    to {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+}
+
+@keyframes page-arrive {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+}
+
+/* What a page was waiting for (its websites, a conversation, the wording) fades in when it
+   arrives, rather than appearing all at once. Opacity only: nothing is moved, so nothing
+   placed against the window (a dialog) is disturbed. */
+.boot,
+.studio-main,
+.editor-body,
+.content-page {
+    animation: fade 0.4s var(--ease) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
