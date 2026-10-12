@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { type ContentField, contentFieldSchema } from "@atelier/shared";
 import type { Context } from "hono";
 import { z } from "zod";
 import { readTar } from "../runtime/tar.ts";
 import { type AgentTokenClaims, verifyAgentToken } from "../services/agentToken.ts";
+import { cleanQuestions } from "../services/asking.ts";
 import { type PageCoverage, pageCoverage } from "../services/coverage.ts";
 import { sanitizeRich } from "../services/fill.ts";
 import { type Api, PROJECT, param } from "./kit.ts";
@@ -228,6 +230,22 @@ export function contentRoutes(api: Api): void {
             return handler(c, claims);
         });
     };
+
+    // The assistant asks the person something and stops; the answer comes as the next message.
+    agentRoute("put", "/api/agent/questions", async (c, claims) => {
+        const project = await store.projects.findById(claims.tenantId, claims.projectId);
+        if (project?.askLevel === 0) return c.json({ asked: false, reason: "decide" });
+        const questions = cleanQuestions(((await c.req.json().catch(() => null)) as { questions?: unknown } | null)?.questions);
+        if (!questions) return c.json({ error: "give at least one question" }, 400);
+        const made = await store.questions.ask({
+            id: randomUUID(),
+            tenantId: claims.tenantId,
+            projectId: claims.projectId,
+            sessionId: claims.sessionId,
+            questions,
+        });
+        return c.json({ asked: true, id: made.id, questions: made.questions.length });
+    });
 
     agentRoute("get", "/api/agent/content", async (c, claims) =>
         c.json({ documents: await store.content.list(claims.tenantId, claims.projectId) }),

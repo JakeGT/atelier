@@ -1633,3 +1633,135 @@
     font-size: 11px;
     min-height: 0;
 }
+
+/* ---- the assistant asks ---- */
+
+.msg-question {
+    display: grid;
+    gap: 14px;
+    padding: 14px 16px 12px;
+    border: 1px solid var(--seal);
+    border-radius: var(--radius-l);
+    background: var(--seal-wash);
+}
+
+.question-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--seal-deep);
+}
+
+.question-eyebrow svg {
+    width: 14px;
+    height: 14px;
+}
+
+.question {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.question legend {
+    padding: 0;
+    font-weight: 600;
+}
+
+.question-why {
+    margin: -4px 0 0;
+    font-size: 13px;
+}
+
+.question-options {
+    display: grid;
+    gap: 6px;
+}
+
+.question-option {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface-raised);
+    cursor: pointer;
+}
+
+.question-option.on {
+    border-color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.question-option input {
+    flex: none;
+    accent-color: var(--seal);
+    translate: 0 2px;
+}
+
+.question-first {
+    margin-left: auto;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.question-own {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface-raised);
+    color: inherit;
+    font: inherit;
+}
+
+.question:disabled {
+    opacity: 0.6;
+}
+
+.question-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.question-note {
+    margin: 0;
+    font-size: 12.5px;
+}
+
+/* ---- how much it asks ---- */
+
+.asking {
+    width: min(340px, calc(100vw - 48px));
+    padding: 14px 16px;
+}
+
+.asking input[type="range"] {
+    width: 100%;
+    margin: 6px 0 2px;
+    accent-color: var(--seal);
+}
+
+.asking-ends {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+}
+
+.asking-now {
+    margin: 12px 0 6px;
+    font-size: 13.5px;
+    line-height: 1.5;
+}
+
+.asking-note {
+    margin: 0;
+    font-size: 12px;
+}

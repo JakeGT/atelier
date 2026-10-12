@@ -27,6 +27,7 @@ import { WordingDialog } from "../editor/Wording";
 import { changedFiles } from "../lib/activity";
 import type {
     AgentSession,
+    AssistantQuestions,
     Checkpoint,
     ContentDocument,
     HistoryEntry,
@@ -128,6 +129,12 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [published, setPublished] = useState<{ number: number; url: string } | null>(null);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
+    // What the assistant has stopped to ask, and how much it asks on this website.
+    const [question, setQuestion] = useState<AssistantQuestions | null>(null);
+    const [askLevel, setAskLevel] = useState(1);
+    // The website's versions are known (an empty list then means an empty website, not "still opening").
+    const [known, setKnown] = useState(false);
+
     const loadThread = useCallback(async () => {
         try {
             const thread = await a.thread(pid);
@@ -135,6 +142,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             setAuthors(thread.authors ?? {});
             setPending([]);
             setActiveRun(thread.activeRun);
+            setQuestion(thread.question ?? null);
+            if (typeof thread.askLevel === "number") setAskLevel(thread.askLevel);
         } catch {
             setMessages((m) => m ?? []);
         }
@@ -148,13 +157,17 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const refresh = useCallback(async () => {
         const [cps, hist, rels, docs, ov] = await Promise.all([
-            a.listCheckpoints(pid).catch(() => [] as Checkpoint[]),
+            a.listCheckpoints(pid).catch(() => null),
             a.history(pid).catch(() => [] as HistoryEntry[]),
             a.listReleases(pid).catch(() => [] as Release[]),
             a.listContent(pid).catch(() => [] as ContentDocument[]),
             a.overview(pid).catch(() => null),
         ]);
-        setCheckpoints(cps);
+        // Not known yet (the workspace is still starting): keep what is shown, and say it is opening.
+        if (cps) {
+            setCheckpoints(cps);
+            setKnown(true);
+        }
         setHistory(hist);
         setReleases([...rels].reverse());
         setDocuments(docs);
@@ -204,6 +217,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         async (prompt: string) => {
             if (!agent || activeRun) return;
             note("user", prompt);
+            setQuestion(null);
             try {
                 setActiveRun(await a.startRun(pid, agent.id, prompt));
             } catch (err) {
@@ -212,6 +226,38 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         },
         [a, agent, activeRun, note, pid],
     );
+
+    const answer = useCallback(
+        async (answers: string[]) => {
+            if (!agent || activeRun || !question) return;
+            const set = question;
+            note("user", set.questions.map((q, i) => `${q.question}\n→ ${answers[i]?.trim() || "You decide."}`).join("\n\n"));
+            setQuestion(null);
+            try {
+                setActiveRun(await a.answer(pid, agent.id, set.id, answers));
+            } catch (err) {
+                note("error", (err as Error).message);
+                void loadThread();
+            }
+        },
+        [a, agent, activeRun, question, note, pid, loadThread],
+    );
+    const changeAsking = useCallback(
+        (level: number) => {
+            setAskLevel(level);
+            a.setAsking(pid, level).catch((err: Error) => toast(err.message, "error"));
+        },
+        [a, pid, toast],
+    );
+    // The workspace was still starting when the website was opened: ask again until it answers.
+    useEffect(() => {
+        if (known || starting || archived) return;
+        const again = setInterval(() => {
+            void refresh();
+            reloadPreview();
+        }, 3000);
+        return () => clearInterval(again);
+    }, [known, starting, archived, refresh, reloadPreview]);
 
     // ---- the pulse: one heartbeat that keeps this editor in step with the website ---------
     // Every couple of seconds it says "I am here" (and whether I am typing) and
@@ -563,6 +609,10 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onStop={stopRun}
                     onMoreTime={moreTime}
                     onCarryOn={() => void carryOn()}
+                    asked={activeRun ? null : question}
+                    onAnswer={(answers) => void answer(answers)}
+                    askLevel={askLevel}
+                    onAskLevel={changeAsking}
                     ready={agent !== null && mayEdit}
                     starting={starting}
                     locked={
@@ -585,6 +635,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onWording={(ref, value) => void saveFromPreview(ref, value)}
                     onOpenWording={openFromPreview}
                     hasPage={checkpoints.length > 0 || (activeRun?.steps.some(changedFiles) ?? false)}
+                    opening={!archived && (starting || !known)}
                     working={running}
                 />
                 <Sidebar

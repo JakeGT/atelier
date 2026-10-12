@@ -292,6 +292,12 @@ export interface SitePage {
     examples: { tag: string; text: string }[];
 }
 
+// What the assistant has stopped to ask the person.
+export interface AssistantQuestions {
+    id: string;
+    questions: { question: string; why: string; options: string[] }[];
+}
+
 // What a visitor sent through one of a website's forms.
 export interface FormMessage {
     id: string;
@@ -596,13 +602,22 @@ export function orgApi(org: string) {
         extendRun: (projectId: string, runId: string) => post<{ run: Run }>(`${p(projectId)}/runs/${runId}/extend`).then((b) => b.run),
         pulse: (projectId: string, typing: boolean) =>
             post<Pulse>(`${p(projectId)}/pulse`, { typing }).then((b) => ({ ...b, run: wholeRun(b.run) })),
+        // Answers to what the assistant asked: the same request carries on with them.
+        answer: (projectId: string, sessionId: string, id: string, answers: string[]) =>
+            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { answers: { id, answers } }).then((b) => b.run),
+        setAsking: (projectId: string, level: number) =>
+            put<{ askLevel: number }>(`${p(projectId)}/asking`, { level }).then((b) => b.askLevel),
         thread: (projectId: string) =>
-            get<{ messages: ThreadMessage[]; activeRun: Run | null; authors: Record<string, string> }>(`${p(projectId)}/messages`).then(
-                (b) => ({
-                    ...b,
-                    activeRun: wholeRun(b.activeRun),
-                }),
-            ),
+            get<{
+                messages: ThreadMessage[];
+                activeRun: Run | null;
+                authors: Record<string, string>;
+                question?: AssistantQuestions | null;
+                askLevel?: number;
+            }>(`${p(projectId)}/messages`).then((b) => ({
+                ...b,
+                activeRun: wholeRun(b.activeRun),
+            })),
         getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => wholeRun(b.run)),
 
         listCheckpoints: (projectId: string) =>

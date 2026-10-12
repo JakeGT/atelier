@@ -220,6 +220,43 @@ server.tool(
 const currentLook = async (): Promise<string | null> => lookOf(await readFile(join(workspace, THEME_FILE), "utf8").catch(() => ""));
 
 server.tool(
+    "ask_person",
+    'Ask the person questions and wait for their answers, instead of guessing. Follow the rules under "How much to ask" in your instructions for when to use it. Put every question you have in one call. After calling it you must stop: reply with one sentence saying you are waiting for their answer and do no more work. Their answers arrive as the next message and you carry on from there.',
+    {
+        questions: z
+            .array(
+                z.object({
+                    question: z.string().describe("One short question in plain words, about the website, never about code or files"),
+                    why: z.string().describe("Why you are asking, in a few words the person will read under the question").default(""),
+                    options: z
+                        .array(z.string())
+                        .max(5)
+                        .describe(
+                            "Two to four answers to choose from, the one you would pick first. Leave empty when only they can know (a name, a price).",
+                        )
+                        .default([]),
+                }),
+            )
+            .min(1)
+            .max(6),
+    },
+    async ({ questions }) => {
+        const out = (await api("/api/agent/questions", { method: "PUT", body: JSON.stringify({ questions }) })) as { asked: boolean };
+        return json(
+            out.asked
+                ? {
+                      asked: true,
+                      now: "STOP. The person has been shown your questions. Reply with one sentence saying you are waiting for their answer, and do nothing else: no more tools, no changes. Their answers will arrive as the next message.",
+                  }
+                : {
+                      asked: false,
+                      now: "The person has asked you to decide everything yourself, so the questions were not shown. Choose the most likely answer to each, carry on, and say what you assumed when you finish.",
+                  },
+        );
+    },
+);
+
+server.tool(
     "design_kit",
     "The website's design kit. Returns the look the website wears (a design language: its colours, type, corners, and how to design in it), the other looks there are, and the ready-made sections (layouts) you can place. Call this before you design or restyle anything. A website with the kit has theme.css (the look, as CSS variables) and kit.css (the sections' styles); pages link both and take every colour, font and corner from the variables.",
     {},

@@ -198,6 +198,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 - Each look has `--motion-duration`, `--motion-ease`, `--motion-distance`. The assistant's page check looks with movement off.
 - People ask in words (Design → Movement). **GSAP's licence forbids tools for building animations visually without code: do not add animation controls to the interface on top of GSAP** (ADR-0018).
 
+## The assistant asks (branch `assistant-questions`, ADR-0019)
+
+- Tool `ask_person` stores questions (`agent_questions`, migration 0020) and ends the request; the conversation shows a card (`editor/Asking.tsx`); answering continues the same request (`messages` route, `answers`).
+- `projects.ask_level` 0 to 3 (slider under the message box, `PUT …/asking`); each level is a paragraph in `services/asking.ts`.
+- The preview says "Opening your website…" until the workspace has answered, instead of "Nothing on the easel yet".
+
 ## Known gaps
 
 - **gVisor is not enabled.** The provisioner supports `RUNTIME_OCI_RUNTIME=runsc`, but this host is Docker Desktop, which has no `runsc`. It is part of the VPS move, which is the last phase (P6).

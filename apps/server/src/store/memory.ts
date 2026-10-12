@@ -17,6 +17,8 @@ import type {
     User,
 } from "@atelier/shared";
 import type {
+    AgentQuestionSet,
+    AgentQuestionStore,
     AgentSessionStore,
     AuditStore,
     ContentStore,
@@ -333,6 +335,7 @@ export class MemoryStore implements Store {
                 template: input.template ?? null,
                 agentInstructions: null,
                 agentModel: null,
+                askLevel: 1,
                 archivedAt: null,
                 createdAt: now(),
             };
@@ -361,6 +364,7 @@ export class MemoryStore implements Store {
                 ...p,
                 name: patch.name ?? p.name,
                 agentInstructions: patch.agentInstructions === undefined ? p.agentInstructions : patch.agentInstructions,
+                askLevel: patch.askLevel ?? p.askLevel,
                 agentModel: patch.agentModel === undefined ? p.agentModel : patch.agentModel,
                 ...(patch.archived === undefined
                     ? {}
@@ -725,6 +729,32 @@ export class MemoryStore implements Store {
             [...this.projectRoles.values()]
                 .filter((r) => r.tenantId === tenantId && r.userId === userId && this.projectMap.has(r.projectId))
                 .map(({ projectId, role }) => ({ projectId, role })),
+    };
+
+    private readonly questionLog: (AgentQuestionSet & { tenantId: string })[] = [];
+    questions: AgentQuestionStore = {
+        ask: async (input) => {
+            for (const q of this.questionLog) if (q.projectId === input.projectId && q.closedAt === null) q.closedAt = now();
+            const made = { ...input, answers: null, askedAt: now(), closedAt: null };
+            this.questionLog.push(made);
+            const { tenantId: _t, ...out } = made;
+            return out;
+        },
+        open: async (tenantId, projectId) => {
+            const q = this.questionLog.find((x) => x.tenantId === tenantId && x.projectId === projectId && x.closedAt === null);
+            if (!q || !this.projectMap.has(projectId)) return null;
+            const { tenantId: _t, ...out } = q;
+            return out;
+        },
+        close: async (tenantId, projectId, id, answers) => {
+            const q = this.questionLog.find(
+                (x) => x.id === id && x.tenantId === tenantId && x.projectId === projectId && x.closedAt === null,
+            );
+            if (!q) return false;
+            q.answers = answers;
+            q.closedAt = now();
+            return true;
+        },
     };
 
     private readonly formLog: (FormSubmission & { tenantId: string })[] = [];
