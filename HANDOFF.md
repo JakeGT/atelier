@@ -1,7 +1,7 @@
 # Atelier: Handoff
 
-> Last updated 2026-10-10. Status: **`p5.21` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
-> `main` has everything through PR #15. Thirteen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
+> Last updated 2026-10-10. Status: **`p5.22` deployed, hosting on.** Publishing puts websites on Cloudflare Pages.
+> `main` has everything through PR #15. Fourteen PRs are open, each stacked on the one before; merge in this order: [#16](https://github.com/JakeGT/atelier/pull/16) `assistant-sight`, [#17](https://github.com/JakeGT/atelier/pull/17) `content-finish`, [#18](https://github.com/JakeGT/atelier/pull/18) `studio-people`, [#19](https://github.com/JakeGT/atelier/pull/19) `gallery-previews`, [#20](https://github.com/JakeGT/atelier/pull/20) `cost-estimate`, [#21](https://github.com/JakeGT/atelier/pull/21) `bar-lengths`, [#22](https://github.com/JakeGT/atelier/pull/22) `design-kit`, [#23](https://github.com/JakeGT/atelier/pull/23) `templates-visible`, [#24](https://github.com/JakeGT/atelier/pull/24) `interactive-forms`, [#25](https://github.com/JakeGT/atelier/pull/25) `motion-gsap`, [#26](https://github.com/JakeGT/atelier/pull/26) `drag-designs`, [#27](https://github.com/JakeGT/atelier/pull/27) `assistant-questions`, [#28](https://github.com/JakeGT/atelier/pull/28) `feedback-reports`, [#29](https://github.com/JakeGT/atelier/pull/29) `fast-gallery`. **Merge each into its base only after the one before it has reached `main`** (#14 was once merged into a branch that had already gone to `main`, and its commits were stranded until #15).
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ behind Authentik. Phases P0–P2 of `docs/13-implementation-plan.md` are built; 
 
 | Concern | Value |
 | --- | --- |
-| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.21` (built locally from `p3-hosting`) |
+| Images | `atelier-server`, `atelier-provisioner`, `atelier-egress`, `atelier-runtime`, `atelier-deployer`, all `:p5.22` (built locally from `p3-hosting`) |
 | Services | `atelier-server` (control plane), `atelier-provisioner` (Docker socket), `atelier-egress` (the workspaces' only way out), `atelier-deployer` (Cloudflare token; publishes websites), plus `atelier-ws-<projectId>` per project |
 | Migrations | `0001`–`0018` applied; `db/grants.sql` re-applied at each start |
 | DB roles | `atelier` (owner, migrations), `atelier_runtime` (group), `atelier_app` (server login) |
@@ -208,6 +208,12 @@ Caddyfile changes need `docker compose restart caddy` (Caddy runs with `admin of
 
 - `feedback_reports` (migration 0021, not tenant-scoped, operator-only reads). People: account menu → "Report a problem or suggest an idea" (`ui/Report.tsx`, `POST /api/v1/feedback`). The assistant: tool `report_to_atelier` (`PUT /api/agent/feedback`), about tools and rules only.
 - Operator → Reports (`/admin/reports`); **`GET /api/v1/admin/feedback.md` is every open report as one document: read it at the start of a session to see what to improve.**
+
+## Gallery pictures (branch `fast-gallery`)
+
+- The looks and built-in templates are shown as pictures (`apps/server/assets/thumbs/*.webp`, served at `/design-thumbs/<name>.<fingerprint>.webp`, cached for good). The live page loads only in "Look closer", which is a large dialog that lays a desktop out at 1280 wide.
+- **After changing `kit.css`, `kit.js`, a look, the showcase sections or a built-in template, run `CHROMIUM_PATH=… pnpm thumbs` and commit the pictures.** A test fails until you do (`design.test.ts`, by fingerprint; CI has no Chromium, so it cannot take them itself).
+- A studio's own templates and the sections in the Design panel are still live miniatures.
 
 ## Known gaps
 

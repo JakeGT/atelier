@@ -137,6 +137,7 @@ export interface DesignLook {
     name: string;
     description: string;
     previewUrl: string;
+    imageUrl?: string;
 }
 // A ready-made section of a page.
 export interface DesignLayout {
@@ -155,6 +156,8 @@ export interface Template {
     own?: boolean;
     // Where it can be looked at.
     previewUrl?: string;
+    // A picture of it, when there is one: shown at once, with the live page for a closer look.
+    imageUrl?: string;
 }
 
 // What an operator sees of each studio.

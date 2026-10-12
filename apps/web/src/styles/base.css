@@ -595,6 +595,10 @@ textarea {
     width: min(560px, 100%);
 }
 
+.dialog-large {
+    width: min(1380px, 100%);
+}
+
 .dialog-actions-split {
     justify-content: space-between;
     align-items: center;

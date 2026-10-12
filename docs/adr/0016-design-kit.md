@@ -96,3 +96,15 @@ files by hand; build from sections where one fits.
 - Editing a single value of a look (just the accent colour).
 - Moving the built-in templates onto the kit.
 - More than one look per website (a dark variant).
+
+## Added 2026-10-11: pictures in the galleries
+
+The galleries showed every design as a live miniature page. A dozen pages at
+once made "See all designs" slow, and the closer look was a small dialog in
+which a desktop page fell into its phone layout. Now Atelier's own designs are
+pictured ahead of time (`pnpm thumbs`, committed, fingerprinted against the
+pages they show, checked by a test), the galleries show the pictures, and the
+live page is loaded only for a closer look, in a large dialog that lays the page
+out 1280 wide and scales it to fit. Prefetching every live page was considered
+and rejected: it makes the first paint slower for something most people never
+open.

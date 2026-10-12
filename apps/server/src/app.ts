@@ -67,7 +67,7 @@ const appCsp = (nonce: string): string =>
     ].join("; ");
 
 // Paths the single-page app never owns: a miss here is a real 404.
-const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz|f)(\/|$)/;
+const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz|f|design-thumbs)(\/|$)/;
 
 export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[]; notifier: Notifier } {
     const app = new Hono();
