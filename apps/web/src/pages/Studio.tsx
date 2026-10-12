@@ -74,7 +74,14 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             () => {},
         );
     }, [a]);
-    const chosen = [...templates, ...looks].find((t) => t.id === template);
+    // Everything a website can start from, in the order it is offered: the studio's own
+    // templates, then looks (an empty website in a finished design), then finished websites.
+    const starts: (Template & { tag: string })[] = [
+        ...templates.filter((t) => t.own).map((t) => ({ ...t, tag: "Your studio's" })),
+        ...looks.map((t) => ({ ...t, name: t.name.replace(/ look$/, ""), tag: "A look" })),
+        ...templates.filter((t) => !t.own).map((t) => ({ ...t, tag: "A finished website" })),
+    ];
+    const chosen = starts.find((t) => t.id === template);
     const [choosing, setChoosing] = useState(false);
     // Saving a website as one of the studio's own starting points.
     const [saving, setSaving] = useState<Project | null>(null);
@@ -243,19 +250,60 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 rows={3}
                                 aria-label="Describe the website"
                             />
+                            {/* The designs and templates are shown, not hidden behind a button: a row of
+                                live miniatures to pick from, with the rest one step away. */}
+                            <div className="designs" role="radiogroup" aria-labelledby="designs-label">
+                                <p className="designs-label" id="designs-label">
+                                    <strong>Pick a design to start from</strong>
+                                    <span className="muted"> · or leave it empty and describe what you want</span>
+                                </p>
+                                <div className="designs-row">
+                                    {[
+                                        { id: "", name: "An empty page", description: "", tag: "" } as Template & { tag: string },
+                                        ...starts,
+                                    ].map((t) => {
+                                        const id = t.id || null;
+                                        return (
+                                            <label key={t.id || "blank"} className={`design ${template === id ? "on" : ""}`}>
+                                                <input
+                                                    type="radio"
+                                                    name="design"
+                                                    checked={template === id}
+                                                    onChange={() => setTemplate(id)}
+                                                />
+                                                <span className="gallery-thumb" aria-hidden="true">
+                                                    {t.previewUrl ? (
+                                                        <iframe
+                                                            src={t.previewUrl}
+                                                            title={`${t.name}, shown small`}
+                                                            sandbox=""
+                                                            loading="lazy"
+                                                            tabIndex={-1}
+                                                        />
+                                                    ) : (
+                                                        <span className="gallery-blank">Empty</span>
+                                                    )}
+                                                </span>
+                                                <span className="design-name">{t.name}</span>
+                                                {t.tag && <span className="design-tag mono muted">{t.tag}</span>}
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                                <button type="button" className="btn btn-sm" onClick={() => setChoosing(true)}>
+                                    <LayoutTemplate /> See all {starts.length} designs and templates, larger
+                                </button>
+                            </div>
                             <p className="brief-start">
                                 {chosen
-                                    ? `${chosen.description} It is there the moment you open the website; then ask your assistant to make it yours.`
+                                    ? `${chosen.name}: ${chosen.description} It is there the moment you open the website; then ask your assistant to make it yours.`
                                     : "Your assistant builds the first page from your description, or you start in the editor with nothing."}
                             </p>
                             <div className="brief-foot">
-                                <div className="starters">
+                                <span className="starters">
                                     <span className="starters-label">Starts from</span>
                                     <strong className="starter-chosen">{chosen ? chosen.name : "An empty page"}</strong>
-                                    <button type="button" className="btn btn-sm" onClick={() => setChoosing(true)}>
-                                        <LayoutTemplate /> Choose a starting point
-                                    </button>
-                                </div>
+                                </span>
                                 <button type="submit" className="btn btn-seal" disabled={busy}>
                                     {busy ? (
                                         <Dots />

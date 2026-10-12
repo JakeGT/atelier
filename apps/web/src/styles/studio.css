@@ -1629,3 +1629,87 @@ button.where:hover {
         display: inline-flex;
     }
 }
+
+/* ---- designs and templates, shown in the new-website form ----------------------------- */
+
+.designs {
+    margin: 18px 0 0;
+    padding: 18px clamp(16px, 2.2vw, 26px) 4px;
+    border: 0;
+    border-top: 1px solid var(--line);
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.designs > .btn {
+    margin-bottom: 10px;
+}
+
+.designs-label {
+    margin: 0 0 12px;
+    font-size: 14.5px;
+}
+
+.designs-row {
+    display: flex;
+    gap: 12px;
+    margin-inline: -4px;
+    padding: 4px 4px 12px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+}
+
+.design {
+    /* Holds its (hidden) radio button, which would otherwise be placed against the page. */
+    position: relative;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 168px;
+    padding: 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-m);
+    cursor: pointer;
+    scroll-snap-align: start;
+    transition:
+        border-color 0.2s,
+        background 0.2s;
+}
+
+.design:hover {
+    background: var(--line);
+}
+
+.design.on {
+    border-color: var(--seal);
+    background: var(--surface);
+}
+
+.design input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.design:has(input:focus-visible) {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+}
+
+.design-name {
+    margin-top: 6px;
+    font-size: 13.5px;
+    font-weight: 500;
+}
+
+.design-tag {
+    font-size: 10.5px;
+}
+
+.brief-foot .starters {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
