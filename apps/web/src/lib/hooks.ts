@@ -117,3 +117,119 @@ export function timeAgo(iso: string): string {
     if (abs < 86400 * 14) return RELATIVE.format(Math.round(diff / 86400), "day");
     return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
+
+// Lets a row that scrolls sideways be dragged along with the mouse, and carries on
+// a little when let go, as a finger's swipe does. A press that moves is a drag and
+// chooses nothing; a press that stays put is still a click. Touch and trackpads
+// already scroll it themselves.
+// `ref` goes on the row (which may appear later than the page); `more` says which
+// way there is more to see; `step` moves a screenful that way.
+export function useDragScroll<T extends HTMLElement>(): {
+    ref: (node: T | null) => void;
+    more: { before: boolean; after: boolean };
+    step: (direction: -1 | 1) => void;
+} {
+    const [row, setRow] = useState<T | null>(null);
+    const [more, setMore] = useState({ before: false, after: false });
+    const calm = useRef(false);
+    useEffect(() => {
+        if (!row) return;
+        calm.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let start: { x: number; left: number } | null = null;
+        let dragged = false;
+        // Where the mouse was a moment ago, to know how fast it was going when it let go.
+        let trail: { x: number; t: number }[] = [];
+        let coasting = 0;
+        const stop = () => {
+            cancelAnimationFrame(coasting);
+            coasting = 0;
+        };
+        const down = (e: PointerEvent) => {
+            if (e.pointerType !== "mouse" || e.button !== 0 || row.scrollWidth <= row.clientWidth) return;
+            stop();
+            start = { x: e.clientX, left: row.scrollLeft };
+            trail = [{ x: e.clientX, t: performance.now() }];
+            dragged = false;
+        };
+        const move = (e: PointerEvent) => {
+            if (!start) return;
+            const dx = e.clientX - start.x;
+            if (!dragged && Math.abs(dx) < 6) return;
+            if (!dragged) {
+                dragged = true;
+                row.classList.add("dragging");
+            }
+            row.scrollLeft = start.left - dx;
+            const now = performance.now();
+            trail.push({ x: e.clientX, t: now });
+            while (trail.length > 2 && now - (trail[0]?.t ?? now) > 100) trail.shift();
+        };
+        const up = () => {
+            if (!start) return;
+            start = null;
+            row.classList.remove("dragging");
+            if (!dragged || calm.current) return;
+            const first = trail[0];
+            const last = trail.at(-1);
+            // Let go after holding still: it stays where it was put.
+            if (!first || !last || last.t === first.t || performance.now() - last.t > 60) return;
+            // Pixels a millisecond, in the direction the row was moving.
+            let speed = -(last.x - first.x) / (last.t - first.t);
+            let then = performance.now();
+            const coast = (now: number) => {
+                const dt = Math.min(now - then, 34);
+                then = now;
+                const before = row.scrollLeft;
+                row.scrollLeft = before + speed * dt;
+                // Loses about a twentieth of its speed every sixtieth of a second.
+                speed *= 0.95 ** (dt / 16.7);
+                coasting = Math.abs(speed) > 0.02 && row.scrollLeft !== before ? requestAnimationFrame(coast) : 0;
+            };
+            coasting = requestAnimationFrame(coast);
+        };
+        // The click that ends a drag is swallowed, so letting go over a card does not choose it.
+        const click = (e: MouseEvent) => {
+            if (!dragged) return;
+            dragged = false;
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        const noNativeDrag = (e: DragEvent) => e.preventDefault();
+        const edges = () => {
+            const before = row.scrollLeft > 8;
+            const after = row.scrollLeft + row.clientWidth < row.scrollWidth - 8;
+            row.classList.toggle("more-before", before);
+            row.classList.toggle("more-after", after);
+            setMore((m) => (m.before === before && m.after === after ? m : { before, after }));
+        };
+        edges();
+        const watch = new ResizeObserver(edges);
+        watch.observe(row);
+        for (const child of row.children) watch.observe(child);
+        row.addEventListener("scroll", edges, { passive: true });
+        row.addEventListener("pointerdown", down);
+        row.addEventListener("wheel", stop, { passive: true });
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
+        row.addEventListener("click", click, true);
+        row.addEventListener("dragstart", noNativeDrag);
+        return () => {
+            stop();
+            row.removeEventListener("pointerdown", down);
+            row.removeEventListener("wheel", stop);
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            row.removeEventListener("click", click, true);
+            row.removeEventListener("dragstart", noNativeDrag);
+            row.removeEventListener("scroll", edges);
+            watch.disconnect();
+        };
+    }, [row]);
+    const step = useCallback(
+        (direction: -1 | 1) => row?.scrollBy({ left: direction * row.clientWidth * 0.8, behavior: calm.current ? "auto" : "smooth" }),
+        [row],
+    );
+    return { ref: setRow, more, step };
+}
