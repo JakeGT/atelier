@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import type { Config } from "../config.ts";
 import { clientIp, RateLimiter, sameOrigin } from "../security.ts";
 import { acceptInvitations, ensurePersonalStudio } from "../services/bootstrap.ts";
@@ -13,12 +13,17 @@ import type { Store } from "../store/types.ts";
 // group claim, session in a __Host- HttpOnly cookie with a CSRF token.
 // `/auth/login?prompt=login` forces a fresh authentication (max_age=0); that is
 // the step-up path for privileged actions (see requireRecentAuth).
-export function authRoutes(config: Config, oidc: OidcService | undefined, sessions: SessionStore, store: Store, notifier?: Notifier): Hono {
+export type OidcSource = OidcService | (() => Promise<OidcService | undefined>);
+
+export function authRoutes(config: Config, oidc: OidcSource | undefined, sessions: SessionStore, store: Store, notifier?: Notifier): Hono {
     const app = new Hono();
     const loginLimiter = new RateLimiter(30, 60_000);
     const secure = config.cookieSecure;
 
-    const notConfigured = () => new Response("OIDC is not configured.", { status: 503 });
+    // The provider may be looked up only when first needed (see OidcService.retrying).
+    const provider = async (): Promise<OidcService | undefined> => (typeof oidc === "function" ? oidc() : oidc);
+    // Sign-in is off on this server or its provider cannot be reached: the sign-in page says so in words.
+    const unavailable = (c: Context) => c.redirect("/login?auth_error=unavailable");
 
     const safeNext = (requested: string | undefined): string => {
         // After signing in, people go to their studio unless they were heading somewhere.
@@ -54,13 +59,14 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             writeCookie(c, "session", secure, id);
             return c.redirect(safeNext(c.req.query("next")));
         }
-        if (!oidc) return notConfigured();
         if (!loginLimiter.allow(clientIp(c))) return c.json({ error: "too many requests" }, 429);
         const next = safeNext(c.req.query("next"));
         const state = randomState();
         const nonce = randomNonce();
         const codeVerifier = randomCodeVerifier();
         const maxAge = c.req.query("prompt") === "login" ? 0 : undefined;
+        const oidc = await provider();
+        if (!oidc) return unavailable(c);
         // The identity provider may be out of reach: say so on the sign-in page instead of a bare error.
         let url: string;
         try {
@@ -75,7 +81,8 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
     });
 
     app.get("/auth/callback", async (c) => {
-        if (!oidc) return notConfigured();
+        const oidc = await provider();
+        if (!oidc) return unavailable(c);
         const flowId = readCookie(c, "oidc", secure);
         const flow = flowId ? sessions.takeFlow(flowId) : undefined;
         clearCookie(c, "oidc", secure);
@@ -161,7 +168,8 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             await sessions.destroySession(sid);
         }
         clearCookie(c, "session", secure);
-        const redirect = oidc ? await oidc.logoutUrl().catch(() => undefined) : undefined;
+        const service = await provider();
+        const redirect = service ? await service.logoutUrl().catch(() => undefined) : undefined;
         return c.json({ ok: true, redirect: redirect ?? null });
     });
 

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { OrgRole } from "@atelier/shared";
 import { createApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
+import type { OidcSource } from "../src/routes/auth.ts";
 import { type AgentRunInput, type AgentRuntime, RunInterrupted } from "../src/services/agent.ts";
 import { ensurePersonalStudio } from "../src/services/bootstrap.ts";
 import type { ModelCatalog } from "../src/services/catalog.ts";
@@ -13,7 +14,6 @@ import type { CoverTaker } from "../src/services/cover.ts";
 import type { Hosting } from "../src/services/hosting.ts";
 import type { MediaStorage } from "../src/services/mediaStorage.ts";
 import type { Mailer } from "../src/services/notifier.ts";
-import type { OidcService } from "../src/services/oidc.ts";
 import { LocalRuntime } from "../src/services/runtime.ts";
 import { SessionStore } from "../src/services/sessions.ts";
 import { MemoryStore } from "../src/store/memory.ts";
@@ -65,7 +65,7 @@ export function fakeAgent(): AgentRuntime & { calls: AgentRunInput[]; hold: () =
 
 export async function makeApp(
     env: Record<string, string> = {},
-    oidc?: OidcService,
+    oidc?: OidcSource,
     extra: {
         catalog?: ModelCatalog;
         providerFetch?: typeof fetch;

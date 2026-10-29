@@ -17,6 +17,10 @@ const AUTH_ERRORS: Record<string, { title: string; body: string }> = {
         title: "We couldn't confirm your e-mail.",
         body: "Your identity provider didn't vouch for that address. Try another account.",
     },
+    unavailable: {
+        title: "Signing in isn't working right now.",
+        body: "Atelier couldn't reach the sign-in service. Nothing was changed. Please try again in a minute.",
+    },
     failed: {
         title: "Sign-in didn't go through.",
         body: "Nothing was changed. Please try again.",
