@@ -3,6 +3,7 @@ import type { Config } from "../config.ts";
 import { clientIp, RateLimiter, sameOrigin } from "../security.ts";
 import { acceptInvitations, ensurePersonalStudio } from "../services/bootstrap.ts";
 import { clearCookie, readCookie, writeCookie } from "../services/cookies.ts";
+import type { Notifier } from "../services/notifier.ts";
 import { type OidcService, randomCodeVerifier, randomNonce, randomState } from "../services/oidc.ts";
 import type { SessionStore } from "../services/sessions.ts";
 import type { Store } from "../store/types.ts";
@@ -12,7 +13,7 @@ import type { Store } from "../store/types.ts";
 // group claim, session in a __Host- HttpOnly cookie with a CSRF token.
 // `/auth/login?prompt=login` forces a fresh authentication (max_age=0); that is
 // the step-up path for privileged actions (see requireRecentAuth).
-export function authRoutes(config: Config, oidc: OidcService | undefined, sessions: SessionStore, store: Store): Hono {
+export function authRoutes(config: Config, oidc: OidcService | undefined, sessions: SessionStore, store: Store, notifier?: Notifier): Hono {
     const app = new Hono();
     const loginLimiter = new RateLimiter(30, 60_000);
     const secure = config.cookieSecure;
@@ -98,7 +99,7 @@ export function authRoutes(config: Config, oidc: OidcService | undefined, sessio
             // Their own studio (made now if this is their first time), plus any
             // studios they have been added to.
             await ensurePersonalStudio(store, user);
-            await acceptInvitations(store, user);
+            await acceptInvitations(store, user, notifier);
 
             // A fresh session id on every sign-in (no fixation); replace any old one.
             const old = readCookie(c, "session", secure);

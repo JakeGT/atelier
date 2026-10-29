@@ -11,6 +11,7 @@ import { timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { OpenCodeAgent } from "../services/agent.ts";
+import { takeCover } from "../services/cover.ts";
 import { RunTracker } from "../services/runs.ts";
 import { startAgentRun } from "../services/runtime.ts";
 import { Workspace } from "../services/workspace.ts";
@@ -129,6 +130,37 @@ app.post("/seed", async (c) => {
         return c.json({ sha: result });
     } catch (err) {
         return c.json({ error: (err as Error).message }, 400);
+    }
+});
+
+// Files written by the platform itself into an existing website (its look), saved as a version.
+app.post("/write", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { files?: unknown; message?: unknown } | null;
+    const files = Array.isArray(body?.files)
+        ? body.files.filter((f): f is { path: string; content: string } => typeof f?.path === "string" && typeof f?.content === "string")
+        : null;
+    if (!files || files.length === 0 || files.length > 20) return c.json({ error: "files required" }, 400);
+    const message = typeof body?.message === "string" ? body.message.slice(0, 120) : "Changed by Atelier";
+    try {
+        const result = await runs.exclusive(() => workspace.write(files, message));
+        if (result === "busy") return c.json({ error: "busy" }, 409);
+        return c.json({ sha: result });
+    } catch (err) {
+        return c.json({ error: (err as Error).message }, 400);
+    }
+});
+
+// A picture of the home page as it is now, for the website's card. Read-only: it may be taken while a request is worked on.
+app.post("/cover", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { apiUrl?: unknown; agentToken?: unknown } | null;
+    if (typeof body?.apiUrl !== "string" || typeof body.agentToken !== "string")
+        return c.json({ error: "apiUrl and agentToken required" }, 400);
+    try {
+        const picture = await takeCover(workspace.dir, body.apiUrl, body.agentToken);
+        if (!picture) return c.body(null, 204);
+        return new Response(new Uint8Array(picture), { headers: { "content-type": "image/webp" } });
+    } catch (err) {
+        return c.json({ error: (err as Error).message }, 500);
     }
 });
 

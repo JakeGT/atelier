@@ -17,11 +17,17 @@ import type {
     User,
 } from "@atelier/shared";
 import type {
+    AgentQuestionSet,
+    AgentQuestionStore,
     AgentSessionStore,
     AuditStore,
     ContentStore,
     DeploymentStore,
     DomainStore,
+    FeedbackReport,
+    FeedbackStore,
+    FormStore,
+    FormSubmission,
     InvitationStore,
     LoginSession,
     LoginSessionStore,
@@ -30,11 +36,17 @@ import type {
     MessageStore,
     Notice,
     NotificationStore,
+    OperatorVisit,
+    OperatorVisitStore,
     OrganizationStore,
+    ProjectMemberStore,
+    ProjectRole,
     ProjectStore,
     ProviderKeyStore,
     ReleaseStore,
     Store,
+    StudioTemplate,
+    StudioTemplateStore,
     UsageStore,
     UsageTotals,
     UserStore,
@@ -126,6 +138,13 @@ export class MemoryStore implements Store {
             if (!org || org.personalOf || [...this.orgMap.values()].some((o) => o.personalOf === userId)) return false;
             this.orgMap.set(id, { ...org, personalOf: userId });
             return true;
+        },
+        delete: async (id) => {
+            for (const p of [...this.projectMap.values()]) if (p.tenantId === id) await this.projects.delete(id, p.id);
+            for (const [k, m] of this.membershipMap) if (m.tenantId === id) this.membershipMap.delete(k);
+            for (const [k, i] of this.invitationMap) if (i.tenantId === id) this.invitationMap.delete(k);
+            for (const k of [...this.providerKeyMap.keys()]) if (k.startsWith(`${id}\0`)) this.providerKeyMap.delete(k);
+            this.orgMap.delete(id);
         },
         listAll: async () => {
             const since = Date.now() - 30 * 86_400_000;
@@ -276,6 +295,17 @@ export class MemoryStore implements Store {
                 at: Date.now(),
             });
         },
+        monthly: async (tenantId, since) => {
+            const sums = new Map<string, { month: string; kind: string; units: number }>();
+            for (const e of this.usageLog) {
+                if (e.tenantId !== tenantId || e.at < since.getTime()) continue;
+                const month = new Date(e.at).toISOString().slice(0, 7);
+                const row = sums.get(key(month, e.kind)) ?? { month, kind: e.kind, units: 0 };
+                row.units += e.units;
+                sums.set(key(month, e.kind), row);
+            }
+            return [...sums.values()].sort((a, b) => b.month.localeCompare(a.month));
+        },
         totals: async (tenantId, since) => {
             const sums = new Map<string, UsageTotals>();
             for (const e of this.usageLog) {
@@ -309,6 +339,8 @@ export class MemoryStore implements Store {
                 template: input.template ?? null,
                 agentInstructions: null,
                 agentModel: null,
+                askLevel: 1,
+                coverAt: null,
                 archivedAt: null,
                 createdAt: now(),
             };
@@ -318,6 +350,10 @@ export class MemoryStore implements Store {
         clearTemplate: async (tenantId, id) => {
             const p = this.projectMap.get(id);
             if (p && p.tenantId === tenantId) this.projectMap.set(id, { ...p, template: null });
+        },
+        setCover: async (tenantId, id, at) => {
+            const p = this.projectMap.get(id);
+            if (p && p.tenantId === tenantId) this.projectMap.set(id, { ...p, coverAt: at.toISOString() });
         },
         setHosting: async (tenantId, id, hosting) => {
             const p = this.projectMap.get(id);
@@ -337,6 +373,7 @@ export class MemoryStore implements Store {
                 ...p,
                 name: patch.name ?? p.name,
                 agentInstructions: patch.agentInstructions === undefined ? p.agentInstructions : patch.agentInstructions,
+                askLevel: patch.askLevel ?? p.askLevel,
                 agentModel: patch.agentModel === undefined ? p.agentModel : patch.agentModel,
                 ...(patch.archived === undefined
                     ? {}
@@ -437,6 +474,12 @@ export class MemoryStore implements Store {
             [...this.contentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId),
         snapshot: async (tenantId, projectId) =>
             [...this.contentMap.values()].filter((d) => d.tenantId === tenantId && d.projectId === projectId && d.published !== null),
+        recentRevisions: async (tenantId, projectId, limit) =>
+            [...this.contentMap.values()]
+                .filter((d) => d.tenantId === tenantId && d.projectId === projectId)
+                .flatMap((d) => (this.revisionMap.get(d.id) ?? []).map((r) => ({ ...r, kind: d.kind, slug: d.slug })))
+                .sort((x, y) => y.createdAt.localeCompare(x.createdAt) || y.rev - x.rev)
+                .slice(0, limit),
         revisions: async (tenantId, documentId) => {
             const doc = this.contentMap.get(documentId);
             if (!doc || doc.tenantId !== tenantId) return [];
@@ -679,6 +722,100 @@ export class MemoryStore implements Store {
         admins: async () => [...this.userMap.values()].filter((u) => u.admin).map((u) => u.id),
     };
 
+    private readonly projectRoles = new Map<string, { tenantId: string; projectId: string; userId: string; role: ProjectRole }>();
+    projectMembers: ProjectMemberStore = {
+        list: async (tenantId, projectId) =>
+            [...this.projectRoles.values()]
+                .filter((r) => r.tenantId === tenantId && r.projectId === projectId)
+                .map(({ userId, role }) => ({ userId, role })),
+        set: async (tenantId, projectId, userId, role) => {
+            const project = this.projectMap.get(projectId);
+            if (!project || project.tenantId !== tenantId) return;
+            if (role === null) this.projectRoles.delete(key(projectId, userId));
+            else this.projectRoles.set(key(projectId, userId), { tenantId, projectId, userId, role });
+        },
+        forUser: async (tenantId, userId) =>
+            [...this.projectRoles.values()]
+                .filter((r) => r.tenantId === tenantId && r.userId === userId && this.projectMap.has(r.projectId))
+                .map(({ projectId, role }) => ({ projectId, role })),
+    };
+
+    private readonly questionLog: (AgentQuestionSet & { tenantId: string })[] = [];
+    questions: AgentQuestionStore = {
+        ask: async (input) => {
+            for (const q of this.questionLog) if (q.projectId === input.projectId && q.closedAt === null) q.closedAt = now();
+            const made = { ...input, answers: null, askedAt: now(), closedAt: null };
+            this.questionLog.push(made);
+            const { tenantId: _t, ...out } = made;
+            return out;
+        },
+        open: async (tenantId, projectId) => {
+            const q = this.questionLog.find((x) => x.tenantId === tenantId && x.projectId === projectId && x.closedAt === null);
+            if (!q || !this.projectMap.has(projectId)) return null;
+            const { tenantId: _t, ...out } = q;
+            return out;
+        },
+        close: async (tenantId, projectId, id, answers) => {
+            const q = this.questionLog.find(
+                (x) => x.id === id && x.tenantId === tenantId && x.projectId === projectId && x.closedAt === null,
+            );
+            if (!q) return false;
+            q.answers = answers;
+            q.closedAt = now();
+            return true;
+        },
+    };
+
+    private readonly formLog: (FormSubmission & { tenantId: string })[] = [];
+    forms: FormStore = {
+        add: async (input) => {
+            const project = this.projectMap.get(input.projectId);
+            if (!project || project.tenantId !== input.tenantId) throw new Error("project not found");
+            const made = { ...input, createdAt: now(), readAt: null };
+            this.formLog.unshift(made);
+            const { tenantId: _t, ...out } = made;
+            return out;
+        },
+        list: async (tenantId, projectId, limit = 500) =>
+            this.formLog
+                .filter((f) => f.tenantId === tenantId && f.projectId === projectId && this.projectMap.has(f.projectId))
+                .slice(0, limit)
+                .map(({ tenantId: _t, ...f }) => f),
+        unread: async (tenantId, projectId) =>
+            this.formLog.filter(
+                (f) => f.tenantId === tenantId && f.projectId === projectId && f.readAt === null && this.projectMap.has(f.projectId),
+            ).length,
+        markRead: async (tenantId, projectId) => {
+            for (const f of this.formLog) if (f.tenantId === tenantId && f.projectId === projectId && f.readAt === null) f.readAt = now();
+        },
+        remove: async (tenantId, projectId, id) => {
+            const i = this.formLog.findIndex((f) => f.id === id && f.tenantId === tenantId && f.projectId === projectId);
+            if (i >= 0) this.formLog.splice(i, 1);
+        },
+        purgeBefore: async (tenantId, before) => {
+            const old = this.formLog.filter((f) => f.tenantId === tenantId && new Date(f.createdAt).getTime() < before.getTime());
+            for (const f of old) this.formLog.splice(this.formLog.indexOf(f), 1);
+            return old.length;
+        },
+    };
+
+    private readonly templateMap = new Map<string, StudioTemplate>();
+    studioTemplates: StudioTemplateStore = {
+        create: async ({ createdBy: _by, ...t }) => {
+            const made = { ...t, createdAt: now() };
+            this.templateMap.set(made.id, made);
+            return made;
+        },
+        list: async (tenantId) => [...this.templateMap.values()].filter((t) => t.tenantId === tenantId),
+        get: async (tenantId, id) => {
+            const t = this.templateMap.get(id);
+            return t && t.tenantId === tenantId ? t : null;
+        },
+        remove: async (tenantId, id) => {
+            if (this.templateMap.get(id)?.tenantId === tenantId) this.templateMap.delete(id);
+        },
+    };
+
     private readonly mediaMap = new Map<string, MediaAsset>();
     media: MediaStore = {
         create: async (asset) => {
@@ -697,7 +834,7 @@ export class MemoryStore implements Store {
         describe: async (tenantId, projectId, id, patch) => {
             const m = this.mediaMap.get(id);
             if (!m || m.tenantId !== tenantId || m.projectId !== projectId) return null;
-            const next = { ...m, ...patch };
+            const next = { ...m, alt: patch.alt, decorative: patch.decorative, focal: patch.focal === undefined ? m.focal : patch.focal };
             this.mediaMap.set(id, next);
             return next;
         },
@@ -714,6 +851,44 @@ export class MemoryStore implements Store {
             ),
         purge: async (tenantId, id) => {
             if (this.mediaMap.get(id)?.tenantId === tenantId) this.mediaMap.delete(id);
+        },
+    };
+
+    private readonly visits = new Map<string, OperatorVisit>();
+    operatorVisits: OperatorVisitStore = {
+        start: async (userId, studioId, until) => {
+            const visit = {
+                userId,
+                studioId,
+                startedAt: this.visits.get(`${userId}:${studioId}`)?.startedAt ?? now(),
+                until: until.toISOString(),
+            };
+            this.visits.set(`${userId}:${studioId}`, visit);
+            return { ...visit };
+        },
+        end: async (userId, studioId) => this.visits.delete(`${userId}:${studioId}`),
+        active: async (userId, at = new Date()) =>
+            [...this.visits.values()].filter((v) => v.userId === userId && new Date(v.until) > at).map((v) => ({ ...v })),
+    };
+
+    private readonly reports: FeedbackReport[] = [];
+    feedback: FeedbackStore = {
+        add: async (report) => {
+            const made: FeedbackReport = { ...report, status: "open", createdAt: now(), closedAt: null };
+            this.reports.unshift(made);
+            return { ...made };
+        },
+        list: async ({ status, limit = 500 } = {}) =>
+            this.reports
+                .filter((r) => !status || r.status === status)
+                .slice(0, limit)
+                .map((r) => ({ ...r })),
+        setStatus: async (id, status) => {
+            const r = this.reports.find((x) => x.id === id);
+            if (!r) return null;
+            r.status = status;
+            r.closedAt = status === "done" ? now() : null;
+            return { ...r };
         },
     };
 

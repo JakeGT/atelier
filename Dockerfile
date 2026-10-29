@@ -52,6 +52,8 @@ COPY apps/server/assets apps/server/assets
 
 # ---- server (control plane) ----------------------------------------------------------------------------
 FROM app AS server
+# ffmpeg: a still picture is taken from each uploaded video (services/media.ts).
+RUN apk add --no-cache ffmpeg
 ENV HOST=0.0.0.0 PORT=8080 WEB_DIST_DIR=/app/web RUNTIME_MODE=container
 COPY --from=web /src/apps/web/dist /app/web
 USER node
@@ -62,15 +64,21 @@ CMD ["node", "apps/server/src/main.ts"]
 # ---- runtime (per-project agent workspace) --------------------------------------------------------------
 FROM app AS runtime
 ARG OPENCODE_VERSION=1.18.35
+# ripgrep: the assistant's engine searches files with it, and downloads it from GitHub if it is
+# not here; having it here is what lets github.com stay off the workspaces' allow-list.
 # Chromium and a few fonts: the assistant looks at the pages it builds (mcp/look.ts).
-RUN apk add --no-cache git curl chromium font-liberation font-dejavu font-noto-emoji && \
+# curl stays: the assistant downloads fonts, pictures and libraries into the website (ADR-0022).
+# Media tools: the assistant edits and converts pictures and clips itself (resize, crop, JPEG to
+# WebP, video to GIF, contact sheets): ffmpeg, ImageMagick, cwebp/gif2webp, gifsicle, pngquant, jpegoptim.
+RUN apk add --no-cache git curl ripgrep chromium font-liberation font-dejavu font-noto-emoji \
+        ffmpeg imagemagick imagemagick-jpeg imagemagick-webp imagemagick-svg imagemagick-tiff imagemagick-heic \
+        libwebp-tools gifsicle pngquant jpegoptim && \
     ARCH=$([ "$(uname -m)" = "aarch64" ] && echo arm64 || echo x64) && \
     curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}-musl.tar.gz" -o /tmp/opencode.tgz && \
     tar -xzf /tmp/opencode.tgz -C /tmp && \
     mv /tmp/opencode /usr/local/bin/opencode && \
     chmod +x /usr/local/bin/opencode && \
     rm /tmp/opencode.tgz && \
-    apk del curl && \
     # The project volume is mounted here; a new named volume copies this ownership.
     mkdir -p /workspace && chown node:node /workspace
 ENV WORKSPACE_DIR=/workspace AGENT_STATE_DIR=/tmp/agent PORT=8090 HOME=/tmp/agent CHROMIUM_PATH=/usr/bin/chromium

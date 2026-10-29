@@ -9,6 +9,8 @@ export const PERMISSIONS = [
     "org.read",
     "org.manage",
     "org.members",
+    // deleting the studio itself, and downloading everything in it: the owner only
+    "org.delete",
     // the studio's own API keys for model providers (BYOK)
     "secrets.manage",
     // projects
@@ -63,6 +65,7 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = {
         "domain.manage",
     ],
     owner: [
+        "org.delete",
         "org.read",
         "org.manage",
         "org.members",

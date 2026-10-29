@@ -1,6 +1,7 @@
-import { ArrowLeft, Crosshair, History, Images, Search, Type, Undo2, Unlink } from "lucide-react";
+import { ArrowLeft, Crosshair, History, Images, Inbox, Search, Type, Undo2, Unlink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MediaLibrary, MediaProvider } from "../editor/Media";
+import { Messages } from "../editor/Messages";
 import { countPieces, documentName, fieldsOf, WordingForm } from "../editor/Wording";
 import type { ContentDocument, ContentRevision, Org, Project, Session, SitePage } from "../lib/api";
 import { can, orgApi } from "../lib/api";
@@ -13,6 +14,7 @@ interface Props {
     session: Session;
     theme: Theme;
     onToggleTheme: () => void;
+    startOn?: "wording" | "files" | "messages";
 }
 
 const unpublished = (d: ContentDocument): boolean => JSON.stringify(d.draft) !== JSON.stringify(d.published);
@@ -48,11 +50,11 @@ const LABEL_REQUEST =
 // in the preview beside it, and clicking something in the preview finds its
 // field. Wording that no page shows is said to be so, plainly, with the way to
 // fix it. (ADR-0014)
-export function Content({ project, org, session, theme, onToggleTheme }: Props) {
+export function Content({ project, org, session, theme, onToggleTheme, startOn = "wording" }: Props) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const pid = project.id;
-    const canEdit = can.edit(org.role) && project.archivedAt === null;
+    const canEdit = can.edit(project.myRole ?? org.role) && project.archivedAt === null;
     const editor = `/o/${org.slug}/p/${project.slug}`;
 
     const [documents, setDocuments] = useState<ContentDocument[] | null>(null);
@@ -63,7 +65,15 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [previewKey, setPreviewKey] = useState(0);
     const [page, setPage] = useState("index.html");
-    const [tab, setTab] = useState<"wording" | "files">("wording");
+    const [tab, setTab] = useState<"wording" | "files" | "messages">(startOn);
+    // How many messages from visitors have not been looked at.
+    const [unread, setUnread] = useState(0);
+    useEffect(() => {
+        a.listMessages(pid)
+            .then((box) => setUnread(box.unread))
+            .catch(() => undefined);
+    }, [a, pid]);
+    const seen = useCallback(() => setUnread(0), []);
 
     const load = useCallback(async () => {
         try {
@@ -233,6 +243,10 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                 </header>
 
                 <div className="content-head">
+                    {/* On a phone the bar has no room for the way back, so it is here, in words. */}
+                    <button type="button" className="link content-back" onClick={() => navigate(editor)}>
+                        <ArrowLeft /> Back to the editor
+                    </button>
                     <p className="eyebrow">{project.name}</p>
                     <h1 className="display">
                         Its <em>content.</em>
@@ -271,9 +285,23 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                     >
                         <Images /> Pictures and files
                     </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === "messages"}
+                        className={tab === "messages" ? "on" : ""}
+                        onClick={() => setTab("messages")}
+                    >
+                        <Inbox /> Messages from visitors
+                        {unread > 0 && <span className="chip chip-draft">{unread} new</span>}
+                    </button>
                 </div>
 
-                {tab === "files" ? (
+                {tab === "messages" ? (
+                    <div className="content-files">
+                        <Messages org={org.slug} projectId={pid} canEdit={canEdit} onSeen={seen} />
+                    </div>
+                ) : tab === "files" ? (
                     <div className="content-files">
                         <MediaLibrary />
                     </div>
@@ -316,7 +344,7 @@ export function Content({ project, org, session, theme, onToggleTheme }: Props) 
                                 )}
                             </div>
                         )}
-                        {loose.length === 0 && looseCount > 0 && (
+                        {looseCount > 0 && (
                             <div className="content-loose" role="status">
                                 <Unlink />
                                 <div>

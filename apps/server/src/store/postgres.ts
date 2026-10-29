@@ -19,11 +19,17 @@ import type {
 } from "@atelier/shared";
 import postgres from "postgres";
 import type {
+    AgentQuestionSet,
+    AgentQuestionStore,
     AgentSessionStore,
     AuditStore,
     ContentStore,
     DeploymentStore,
     DomainStore,
+    FeedbackReport,
+    FeedbackStore,
+    FormStore,
+    FormSubmission,
     InvitationStore,
     LoginSessionStore,
     MediaStore,
@@ -31,11 +37,17 @@ import type {
     MessageStore,
     Notice,
     NotificationStore,
+    OperatorVisit,
+    OperatorVisitStore,
     OrganizationStore,
+    ProjectMemberStore,
+    ProjectRole,
     ProjectStore,
     ProviderKeyStore,
     ReleaseStore,
     Store,
+    StudioTemplate,
+    StudioTemplateStore,
     UsageStore,
     UserStore,
 } from "./types.ts";
@@ -95,6 +107,8 @@ interface ProjectRow {
     hosting_ref: string | null;
     template: string | null;
     agent_instructions: string | null;
+    ask_level: number;
+    cover_at: Ts | null;
     agent_model: string | null;
     archived_at: Ts | null;
     created_at: Ts;
@@ -201,7 +215,7 @@ const firstRow = <T>(rows: readonly T[]): T => {
 const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of, flags";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
-    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, archived_at, created_at";
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, ask_level, cover_at, archived_at, created_at";
 const CONTENT_COLS =
     "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, fields, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
@@ -254,6 +268,8 @@ const rowToProject = (r: ProjectRow): Project => ({
     template: r.template,
     agentInstructions: r.agent_instructions,
     agentModel: r.agent_model,
+    askLevel: r.ask_level,
+    coverAt: iso(r.cover_at),
     archivedAt: iso(r.archived_at),
     createdAt: isoNow(r.created_at),
 });
@@ -355,8 +371,14 @@ export class PostgresStore implements Store {
     deployments: DeploymentStore;
     domains: DomainStore;
     media: MediaStore;
+    projectMembers: ProjectMemberStore;
+    studioTemplates: StudioTemplateStore;
+    forms: FormStore;
+    questions: AgentQuestionStore;
     notifications: NotificationStore;
     audit: AuditStore;
+    feedback: FeedbackStore;
+    operatorVisits: OperatorVisitStore;
     loginSessions: LoginSessionStore;
 
     constructor(databaseUrl: string) {
@@ -457,6 +479,13 @@ export class PostgresStore implements Store {
                     if (patch.status) await tx`UPDATE control.tenants SET status = ${patch.status} WHERE id = ${id}`;
                     return rowToOrg(firstRow(rows));
                 }),
+            delete: async (id) => {
+                await this.withTenant(id, async (tx) => {
+                    // Everything under the studio goes with it (ON DELETE CASCADE).
+                    await tx`DELETE FROM organizations WHERE id = ${id}`;
+                    await tx`DELETE FROM control.tenants WHERE id = ${id}`;
+                });
+            },
             // The operator's view. `control.tenants` lists every studio (it is not
             // tenant-scoped); each studio's own figures are then read inside its tenant.
             listAll: async () => {
@@ -624,6 +653,13 @@ export class PostgresStore implements Store {
                         WHERE occurred_at >= ${since} GROUP BY project_id, kind`;
                     return rows.map((r) => ({ projectId: r.project_id, kind: r.kind, units: Number(r.units) }));
                 }),
+            monthly: async (tenantId, since) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ month: string; kind: string; units: string }[]>`
+                        SELECT to_char(date_trunc('month', occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month, kind, COALESCE(SUM(units), 0) AS units
+                        FROM usage_events WHERE occurred_at >= ${since} GROUP BY 1, 2 ORDER BY 1 DESC`;
+                    return rows.map((r) => ({ month: r.month, kind: r.kind, units: Number(r.units) }));
+                }),
             total: async (tenantId, kinds, since) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<{ units: string }[]>`
@@ -662,6 +698,9 @@ export class PostgresStore implements Store {
             clearTemplate: async (tenantId, id) => {
                 await this.withTenant(tenantId, (tx) => tx`UPDATE projects SET template = NULL WHERE id = ${id}`);
             },
+            setCover: async (tenantId, id, at) => {
+                await this.withTenant(tenantId, (tx) => tx`UPDATE projects SET cover_at = ${at} WHERE id = ${id}`);
+            },
             setHosting: async (tenantId, id, hosting) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<ProjectRow[]>`
@@ -680,6 +719,7 @@ export class PostgresStore implements Store {
                             name = COALESCE(${patch.name ?? null}, name),
                             agent_instructions = CASE WHEN ${patch.agentInstructions !== undefined} THEN ${patch.agentInstructions ?? null} ELSE agent_instructions END,
                             agent_model = CASE WHEN ${patch.agentModel !== undefined} THEN ${patch.agentModel ?? null} ELSE agent_model END,
+                            ask_level = COALESCE(${patch.askLevel ?? null}, ask_level),
                             archived_at = CASE WHEN ${archive}::boolean IS NULL THEN archived_at WHEN ${archive}::boolean THEN now() ELSE NULL END,
                             status = CASE WHEN ${archive}::boolean IS NULL THEN status WHEN ${archive}::boolean THEN 'archived' ELSE 'active' END,
                             updated_at = now()
@@ -744,6 +784,14 @@ export class PostgresStore implements Store {
                         SELECT ${tx.unsafe(CONTENT_COLS)} FROM content_documents
                         WHERE project_id = ${projectId} AND published IS NOT NULL ORDER BY kind, slug`;
                     return rows.map(rowToContent);
+                }),
+            recentRevisions: async (tenantId, projectId, limit) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<(RevisionRow & { kind: string; slug: string })[]>`
+                        SELECT r.document_id, r.rev, r.draft, r.updated_by, r.created_at, d.kind, d.slug
+                        FROM content_revisions r JOIN content_documents d ON d.id = r.document_id
+                        WHERE r.project_id = ${projectId} ORDER BY r.created_at DESC, r.rev DESC LIMIT ${limit}`;
+                    return rows.map((r) => ({ ...rowToRevision(r), kind: r.kind, slug: r.slug }));
                 }),
             revisions: async (tenantId, documentId) =>
                 this.withTenant(tenantId, async (tx) => {
@@ -1032,8 +1080,181 @@ export class PostgresStore implements Store {
             admins: async () => (await this.sql<{ id: string }[]>`SELECT id FROM users WHERE admin`).map((r) => r.id),
         };
 
+        this.projectMembers = {
+            list: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ user_id: string; role: ProjectRole }[]>`
+                        SELECT user_id, role FROM project_members WHERE project_id = ${projectId}`;
+                    return rows.map((r) => ({ userId: r.user_id, role: r.role }));
+                }),
+            set: async (tenantId, projectId, userId, role) => {
+                await this.withTenant(tenantId, (tx) =>
+                    role === null
+                        ? tx`DELETE FROM project_members WHERE project_id = ${projectId} AND user_id = ${userId}`
+                        : tx`
+                            INSERT INTO project_members (project_id, tenant_id, user_id, role) VALUES (${projectId}, ${tenantId}, ${userId}, ${role})
+                            ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+                );
+            },
+            forUser: async (tenantId, userId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ project_id: string; role: ProjectRole }[]>`
+                        SELECT project_id, role FROM project_members WHERE user_id = ${userId}`;
+                    return rows.map((r) => ({ projectId: r.project_id, role: r.role }));
+                }),
+        };
+
+        interface QuestionRow {
+            id: string;
+            project_id: string;
+            session_id: string | null;
+            questions: AgentQuestionSet["questions"];
+            answers: string[] | null;
+            asked_at: Ts;
+            closed_at: Ts | null;
+        }
+        const rowToQuestion = (r: QuestionRow): AgentQuestionSet => ({
+            id: r.id,
+            projectId: r.project_id,
+            sessionId: r.session_id,
+            questions: r.questions ?? [],
+            answers: r.answers,
+            askedAt: isoNow(r.asked_at),
+            closedAt: r.closed_at ? isoNow(r.closed_at) : null,
+        });
+        const QUESTION_COLS = "id, project_id, session_id, questions, answers, asked_at, closed_at";
+        this.questions = {
+            ask: async (q) =>
+                this.withTenant(q.tenantId, async (tx) => {
+                    await tx`UPDATE agent_questions SET closed_at = now() WHERE project_id = ${q.projectId} AND closed_at IS NULL`;
+                    const rows = await tx<QuestionRow[]>`
+                        INSERT INTO agent_questions (id, project_id, tenant_id, session_id, questions)
+                        VALUES (${q.id}, ${q.projectId}, ${q.tenantId}, ${q.sessionId}, ${json(q.questions as unknown as Json)})
+                        RETURNING ${tx.unsafe(QUESTION_COLS)}`;
+                    return rowToQuestion(firstRow(rows));
+                }),
+            open: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<QuestionRow[]>`
+                        SELECT ${tx.unsafe(QUESTION_COLS)} FROM agent_questions
+                        WHERE project_id = ${projectId} AND closed_at IS NULL ORDER BY asked_at DESC LIMIT 1`;
+                    return rows[0] ? rowToQuestion(rows[0]) : null;
+                }),
+            close: async (tenantId, projectId, id, answers, userId) =>
+                this.withTenant(
+                    tenantId,
+                    async (tx) =>
+                        (
+                            await tx`
+                                UPDATE agent_questions SET answers = ${answers === null ? null : json(answers as unknown as Json)}, closed_at = now(), answered_by = ${userId}
+                                WHERE id = ${id} AND project_id = ${projectId} AND closed_at IS NULL`
+                        ).count > 0,
+                ),
+        };
+
+        interface FormRow {
+            id: string;
+            project_id: string;
+            form: string;
+            data: Record<string, string>;
+            preview: boolean;
+            created_at: Ts;
+            read_at: Ts | null;
+        }
+        const rowToForm = (r: FormRow): FormSubmission => ({
+            id: r.id,
+            projectId: r.project_id,
+            form: r.form,
+            data: r.data ?? {},
+            preview: r.preview,
+            createdAt: isoNow(r.created_at),
+            readAt: r.read_at ? isoNow(r.read_at) : null,
+        });
+        const FORM_COLS = "id, project_id, form, data, preview, created_at, read_at";
+        this.forms = {
+            add: async (f) =>
+                this.withTenant(f.tenantId, async (tx) => {
+                    const rows = await tx<FormRow[]>`
+                        INSERT INTO form_submissions (id, project_id, tenant_id, form, data, preview)
+                        VALUES (${f.id}, ${f.projectId}, ${f.tenantId}, ${f.form}, ${json(f.data)}, ${f.preview})
+                        RETURNING ${tx.unsafe(FORM_COLS)}`;
+                    return rowToForm(firstRow(rows));
+                }),
+            list: async (tenantId, projectId, limit = 500) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<FormRow[]>`
+                        SELECT ${tx.unsafe(FORM_COLS)} FROM form_submissions WHERE project_id = ${projectId} ORDER BY created_at DESC LIMIT ${limit}`;
+                    return rows.map(rowToForm);
+                }),
+            unread: async (tenantId, projectId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<
+                        { n: string }[]
+                    >`SELECT count(*) AS n FROM form_submissions WHERE project_id = ${projectId} AND read_at IS NULL`;
+                    return Number(rows[0]?.n ?? 0);
+                }),
+            markRead: async (tenantId, projectId) => {
+                await this.withTenant(
+                    tenantId,
+                    (tx) => tx`UPDATE form_submissions SET read_at = now() WHERE project_id = ${projectId} AND read_at IS NULL`,
+                );
+            },
+            remove: async (tenantId, projectId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM form_submissions WHERE id = ${id} AND project_id = ${projectId}`);
+            },
+            purgeBefore: async (tenantId, before) =>
+                this.withTenant(tenantId, async (tx) => (await tx`DELETE FROM form_submissions WHERE created_at < ${before}`).count),
+        };
+
+        interface TemplateRow {
+            id: string;
+            tenant_id: string;
+            name: string;
+            description: string;
+            files: StudioTemplate["files"];
+            content: StudioTemplate["content"];
+            source_project: string | null;
+            created_at: Ts;
+        }
+        const rowToTemplate = (r: TemplateRow): StudioTemplate => ({
+            id: r.id,
+            tenantId: r.tenant_id,
+            name: r.name,
+            description: r.description,
+            files: r.files ?? [],
+            content: r.content ?? [],
+            sourceProject: r.source_project,
+            createdAt: isoNow(r.created_at),
+        });
+        const TEMPLATE_COLS = "id, tenant_id, name, description, files, content, source_project, created_at";
+        this.studioTemplates = {
+            create: async (t) =>
+                this.withTenant(t.tenantId, async (tx) => {
+                    const rows = await tx<TemplateRow[]>`
+                        INSERT INTO studio_templates (id, tenant_id, name, description, files, content, source_project, created_by)
+                        VALUES (${t.id}, ${t.tenantId}, ${t.name}, ${t.description}, ${json(t.files as unknown as Json)}, ${json(t.content as unknown as Json)},
+                                ${t.sourceProject}, ${t.createdBy})
+                        RETURNING ${tx.unsafe(TEMPLATE_COLS)}`;
+                    return rowToTemplate(firstRow(rows));
+                }),
+            list: async (tenantId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<TemplateRow[]>`SELECT ${tx.unsafe(TEMPLATE_COLS)} FROM studio_templates ORDER BY created_at`;
+                    return rows.map(rowToTemplate);
+                }),
+            get: async (tenantId, id) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<TemplateRow[]>`SELECT ${tx.unsafe(TEMPLATE_COLS)} FROM studio_templates WHERE id = ${id}`;
+                    const r = rows[0];
+                    return r ? rowToTemplate(r) : null;
+                }),
+            remove: async (tenantId, id) => {
+                await this.withTenant(tenantId, (tx) => tx`DELETE FROM studio_templates WHERE id = ${id}`);
+            },
+        };
+
         const MEDIA_COLS =
-            "id, project_id, tenant_id, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by, created_at, deleted_at";
+            "id, project_id, tenant_id, name, kind, mime, width, height, alt, decorative, bytes, variants, focal_x, focal_y, poster, uploaded_by, created_at, deleted_at";
         interface MediaRow {
             id: string;
             project_id: string;
@@ -1047,6 +1268,9 @@ export class PostgresStore implements Store {
             decorative: boolean;
             bytes: string | number | null;
             variants: MediaAsset["variants"];
+            focal_x: number | null;
+            focal_y: number | null;
+            poster: string | null;
             uploaded_by: string | null;
             created_at: Ts;
             deleted_at: Ts | null;
@@ -1064,6 +1288,8 @@ export class PostgresStore implements Store {
             decorative: r.decorative,
             bytes: Number(r.bytes ?? 0),
             variants: r.variants ?? [],
+            focal: r.focal_x !== null && r.focal_y !== null ? { x: Number(r.focal_x), y: Number(r.focal_y) } : null,
+            poster: r.poster,
             uploadedBy: r.uploaded_by,
             createdAt: isoNow(r.created_at),
             deletedAt: r.deleted_at ? isoNow(r.deleted_at) : null,
@@ -1072,9 +1298,9 @@ export class PostgresStore implements Store {
             create: async (a) =>
                 this.withTenant(a.tenantId, async (tx) => {
                     const rows = await tx<MediaRow[]>`
-                        INSERT INTO media_assets (id, project_id, tenant_id, key, name, kind, mime, width, height, alt, decorative, bytes, variants, uploaded_by)
+                        INSERT INTO media_assets (id, project_id, tenant_id, key, name, kind, mime, width, height, alt, decorative, bytes, variants, poster, uploaded_by)
                         VALUES (${a.id}, ${a.projectId}, ${a.tenantId}, ${`${a.tenantId}/${a.projectId}/${a.name}`}, ${a.name}, ${a.kind}, ${a.mime},
-                                ${a.width}, ${a.height}, ${a.alt}, ${a.decorative}, ${a.bytes}, ${json(a.variants as unknown as Json)}, ${a.uploadedBy})
+                                ${a.width}, ${a.height}, ${a.alt}, ${a.decorative}, ${a.bytes}, ${json(a.variants as unknown as Json)}, ${a.poster}, ${a.uploadedBy})
                         RETURNING ${tx.unsafe(MEDIA_COLS)}`;
                     return rowToMedia(firstRow(rows));
                 }),
@@ -1096,7 +1322,9 @@ export class PostgresStore implements Store {
             describe: async (tenantId, projectId, id, patch) =>
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<MediaRow[]>`
-                        UPDATE media_assets SET alt = ${patch.alt}, decorative = ${patch.decorative}
+                        UPDATE media_assets SET alt = ${patch.alt}, decorative = ${patch.decorative},
+                            focal_x = ${patch.focal === undefined ? tx`focal_x` : (patch.focal?.x ?? null)},
+                            focal_y = ${patch.focal === undefined ? tx`focal_y` : (patch.focal?.y ?? null)}
                         WHERE id = ${id} AND project_id = ${projectId} RETURNING ${tx.unsafe(MEDIA_COLS)}`;
                     const r = rows[0];
                     return r ? rowToMedia(r) : null;
@@ -1117,6 +1345,86 @@ export class PostgresStore implements Store {
                 }),
             purge: async (tenantId, id) => {
                 await this.withTenant(tenantId, (tx) => tx`DELETE FROM media_assets WHERE id = ${id} AND deleted_at IS NOT NULL`);
+            },
+        };
+
+        interface VisitRow {
+            user_id: string;
+            studio_id: string;
+            started_at: Ts;
+            until: Ts;
+        }
+        const rowToVisit = (r: VisitRow): OperatorVisit => ({
+            userId: r.user_id,
+            studioId: r.studio_id,
+            startedAt: isoNow(r.started_at),
+            until: isoNow(r.until),
+        });
+        // Not tenant-scoped (like the audit log): only operator code reads or writes it.
+        this.operatorVisits = {
+            start: async (userId, studioId, until) => {
+                const rows = await this.sql<VisitRow[]>`
+                    INSERT INTO operator_visits (user_id, studio_id, until) VALUES (${userId}, ${studioId}, ${until})
+                    ON CONFLICT (user_id, studio_id) DO UPDATE SET until = EXCLUDED.until
+                    RETURNING *`;
+                return rowToVisit(firstRow(rows));
+            },
+            end: async (userId, studioId) =>
+                (await this.sql`DELETE FROM operator_visits WHERE user_id = ${userId} AND studio_id = ${studioId}`).count > 0,
+            active: async (userId, at = new Date()) => {
+                const rows = await this.sql<VisitRow[]>`SELECT * FROM operator_visits WHERE user_id = ${userId} AND until > ${at}`;
+                return rows.map(rowToVisit);
+            },
+        };
+
+        interface ReportRow {
+            id: string;
+            source: "person" | "assistant";
+            kind: string;
+            text: string;
+            context: Record<string, string>;
+            tenant_id: string | null;
+            project_id: string | null;
+            user_id: string | null;
+            status: "open" | "done";
+            created_at: Ts;
+            closed_at: Ts | null;
+        }
+        const rowToReport = (r: ReportRow): FeedbackReport => ({
+            id: r.id,
+            source: r.source,
+            kind: r.kind,
+            text: r.text,
+            context: r.context ?? {},
+            tenantId: r.tenant_id,
+            projectId: r.project_id,
+            userId: r.user_id,
+            status: r.status,
+            createdAt: isoNow(r.created_at),
+            closedAt: r.closed_at ? isoNow(r.closed_at) : null,
+        });
+        // Not tenant-scoped (like the audit log): written from anywhere, read by operator routes only.
+        this.feedback = {
+            add: async (r) => {
+                const rows = await this.sql<ReportRow[]>`
+                    INSERT INTO feedback_reports (id, source, kind, text, context, tenant_id, project_id, user_id)
+                    VALUES (${r.id}, ${r.source}, ${r.kind}, ${r.text}, ${json(r.context)}, ${r.tenantId}, ${r.projectId}, ${r.userId})
+                    RETURNING *`;
+                return rowToReport(firstRow(rows));
+            },
+            list: async ({ status, limit = 500 } = {}) => {
+                const rows = status
+                    ? await this.sql<
+                          ReportRow[]
+                      >`SELECT * FROM feedback_reports WHERE status = ${status} ORDER BY created_at DESC LIMIT ${limit}`
+                    : await this.sql<ReportRow[]>`SELECT * FROM feedback_reports ORDER BY created_at DESC LIMIT ${limit}`;
+                return rows.map(rowToReport);
+            },
+            setStatus: async (id, status) => {
+                const rows = await this.sql<ReportRow[]>`
+                    UPDATE feedback_reports SET status = ${status}, closed_at = ${status === "done" ? this.sql`now()` : null}
+                    WHERE id = ${id} RETURNING *`;
+                return rows[0] ? rowToReport(rows[0]) : null;
             },
         };
 

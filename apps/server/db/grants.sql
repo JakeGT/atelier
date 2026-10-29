@@ -20,15 +20,23 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE ON
         organizations, memberships, projects, content_documents, content_revisions,
         media_assets, releases, release_documents, deployments, agent_sessions, agent_messages,
-        invitations, provider_keys, project_domains, notifications,
+        invitations, provider_keys, project_domains, notifications, project_members, studio_templates, form_submissions, agent_questions,
         users, sessions
         TO atelier_runtime;
     GRANT SELECT, INSERT ON usage_events TO atelier_runtime;
-    GRANT SELECT, INSERT, UPDATE ON control.tenants TO atelier_runtime;
+    -- DELETE: a studio that is deleted leaves the operator's list too.
+    GRANT SELECT, INSERT, UPDATE, DELETE ON control.tenants TO atelier_runtime;
 
     -- The audit log is append-only for the runtime role.
     GRANT SELECT, INSERT ON audit_log TO atelier_runtime;
     REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM atelier_runtime;
+
+    -- Operators' visits to studios: started, ended and read by operator code only.
+    GRANT SELECT, INSERT, UPDATE, DELETE ON operator_visits TO atelier_runtime;
+
+    -- Reports about Atelier itself: written by anyone, read and closed by operator routes.
+    GRANT SELECT, INSERT, UPDATE ON feedback_reports TO atelier_runtime;
+    REVOKE DELETE, TRUNCATE ON feedback_reports FROM atelier_runtime;
 
     GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO atelier_runtime;
     REVOKE ALL ON schema_migrations FROM atelier_runtime;

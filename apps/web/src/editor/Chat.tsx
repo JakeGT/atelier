@@ -1,11 +1,13 @@
-import { ArrowUp, Clock, Lightbulb, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, Clock, Lightbulb, MessageSquareWarning, Play, RotateCcw, Square } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clock, stepDone, stepList, summary } from "../lib/activity";
-import type { Pulse, Run, ThreadMessage } from "../lib/api";
+import { clock, isSaid, stepDone, stepItems, summary } from "../lib/activity";
+import type { AssistantQuestions, Pulse, Run, ThreadMessage } from "../lib/api";
 import { useClickOutside } from "../lib/hooks";
 import { IDEAS } from "../lib/ideas";
 import { Dots } from "../ui/kit";
+import { reportProblem } from "../ui/Report";
+import { AskLevelSlider, QuestionCard } from "./Asking";
 import { UploadButton } from "./Media";
 import { Prose } from "./Prose";
 
@@ -43,6 +45,11 @@ interface ChatProps {
     onMoreTime: () => void;
     onCarryOn: () => void;
     onRetryWorkspace?: () => void;
+    // What the assistant has stopped to ask, and how much it asks on this website.
+    asked?: AssistantQuestions | null;
+    onAnswer?: (answers: string[]) => void;
+    askLevel?: number;
+    onAskLevel?: (level: number) => void;
 }
 
 // "Maren", "Maren and Sol", "Maren, Sol and 2 others"
@@ -57,6 +64,11 @@ export function Chat(props: ChatProps) {
     // A request prepared elsewhere (the Content page's "Ask my assistant to connect it") arrives
     // written out in the box, for the person to read, change and send.
     const [input, setInput] = useState(props.draft ?? "");
+    // A request written elsewhere while the editor is open (Design: "add this section") replaces what is in the box.
+    const draft = props.draft;
+    useEffect(() => {
+        if (draft) setInput(draft);
+    }, [draft]);
     const scroller = useRef<HTMLDivElement>(null);
     const textarea = useRef<HTMLTextAreaElement>(null);
     const busy = run !== null;
@@ -138,7 +150,16 @@ export function Chat(props: ChatProps) {
                                         <p>{m.text}</p>
                                     </>
                                 ) : m.role === "error" ? (
-                                    <p>{m.text}</p>
+                                    <>
+                                        <p>{m.text}</p>
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm"
+                                            onClick={() => reportProblem(`The assistant said: “${m.text}”`)}
+                                        >
+                                            <MessageSquareWarning /> Report this problem
+                                        </button>
+                                    </>
                                 ) : m.role === "note" ? (
                                     <>
                                         <p>{m.text}</p>
@@ -157,6 +178,14 @@ export function Chat(props: ChatProps) {
                                 )}
                             </article>
                         ))}
+                        {props.asked && !run && (
+                            <QuestionCard
+                                key={props.asked.id}
+                                asked={props.asked}
+                                canAnswer={ready}
+                                onAnswer={(list) => props.onAnswer?.(list)}
+                            />
+                        )}
                         {run && <Working run={run} whose={theirs} canAct={ready} onStop={props.onStop} onMoreTime={props.onMoreTime} />}
                     </div>
                 )}
@@ -254,6 +283,9 @@ export function Chat(props: ChatProps) {
                         )}
                     </div>
                 )}
+                {props.onAskLevel && !locked && (
+                    <AskLevelSlider level={props.askLevel ?? 1} onChange={props.onAskLevel} disabled={!ready} />
+                )}
                 <p className="composer-hint mono muted">
                     {busy
                         ? "You can write your next request now and send it when this one finishes."
@@ -264,23 +296,27 @@ export function Chat(props: ChatProps) {
     );
 }
 
-// What the assistant did, one line that opens into the steps.
+// What the assistant did, one line that opens into the steps, with what it said along the
+// way among them. Folded away, so the reply above is the only thing to read unless asked.
 function Steps({ tools, label }: { tools: Message["tools"]; label: string }) {
-    const list = stepList(tools ?? []);
-    if (list.length === 0) return null;
+    const items = stepItems(tools ?? []);
+    const done = items.filter((x) => !x.said).length;
+    if (items.length === 0) return null;
     const line = summary(tools ?? []);
     return (
         <details className="msg-steps">
             <summary>
                 <span className="mono">{line || label}</span>
                 <span className="steps-toggle">
-                    {label}: {list.length} {list.length === 1 ? "step" : "steps"}
+                    {label}: {done} {done === 1 ? "step" : "steps"}
                 </span>
             </summary>
             <ol>
-                {list.map((s, i) => (
+                {items.map((s, i) => (
                     // biome-ignore lint/suspicious/noArrayIndexKey: a fixed list of what happened, in order
-                    <li key={i}>{s}</li>
+                    <li key={i} className={s.said ? "step-said" : ""}>
+                        {s.text}
+                    </li>
                 ))}
             </ol>
         </details>
@@ -316,8 +352,11 @@ function Working({
         return () => clearInterval(t);
     }, []);
 
-    const list = stepList(run.steps);
-    const lastStep = run.steps.at(-1);
+    const items = stepItems(run.steps);
+    const list = items.filter((x) => !x.said);
+    // What it last did, and what it last said about what it is doing.
+    const lastStep = run.steps.filter((x) => !isSaid(x)).at(-1);
+    const note = run.steps.filter(isSaid).at(-1)?.said ?? null;
     const quiet = now - new Date(run.lastActivityAt).getTime();
     const left = new Date(run.deadlineAt).getTime() - now;
     const headline = stopping
@@ -338,6 +377,7 @@ function Working({
                 </span>
                 <span className="mono muted">{clock(now - new Date(run.startedAt).getTime())}</span>
             </div>
+            {note && <p className="working-note">{note}</p>}
             {lastStep && (
                 <p className="working-last">Just finished: {stepDone(lastStep).charAt(0).toLowerCase() + stepDone(lastStep).slice(1)}.</p>
             )}
@@ -349,9 +389,11 @@ function Working({
                     </button>
                     {open && (
                         <ol className="working-steps">
-                            {list.map((s, i) => (
+                            {items.map((s, i) => (
                                 // biome-ignore lint/suspicious/noArrayIndexKey: a growing list of what happened, in order
-                                <li key={i}>{s}</li>
+                                <li key={i} className={s.said ? "step-said" : ""}>
+                                    {s.text}
+                                </li>
                             ))}
                         </ol>
                     )}

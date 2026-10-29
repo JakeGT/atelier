@@ -6,11 +6,11 @@ const allow = (process.env.EGRESS_ALLOW ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-const mode = process.env.EGRESS_MODE === "observe" ? "observe" : "enforce";
+const mode = process.env.EGRESS_MODE === "observe" ? "observe" : process.env.EGRESS_MODE === "open" ? "open" : "enforce";
 const port = Number(process.env.PORT ?? 8888);
 
 if (allow.length === 0 && mode === "enforce") {
-    console.error("EGRESS_ALLOW is empty: nothing would be reachable. Set it, or EGRESS_MODE=observe.");
+    console.error("EGRESS_ALLOW is empty: nothing would be reachable. Set it, or EGRESS_MODE=open.");
     process.exit(1);
 }
 

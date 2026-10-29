@@ -1,4 +1,4 @@
-import { ArrowRight, Bell, Check, LogOut, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
+import { ArrowRight, Bell, Check, LogOut, MessageSquareWarning, Moon, RefreshCw, Sun, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Inbox, Session } from "../lib/api";
@@ -104,6 +104,16 @@ export function UserMenu({
                         }}
                     >
                         <Bell /> Notifications{unread > 0 ? ` (${unread} new)` : ""}
+                    </button>
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                            setOpen(false);
+                            window.dispatchEvent(new CustomEvent("atelier:report", { detail: "" }));
+                        }}
+                    >
+                        <MessageSquareWarning /> Report a problem or suggest an idea
                     </button>
                     {items.length > 0 && <div className="menu-rule" />}
                     {theme && onToggleTheme && (
@@ -218,7 +228,8 @@ function NoticeList({ inbox, onClose, onEmail }: { inbox: Inbox; onClose: () => 
 
 // ---- dialog -------------------------------------------------------------------------
 
-export function Dialog({ onClose, children, wide }: { onClose: () => void; children: ReactNode; wide?: boolean }) {
+// `large`: as big as the window allows, for looking at something closely.
+export function Dialog({ onClose, children, wide, large }: { onClose: () => void; children: ReactNode; wide?: boolean; large?: boolean }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") onClose();
@@ -235,7 +246,7 @@ export function Dialog({ onClose, children, wide }: { onClose: () => void; child
                 if (e.target === e.currentTarget) onClose();
             }}
         >
-            <div className={`dialog ${wide ? "dialog-wide" : ""}`} role="dialog" aria-modal="true">
+            <div className={`dialog ${large ? "dialog-large" : wide ? "dialog-wide" : ""}`} role="dialog" aria-modal="true">
                 {children}
             </div>
         </div>

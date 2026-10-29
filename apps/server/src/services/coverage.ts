@@ -17,7 +17,7 @@ export interface LooseText {
     text: string;
 }
 
-const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image"];
+const BINDINGS = ["data-content", "data-content-rich", "data-content-list", "data-content-image", "data-content-video"];
 // Never wording a visitor reads.
 const SKIP = new Set([
     "script",
@@ -114,6 +114,53 @@ function find(node: DefaultTreeAdapterTypes.ParentNode, tag: string): Element | 
     return null;
 }
 
+// A list bound to content shows every entry as a copy of the first entry's markup.
+// If the page was written with entries that look different from each other (a bar
+// 99% long, the next 41%), that difference is lost: every entry gets the first one's.
+// Returns one sentence per such list.
+export function entriesThatWillMatch(html: string): string[] {
+    const found: string[] = [];
+    // What makes an entry look the way it does, apart from its own bound parts.
+    const look = (el: Element): string[] => {
+        const out: string[] = [];
+        const visit = (node: Element) => {
+            if (!node.attrs.some((a) => a.name === "data-item-percent")) {
+                const style = attr(node, "style");
+                if (style) out.push(squeeze(style));
+            }
+            const cls = attr(node, "class");
+            if (cls) out.push(`.${squeeze(cls)}`);
+            for (const c of node.childNodes) if (isElement(c)) visit(c);
+        };
+        visit(el);
+        return out;
+    };
+    const visit = (node: DefaultTreeAdapterTypes.ParentNode) => {
+        for (const child of node.childNodes) {
+            if (!isElement(child) || SKIP.has(child.tagName)) continue;
+            const ref = attr(child, "data-content-list");
+            if (ref) {
+                const entries = child.childNodes.filter(isElement);
+                const first = entries[0] ? look(entries[0]) : [];
+                const other = entries
+                    .slice(1)
+                    .map(look)
+                    .find((l) => l.join("|") !== first.join("|"));
+                if (other) {
+                    const a = first.find((x, i) => x !== other[i]) ?? first[0] ?? "";
+                    const b = other.find((x, i) => x !== first[i]) ?? other[0] ?? "";
+                    found.push(
+                        `The list ${ref} is written with entries that differ (${a.slice(0, 60)} / ${b.slice(0, 60)}), but every entry is shown as a copy of the first, so they will all look like the first one. Give what differs its own value in each entry (for a bar's length: a number part and data-item-percent on the bar).`,
+                    );
+                }
+            } else visit(child);
+        }
+    };
+    const body = find(parse(html), "body");
+    if (body) visit(body);
+    return found;
+}
+
 export interface PageCoverage {
     path: string;
     title: string;
@@ -143,7 +190,7 @@ export function coverageReport(
     documents: { kind: string; slug: string; draft: Record<string, unknown> | null; fields: { key: string }[] | null }[],
 ): {
     ok: boolean;
-    pages: { page: string; notEditable: LooseText[]; markedButNothingSaved: string[] }[];
+    pages: { page: string; notEditable: LooseText[]; markedButNothingSaved: string[]; entriesWillAllLookTheSame: string[] }[];
     savedButOnNoPage: string[];
     notDescribed: string[];
 } {
@@ -160,17 +207,16 @@ export function coverageReport(
     const report = pages.map((p) => {
         const refs = [...new Set(boundRefs(p.html).map((r) => r.ref))];
         for (const r of refs) shown.add(r);
-        return { page: p.path, notEditable: looseText(p.html, 60), markedButNothingSaved: refs.filter((r) => !saved.has(r)) };
+        return {
+            page: p.path,
+            notEditable: looseText(p.html, 60),
+            markedButNothingSaved: refs.filter((r) => !saved.has(r)),
+            entriesWillAllLookTheSame: entriesThatWillMatch(p.html),
+        };
     });
     const savedButOnNoPage = [...saved].filter((r) => !shown.has(r));
-    const ok =
-        report.every((p) => p.notEditable.length === 0 && p.markedButNothingSaved.length === 0) &&
-        savedButOnNoPage.length === 0 &&
-        notDescribed.length === 0;
-    return {
-        ok,
-        pages: report.filter((p) => p.notEditable.length > 0 || p.markedButNothingSaved.length > 0),
-        savedButOnNoPage,
-        notDescribed,
-    };
+    const clean = (p: (typeof report)[number]) =>
+        p.notEditable.length === 0 && p.markedButNothingSaved.length === 0 && p.entriesWillAllLookTheSame.length === 0;
+    const ok = report.every(clean) && savedButOnNoPage.length === 0 && notDescribed.length === 0;
+    return { ok, pages: report.filter((p) => !clean(p)), savedButOnNoPage, notDescribed };
 }

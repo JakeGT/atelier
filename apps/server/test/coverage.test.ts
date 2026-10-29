@@ -61,3 +61,29 @@ test("the assistant's check: what is not editable, what is marked with nothing s
     );
     assert.deepEqual(fine, { ok: true, pages: [], savedButOnNoPage: [], notDescribed: [] });
 });
+
+test("a list written with entries that differ is reported: every entry will be a copy of the first", async () => {
+    const { entriesThatWillMatch } = await import("../src/services/coverage.ts");
+    const bars = (second: string) =>
+        `<body><ul data-content-list="page/home#bars"><li><b data-item="label">A</b><span class="fill" style="width:99%"></span></li><li><b data-item="label">B</b>${second}</li></ul></body>`;
+    const found = entriesThatWillMatch(bars('<span class="fill" style="width:41%"></span>'));
+    assert.equal(found.length, 1);
+    assert.match(
+        found[0] ?? "",
+        /The list page\/home#bars is written with entries that differ \(width:99% \/ width:41%\).*data-item-percent/,
+    );
+    // The same markup in every entry, or the difference bound to a value: nothing to report.
+    assert.deepEqual(entriesThatWillMatch(bars('<span class="fill" style="width:99%"></span>')), []);
+    assert.deepEqual(
+        entriesThatWillMatch(
+            '<body><ul data-content-list="a/b#c"><li><i data-item-percent="n" style="width:9%"></i></li><li><i data-item-percent="n" style="width:80%"></i></li></ul></body>',
+        ),
+        [],
+    );
+    const report = coverageReport(
+        [{ path: "index.html", html: bars('<span class="fill" style="width:41%"></span>') }],
+        [{ kind: "page", slug: "home", draft: { bars: [] }, fields: [{ key: "bars" }] }],
+    );
+    assert.equal(report.ok, false);
+    assert.equal(report.pages[0]?.entriesWillAllLookTheSame.length, 1);
+});

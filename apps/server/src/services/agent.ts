@@ -10,7 +10,13 @@ export interface AgentToolEvent {
     name: string;
     state: string;
     target?: string | null;
+    // For a step named "say": what the assistant said as it worked, between other steps.
+    // Its last words, the reply itself, are not a step.
+    said?: string;
 }
+// Something said while working, kept among the steps in the order it happened.
+export const SAY = "say";
+const MAX_SAID = 1200;
 
 export interface AgentResult {
     text: string;
@@ -156,6 +162,8 @@ export class OpenCodeAgent implements AgentRuntime {
                             ATELIER_WORKSPACE: input.workspaceDir,
                             ATELIER_VISION: input.vision ? "1" : "0",
                             ...(process.env.CHROMIUM_PATH ? { CHROMIUM_PATH: process.env.CHROMIUM_PATH } : {}),
+                            // The way out to the web, for the browser the assistant looks at pages with.
+                            ...(this.opts.egressProxy ? { EGRESS_PROXY: this.opts.egressProxy } : {}),
                         },
                     },
                 },
@@ -199,6 +207,12 @@ export class OpenCodeAgent implements AgentRuntime {
         );
         if (outcome.ended !== "exited") throw new RunInterrupted(outcome.ended, parser.result());
         if (parser.error) throw new Error(parser.error);
+        // No exit code: it did not end, it was ended, from outside. In a workspace that is nearly
+        // always the system reclaiming memory.
+        if (outcome.code === null)
+            throw new Error(
+                "The assistant was stopped part-way by the system, most likely because its workspace ran out of memory. What it had done so far is kept. Send your request again to carry on.",
+            );
         if (outcome.code !== 0) throw new Error(`opencode run failed (exit ${outcome.code}): ${outcome.stderr.slice(0, 2000)}`);
         return parser.result();
     }
@@ -289,7 +303,8 @@ const FILE_TOOLS = new Set(["read", "write", "edit", "patch", "multiedit"]);
 
 // Reads the run's events as they arrive.
 class RunParser {
-    private text = "";
+    // The passage said most recently, while nothing has been done since.
+    private last: { step: AgentToolEvent; text: string } | null = null;
     private readonly toolEvents: AgentToolEvent[] = [];
     private readonly tokens = { input: 0, output: 0 };
     error: string | null = null;
@@ -309,9 +324,16 @@ class RunParser {
         } catch {
             return;
         }
-        // Each text event is a separate passage (before/after tool calls): keep them apart.
-        if (evt.type === "text" && evt.part?.text) this.text += (this.text ? "\n\n" : "") + evt.part.text.trim();
-        else if (evt.type === "tool_use") {
+        // Each text event is a separate passage. What is said before more work is a note on the
+        // way; only what is said last, with nothing after it, is the reply.
+        if (evt.type === "text" && evt.part?.text?.trim()) {
+            const said = evt.part.text.trim();
+            const step: AgentToolEvent = { name: SAY, state: "completed", target: null, said: said.slice(0, MAX_SAID) };
+            this.toolEvents.push(step);
+            this.last = { step, text: said };
+            this.onStep?.(step);
+        } else if (evt.type === "tool_use") {
+            this.last = null;
             const name = evt.part?.tool ?? "unknown";
             const step: AgentToolEvent = { name, state: evt.part?.state?.status ?? "unknown", target: this.target(name, evt) };
             this.toolEvents.push(step);
@@ -345,7 +367,10 @@ class RunParser {
     }
 
     result(): AgentResult {
-        return { text: this.text, toolEvents: [...this.toolEvents], tokens: { ...this.tokens } };
+        // The reply is what was said last; it is taken out of the steps, where it stood while it might have been a note.
+        const reply = this.last;
+        const steps = reply ? this.toolEvents.filter((s) => s !== reply.step) : [...this.toolEvents];
+        return { text: reply?.text ?? "", toolEvents: steps, tokens: { ...this.tokens } };
     }
 }
 

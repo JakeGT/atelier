@@ -11,7 +11,7 @@ import { health } from "./routes/health.ts";
 import type { ModelCatalog } from "./services/catalog.ts";
 import type { Hosting } from "./services/hosting.ts";
 import type { MediaStorage } from "./services/mediaStorage.ts";
-import type { Mailer } from "./services/notifier.ts";
+import { type Mailer, Notifier } from "./services/notifier.ts";
 import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
@@ -67,9 +67,9 @@ const appCsp = (nonce: string): string =>
     ].join("; ");
 
 // Paths the single-page app never owns: a miss here is a real 404.
-const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz)(\/|$)/;
+const NOT_APP = /^\/(api|auth|preview|internal|assets|healthz|f|design-thumbs)(\/|$)/;
 
-export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } {
+export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[]; notifier: Notifier } {
     const app = new Hono();
 
     // The built web app, when present (WEB_DIST_DIR in the image). Its entry script
@@ -91,8 +91,13 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
 
     app.route("/", health);
     app.route("/", configRoutes(deps.config));
-    app.route("/", authRoutes(deps.config, deps.oidc, deps.sessions, deps.store));
-    const api = apiRoutes(deps);
+    const notifier = new Notifier(deps.store, {
+        mailer: deps.mailer ?? null,
+        publicOrigin: deps.config.publicOrigin,
+        operatorEmail: deps.config.operatorEmail,
+    });
+    app.route("/", authRoutes(deps.config, deps.oidc, deps.sessions, deps.store, notifier));
+    const api = apiRoutes({ ...deps, notifier });
     app.route("/", api.app);
 
     if (dist && shell) {
@@ -111,5 +116,5 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[] } 
         app.get("/", (c) => c.json({ name: "atelier", status: "ok" }));
     }
 
-    return { app, declared: api.declared };
+    return { app, declared: api.declared, notifier };
 }

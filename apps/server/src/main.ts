@@ -7,6 +7,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { connectedAsOwner, migrate } from "./db/migrate.ts";
+import { weeklyDigest } from "./routes/feedback.ts";
 import { OpenCodeAgent } from "./services/agent.ts";
 import { DeployerHosting } from "./services/hosting.ts";
 import { DiskStorage, R2Storage } from "./services/mediaStorage.ts";
@@ -127,7 +128,7 @@ console.log(
         : "Notifications: in the app only (set RESEND_API_KEY and MAIL_FROM to e-mail them too).",
 );
 
-const { app } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting, storage, mailer });
+const { app, notifier } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting, storage, mailer });
 
 // Retention: once shortly after start-up, then daily.
 const retain = () =>
@@ -141,6 +142,14 @@ const retain = () =>
         (err: Error) => console.warn(`Retention failed: ${err.message}`),
     );
 setTimeout(retain, 60_000).unref();
+// Once a week, the reports still open, to whoever runs this Atelier (checked daily; sent once per week).
+const digest = () =>
+    weeklyDigest(store, notifier).then(
+        (sent) => sent && console.log("Sent the weekly digest of open reports."),
+        (err: Error) => console.warn(`Weekly digest failed: ${err.message}`),
+    );
+setTimeout(digest, 5 * 60_000).unref();
+setInterval(digest, 24 * 3_600_000).unref();
 setInterval(retain, 24 * 3_600_000).unref();
 
 // Stop workspaces nobody is using: their files stay, and the next request starts

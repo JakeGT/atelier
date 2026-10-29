@@ -287,7 +287,7 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
                                             {row.kind === "auto" ? (
                                                 <span className="model-name">
                                                     <strong>{automatic}</strong>
-                                                    <span className="muted">{automaticHint}</span>
+                                                    <span className="muted model-hint">{automaticHint}</span>
                                                 </span>
                                             ) : row.kind === "typed" ? (
                                                 <span className="model-name">

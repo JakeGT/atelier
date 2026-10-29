@@ -5,11 +5,13 @@ import {
     ChevronDown,
     CloudOff,
     Copy,
+    ExternalLink,
     Eye,
     Globe,
     History,
     LayoutList,
     MessageSquare,
+    Palette,
     PanelRight,
     Rocket,
     SlidersHorizontal,
@@ -17,12 +19,26 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Address } from "../editor/Address";
 import { Chat, type Message } from "../editor/Chat";
+import { DesignDialog } from "../editor/Design";
 import { type Device, Preview } from "../editor/Preview";
 import { ProjectSettings } from "../editor/ProjectSettings";
 import { Sidebar, type Tab } from "../editor/Sidebar";
 import { WordingDialog } from "../editor/Wording";
 import { changedFiles } from "../lib/activity";
-import type { AgentSession, Checkpoint, ContentDocument, Org, Overview, Project, Pulse, Release, Run, Session } from "../lib/api";
+import type {
+    AgentSession,
+    AssistantQuestions,
+    Checkpoint,
+    ContentDocument,
+    HistoryEntry,
+    Org,
+    Overview,
+    Project,
+    Pulse,
+    Release,
+    Run,
+    Session,
+} from "../lib/api";
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, useClickOutside, useStored } from "../lib/hooks";
 import { Dialog, Dots, UserMenu, useToast } from "../ui/kit";
@@ -52,8 +68,10 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     // An archived website is frozen for everyone; otherwise the role decides.
     const archived = project.archivedAt !== null;
-    const mayEdit = can.edit(org.role) && !archived;
-    const canPublish = can.publish(org.role) && !archived;
+    // The person's role on this website, which can differ from their role in the studio.
+    const role = project.myRole ?? org.role;
+    const mayEdit = can.edit(role) && !archived;
+    const canPublish = can.publish(role) && !archived;
     const mayManage = can.manage(org.role);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -72,6 +90,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const typing = useRef(false);
 
     const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+    const [history, setHistory] = useState<HistoryEntry[]>([]);
     const [releases, setReleases] = useState<Release[]>([]);
     const [documents, setDocuments] = useState<ContentDocument[]>([]);
     const [overview, setOverview] = useState<Overview | null>(null);
@@ -81,11 +100,12 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [device, setDevice] = useStored<Device>("atelier.device", "desktop");
     // "?ask=…": a request written for the person somewhere else in the app. It is put in
     // the message box, not sent, and taken out of the address.
-    const [asked] = useState(() => {
+    const [asked, setAsked] = useState(() => {
         const ask = new URLSearchParams(window.location.search).get("ask")?.slice(0, 2000) ?? "";
         if (ask) window.history.replaceState(null, "", window.location.pathname);
         return ask;
     });
+    const [designOpen, setDesignOpen] = useState(false);
     const [tab, setTab] = useState<Tab>("versions");
     // A file added beside the message box: show it in the panel's Pictures tab.
     const [filesKey, setFilesKey] = useState(0);
@@ -109,6 +129,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const [published, setPublished] = useState<{ number: number; url: string } | null>(null);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
+    // What the assistant has stopped to ask, and how much it asks on this website.
+    const [question, setQuestion] = useState<AssistantQuestions | null>(null);
+    const [askLevel, setAskLevel] = useState(1);
+    // When the slider was last moved here.
+    const askedAt = useRef(0);
+    // The website's versions are known (an empty list then means an empty website, not "still opening").
+    const [known, setKnown] = useState(false);
+
     const loadThread = useCallback(async () => {
         try {
             const thread = await a.thread(pid);
@@ -116,6 +144,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             setAuthors(thread.authors ?? {});
             setPending([]);
             setActiveRun(thread.activeRun);
+            setQuestion(thread.question ?? null);
+            if (typeof thread.askLevel === "number") setAskLevel(thread.askLevel);
         } catch {
             setMessages((m) => m ?? []);
         }
@@ -128,13 +158,19 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     // ---- data ------------------------------------------------------------------------
 
     const refresh = useCallback(async () => {
-        const [cps, rels, docs, ov] = await Promise.all([
-            a.listCheckpoints(pid).catch(() => [] as Checkpoint[]),
+        const [cps, hist, rels, docs, ov] = await Promise.all([
+            a.listCheckpoints(pid).catch(() => null),
+            a.history(pid).catch(() => [] as HistoryEntry[]),
             a.listReleases(pid).catch(() => [] as Release[]),
             a.listContent(pid).catch(() => [] as ContentDocument[]),
             a.overview(pid).catch(() => null),
         ]);
-        setCheckpoints(cps);
+        // Not known yet (the workspace is still starting): keep what is shown, and say it is opening.
+        if (cps) {
+            setCheckpoints(cps);
+            setKnown(true);
+        }
+        setHistory(hist);
         setReleases([...rels].reverse());
         setDocuments(docs);
         setOverview(ov);
@@ -183,6 +219,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         async (prompt: string) => {
             if (!agent || activeRun) return;
             note("user", prompt);
+            setQuestion(null);
             try {
                 setActiveRun(await a.startRun(pid, agent.id, prompt));
             } catch (err) {
@@ -191,6 +228,39 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         },
         [a, agent, activeRun, note, pid],
     );
+
+    const answer = useCallback(
+        async (answers: string[]) => {
+            if (!agent || activeRun || !question) return;
+            const set = question;
+            note("user", set.questions.map((q, i) => `${q.question}\n→ ${answers[i]?.trim() || "You decide."}`).join("\n\n"));
+            setQuestion(null);
+            try {
+                setActiveRun(await a.answer(pid, agent.id, set.id, answers));
+            } catch (err) {
+                note("error", (err as Error).message);
+                void loadThread();
+            }
+        },
+        [a, agent, activeRun, question, note, pid, loadThread],
+    );
+    const changeAsking = useCallback(
+        (level: number) => {
+            askedAt.current = Date.now();
+            setAskLevel(level);
+            a.setAsking(pid, level).catch((err: Error) => toast(err.message, "error"));
+        },
+        [a, pid, toast],
+    );
+    // The workspace was still starting when the website was opened: ask again until it answers.
+    useEffect(() => {
+        if (known || starting || archived) return;
+        const again = setInterval(() => {
+            void refresh();
+            reloadPreview();
+        }, 3000);
+        return () => clearInterval(again);
+    }, [known, starting, archived, refresh, reloadPreview]);
 
     // ---- the pulse: one heartbeat that keeps this editor in step with the website ---------
     // Every couple of seconds it says "I am here" (and whether I am typing) and
@@ -212,6 +282,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 setPeople(pulse.people);
                 setRunBy(pulse.runBy);
                 setActiveRun(pulse.run);
+                // Someone else moved the slider. (Not just after moving it here: the answer may be on its way.)
+                if (typeof pulse.askLevel === "number" && Date.now() - askedAt.current > 4000) setAskLevel(pulse.askLevel);
                 const was = seen.current;
                 // Pages written while it works show in the preview straight away.
                 const written = pulse.run ? pulse.run.steps.filter(changedFiles).length : 0;
@@ -309,6 +381,16 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         }
     }
 
+    const restoreWording = async (kind: string, slug: string, rev: number) => {
+        try {
+            await a.restoreContent(pid, kind, slug, rev);
+            toast("That earlier wording is back. What it replaced is still in the history.");
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+        await refresh();
+        reloadPreview();
+    };
     const restore = (sha: string) =>
         act(async () => {
             await a.restoreCheckpoint(pid, sha);
@@ -326,6 +408,25 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             { action: "rollback", number },
             resuming,
         );
+
+    // A link to show someone before publishing.
+    const [shared, setShared] = useState<string | null>(null);
+    const [sharing, setSharing] = useState(false);
+    const share = async () => {
+        setSharing(true);
+        try {
+            const url = await a.share(pid);
+            setConfirmPublish(false);
+            setShared(url);
+        } catch (err) {
+            if (err instanceof ReauthRequired) {
+                toast("Please confirm your sign-in, then ask for the link again.", "error");
+                setTimeout(reauthenticate, 1400);
+            } else toast((err as Error).message, "error");
+        } finally {
+            setSharing(false);
+        }
+    };
 
     const publish = (resuming = false) => {
         setConfirmPublish(false);
@@ -439,6 +540,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     >
                         <LayoutList /> <span className="bar-label">Content</span>
                     </button>
+                    <button
+                        type="button"
+                        className="btn btn-ghost bar-wide"
+                        onClick={() => setDesignOpen(true)}
+                        title="The website's look (colours, lettering, corners) and ready-made sections for its pages"
+                    >
+                        <Palette /> <span className="bar-label">Design</span>
+                    </button>
                     <button type="button" className="btn btn-ghost bar-wide" onClick={() => openAddress(false)}>
                         <Globe /> <span className="bar-label">Address</span>
                     </button>
@@ -452,9 +561,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         className={`btn btn-ghost side-toggle ${sideOpen ? "on" : ""}`}
                         onClick={() => setSideOpen((o) => !o)}
                         aria-pressed={sideOpen}
-                        title="Show or hide the panel with saved versions, what is published, your wording, and your pictures and files"
+                        title="Show or hide the panel with the website's history, what is published, your wording, and your pictures and files"
                     >
-                        <PanelRight /> <span className="bar-label">Versions, wording, pictures</span>
+                        <PanelRight /> <span className="bar-label">History, wording, pictures</span>
                     </button>
                     {canPublish && (
                         <button
@@ -473,10 +582,11 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         onToggleTheme={onToggleTheme}
                         items={[
                             {
-                                label: "Content: wording, pictures and files",
+                                label: "Content: wording, pictures, files and messages",
                                 icon: <LayoutList />,
                                 onClick: () => navigate(`/o/${org.slug}/p/${project.slug}/content`),
                             },
+                            { label: "Design: looks and sections", icon: <Palette />, onClick: () => setDesignOpen(true) },
                             { label: "Address and domains", icon: <Globe />, onClick: () => openAddress(false) },
                             ...(mayManage
                                 ? [{ label: "Website settings", icon: <SlidersHorizontal />, onClick: () => setSettingsOpen(true) }]
@@ -504,12 +614,16 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onStop={stopRun}
                     onMoreTime={moreTime}
                     onCarryOn={() => void carryOn()}
+                    asked={activeRun ? null : question}
+                    onAnswer={(answers) => void answer(answers)}
+                    askLevel={askLevel}
+                    onAskLevel={changeAsking}
                     ready={agent !== null && mayEdit}
                     starting={starting}
                     locked={
                         archived
                             ? "This website is archived. Restore it from its settings to keep working on it."
-                            : !can.edit(org.role)
+                            : !can.edit(role)
                               ? "You're a viewer in this studio, so you can look but not change things."
                               : null
                     }
@@ -526,6 +640,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onWording={(ref, value) => void saveFromPreview(ref, value)}
                     onOpenWording={openFromPreview}
                     hasPage={checkpoints.length > 0 || (activeRun?.steps.some(changedFiles) ?? false)}
+                    opening={!archived && (starting || !known)}
                     working={running}
                 />
                 <Sidebar
@@ -534,6 +649,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     tab={tab}
                     onTab={setTab}
                     checkpoints={checkpoints}
+                    history={history}
+                    onRestoreWording={(kind, slug, rev) => void restoreWording(kind, slug, rev)}
                     releases={releases}
                     documents={documents}
                     busy={acting || running}
@@ -550,7 +667,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     [
                         ["chat", "Chat", MessageSquare],
                         ["preview", "Preview", Eye],
-                        ["side", "Versions", History],
+                        ["side", "History", History],
                     ] as const
                 ).map(([id, label, Icon]) => (
                     <button key={id} type="button" className={pane === id ? "on" : ""} onClick={() => setPane(id)}>
@@ -587,12 +704,29 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 />
             )}
 
+            {designOpen && (
+                <DesignDialog
+                    api={a}
+                    project={project}
+                    canEdit={mayEdit}
+                    // A trailing space each time, so asking for the same thing twice still fills the box.
+                    onAsk={(request) => setAsked((was) => (was === request ? `${request} ` : request))}
+                    onChanged={() => {
+                        void refresh();
+                        reloadPreview();
+                    }}
+                    onClose={() => setDesignOpen(false)}
+                />
+            )}
+
             {settingsOpen && (
                 <ProjectSettings
                     project={project}
                     org={org}
                     api={a}
                     onClose={() => setSettingsOpen(false)}
+                    askLevel={askLevel}
+                    onAskLevel={changeAsking}
                     onSaved={(next) => {
                         onProjectChanged(next);
                         setSettingsOpen(false);
@@ -626,12 +760,51 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                             <span>{live ? `Release ${live.number}` : "Nothing yet"}</span>
                         </li>
                     </ul>
+                    <p className="field-help share-first">
+                        Want someone to see it first?{" "}
+                        <button type="button" className="link" onClick={() => void share()} disabled={sharing}>
+                            {sharing ? "Making a link…" : "Get a link to show them, without publishing"}
+                        </button>
+                    </p>
                     <div className="dialog-actions">
                         <button type="button" className="btn" onClick={() => setConfirmPublish(false)}>
                             Not yet
                         </button>
                         <button type="button" className="btn btn-seal" onClick={() => void publish()}>
                             <Rocket /> Publish
+                        </button>
+                    </div>
+                </Dialog>
+            )}
+
+            {shared && (
+                <Dialog onClose={() => setShared(null)}>
+                    <p className="eyebrow">Not published</p>
+                    <h2>A link to show someone</h2>
+                    <p>
+                        Anyone with this link sees the website exactly as it is in your preview now. It is not your public address, search
+                        engines are told not to list it, and it does not change when you make more changes: get a new link to show a newer
+                        version.
+                    </p>
+                    <p className="mono field-static share-link">{shared}</p>
+                    <div className="dialog-actions">
+                        <button type="button" className="btn" onClick={() => setShared(null)}>
+                            Close
+                        </button>
+                        <a className="btn" href={shared} target="_blank" rel="noreferrer">
+                            <ExternalLink /> Open it
+                        </a>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() =>
+                                void navigator.clipboard.writeText(shared).then(
+                                    () => toast("The link is copied."),
+                                    () => toast("Select the link and copy it.", "error"),
+                                )
+                            }
+                        >
+                            <Copy /> Copy the link
                         </button>
                     </div>
                 </Dialog>

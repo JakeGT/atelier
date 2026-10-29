@@ -84,6 +84,7 @@ const envSchema = z.object({
     RETAIN_REVISIONS_DAYS: z.coerce.number().int().positive().default(90),
     RETAIN_REVISIONS_KEPT: z.coerce.number().int().positive().default(20),
     RETAIN_REMOVED_MEDIA_DAYS: z.coerce.number().int().positive().default(30),
+    RETAIN_FORMS_DAYS: z.coerce.number().int().positive().default(365),
     RETAIN_AUDIT_DAYS: z.coerce.number().int().positive().default(730),
     // The control-plane address runtime containers use for the agent content API.
     RUNTIME_API_URL: z.string().default("http://atelier-server:8080"),
@@ -198,6 +199,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
             revisionDays: e.RETAIN_REVISIONS_DAYS,
             revisionsKept: e.RETAIN_REVISIONS_KEPT,
             removedMediaDays: e.RETAIN_REMOVED_MEDIA_DAYS,
+            formDays: e.RETAIN_FORMS_DAYS,
             auditDays: e.RETAIN_AUDIT_DAYS,
         },
         mediaStorage,

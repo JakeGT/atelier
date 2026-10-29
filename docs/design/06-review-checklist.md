@@ -61,6 +61,7 @@ to the interface ships, and as a full audit of every screen when a phase ends.
 - [ ] **Every thing a person can change says what it is and where it appears,** and can show it there. A thing that appears nowhere says so.
 - [ ] **Try it with old data,** not only with data made the new way: open the screen on a website from before the feature existed.
 - [ ] **Every screen can be reached from where the work happens** by a labelled control. If the only way in is a link at the bottom of a panel, it cannot be found.
+- [ ] **Choices are shown, not announced.** If there are things to choose from (templates, looks), show them where the choice is made; a button that says there are choices somewhere else does not count. ("Choose a starting point" hid every template behind a dialog and nobody knew they existed.)
 
 ## Recording an audit
 

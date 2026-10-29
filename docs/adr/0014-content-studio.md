@@ -376,3 +376,18 @@ went. Three things changed.
 Both ways of reaching things that could not be found were also fixed: a
 **Content** button in the editor's bar, a **Pictures** tab in its side panel,
 and **Add pictures or files** beside the message box.
+
+## As built: the rest of the field types, focal points, video stills, one history (branch `content-finish`, 2026-10-10)
+
+- **More field types**, each with its own binding:
+  - `link`: `data-content-href` on an `<a>` (beside `data-content` for its words). Only a safe address is placed.
+  - `number`, and `date` (stored as `2026-03-01`): with `data-content-date="long|short|numeric"` the date is written out in the page's language (`<html lang>`), and `<time>` gets its `datetime`.
+  - `yesno`: `data-content-if` on any part of a page. When the answer is no, that part is left out of the page altogether (preview and published).
+  - `video`: `data-content-video` on a `<video>`; the clip's still picture is set as its poster.
+  - Items may have number and date parts.
+- **Reordering:** entries can be dragged by a handle; Move up and Move down remain for keyboards.
+- **Focal point:** "Description and focus" on a picture lets a person click its most important part. Bound images get `object-position` from it, so a cropped banner or portrait keeps the subject in view.
+- **Video stills:** the server image carries ffmpeg; a frame from one second in is stored beside the clip (`<name>-poster.jpg`), shown in the library and used as the poster. Without ffmpeg a clip simply has none.
+- **One history** (`GET …/history`, the side panel's first tab): versions of the website's files, changes to its wording (and who made them) and publishes, newest first, with a filter. A version and a wording change each have "Go back" there. This replaces the two separate lists noted as a gap.
+
+Still not built: a `<picture>` element with AVIF copies; cropping in the library itself.

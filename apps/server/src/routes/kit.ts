@@ -11,7 +11,9 @@ import {
     requireRecentAuth,
     requireSession,
 } from "../middleware/auth.ts";
+import { signAgentToken } from "../services/agentToken.ts";
 import { ModelCatalog } from "../services/catalog.ts";
+import { Covers, type CoverTaker } from "../services/cover.ts";
 import type { Hosting } from "../services/hosting.ts";
 import type { MediaStorage } from "../services/mediaStorage.ts";
 import { type Mailer, Notifier } from "../services/notifier.ts";
@@ -49,8 +51,13 @@ export interface ApiDeps {
     storage?: MediaStorage | null;
     // Sends e-mail; null means notifications are shown in the app only.
     mailer?: Mailer | null;
+    // The one notifier, shared with sign-in (which tells people when they join a studio).
+    notifier?: Notifier;
     // Starter templates; read from apps/server/templates unless given.
     templates?: Template[];
+    // What takes a website's cover picture (the workspace runtime, unless a test supplies its own), and how soon after a change.
+    coverTaker?: CoverTaker;
+    coverDelayMs?: number;
 }
 
 // Everything under an organisation, and under one of its projects.
@@ -86,18 +93,48 @@ export function createApi(deps: ApiDeps) {
     app.use("/api/v1/*", async (c, next) => (c.req.method === "GET" ? next() : csrf(c, next)));
 
     const presence = new Presence();
+    // Pictures of each website's home page, for its card: retaken a few seconds after a change.
+    // Taken in the workspace; switched off where there is no browser to take them with (tests, a bare dev machine).
+    const covers = new Covers({
+        store,
+        storage: config.runtimeMode === "container" || process.env.CHROMIUM_PATH ? (deps.storage ?? null) : null,
+        taker: deps.coverTaker ?? deps.runtime,
+        access: (tenantId, projectId) => ({
+            apiUrl: config.runtimeMode === "container" ? config.runtimeApiUrl : `http://127.0.0.1:${config.port}`,
+            agentToken: signAgentToken(
+                { tenantId, projectId, sessionId: "cover", exp: Math.floor(Date.now() / 1000) + 600 },
+                deps.secretsKey,
+            ),
+        }),
+        ...(deps.coverDelayMs === undefined ? {} : { delayMs: deps.coverDelayMs }),
+        busy: (projectId) => Boolean(presence.run(projectId)),
+    });
     // A successful change to a website tells everyone who has it open to reload what they show.
     const announce: MiddlewareHandler<Env> = async (c, next) => {
         await next();
-        if (c.req.method !== "GET" && c.res.status < 400 && !c.req.path.endsWith("/pulse")) presence.touch(c.get("project").id);
+        // Not the heartbeat itself, and not how much the assistant asks: that changes nothing a
+        // website shows, and travels with the heartbeat instead of making every editor reload.
+        const quiet = c.req.path.endsWith("/pulse") || c.req.path.endsWith("/asking");
+        if (c.req.method === "GET" || c.res.status >= 400 || quiet) return;
+        presence.touch(c.get("project").id);
+        // What the website shows may have changed (wording, a look, a restored version, a picture): its card
+        // gets a new picture. Not for things that change nothing on it, or that only start work whose end will.
+        if (
+            !/\/(messages|submissions(\/.*)?|template|share|archive|releases(\/.*)?|domains(\/.*)?|members(\/.*)?)$/.test(c.req.path) &&
+            c.req.method !== "DELETE"
+        )
+            covers.changed(c.get("org").id, c.get("project").id);
     };
 
     function route(method: Method, path: string, requirement: Requirement, ...rest: [...MiddlewareHandler<Env>[], Handler]) {
         declared.push({ method: method.toUpperCase(), path, permission: requirement });
         const chain: MiddlewareHandler<Env>[] = [];
         if (path.includes(":org")) chain.push(org);
+        // A website is loaded before the check: the person's role may be different on it
+        // (per-website roles). Not found and not allowed both answer 404, as before.
+        if (path.includes(":projectId")) chain.push(project);
         chain.push(requirePermission(requirement));
-        if (path.includes(":projectId")) chain.push(project, announce);
+        if (path.includes(":projectId")) chain.push(announce);
         const on = app.on as unknown as (m: string, p: string, ...h: MiddlewareHandler<Env>[]) => void;
         on(method.toUpperCase(), path, ...chain, ...(rest as MiddlewareHandler<Env>[]));
     }
@@ -109,13 +146,19 @@ export function createApi(deps: ApiDeps) {
         hosting: deps.hosting ?? null,
         templates: deps.templates ?? loadTemplates(),
         presence,
+        covers,
         storage: deps.storage ?? null,
-        notifier: new Notifier(store, {
-            mailer: deps.mailer ?? null,
-            publicOrigin: config.publicOrigin,
-            operatorEmail: config.operatorEmail,
+        notifier:
+            deps.notifier ??
+            new Notifier(store, {
+                mailer: deps.mailer ?? null,
+                publicOrigin: config.publicOrigin,
+                operatorEmail: config.operatorEmail,
+            }),
+        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix, deps.storage ?? null, {
+            origin: config.publicOrigin,
+            secret: `${deps.secretsKey}:form`,
         }),
-        releases: new ReleaseService(store, deps.runtime, deps.hosting ?? null, config.pagesProjectPrefix, deps.storage ?? null),
         box: new SecretBox(deps.secretsKey),
         app,
         declared,

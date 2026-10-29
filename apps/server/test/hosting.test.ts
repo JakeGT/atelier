@@ -515,3 +515,29 @@ test("unpublishing takes the website offline and keeps everything else; publishi
     assert.equal(cf.served(site)["/index.html"], "<h1>v1</h1>");
     assert.ok(cf.projects.get(site)?.domains.has("www.okoro.example"));
 });
+
+test("a published website's form sends to Atelier, and what a visitor writes reaches the studio", async () => {
+    const { t, owner, cf } = await setup();
+    const project = await newProject(t, owner);
+    await build(t, owner, project, '<form data-form="contact"><input name="name"><button>Send</button></form>');
+    assert.equal((await publish(t, owner, project)).status, 200);
+    const site = (await getProject(t, owner, project)).hostingRef ?? "";
+    const page = cf.served(site)["/index.html"] ?? "";
+    const action = /<form data-form="contact" action="([^"]+)" method="post"/.exec(page)?.[1] ?? "";
+    assert.match(action, /^http:\/\/localhost:8080\/f\/[\w-]+\.[\w-]+$/);
+    assert.match(page, /name="_gotcha"/);
+
+    const sent = await t.app.request(new URL(action).pathname, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+        body: "name=Grace",
+    });
+    assert.equal(sent.status, 200);
+    const box = await json<{ messages: { form: string; data: Record<string, string>; preview: boolean }[] }>(
+        await t.app.request(`${owner.api}/projects/${project.id}/submissions`, { headers: owner.read }),
+    );
+    assert.deepEqual(
+        box.messages.map((m) => [m.form, m.data.name, m.preview]),
+        [["contact", "Grace", false]],
+    );
+});

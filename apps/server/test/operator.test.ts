@@ -171,3 +171,80 @@ test("a website started from a template has its pages as its first version, with
     await openSession(t, maren, project);
     assert.equal((await json<{ checkpoints: unknown[] }>(await get(t, maren, `${p}/checkpoints`))).checkpoints.length, 1);
 });
+
+// ---- going into a studio ------------------------------------------------------------------------
+
+test("an operator can open a studio for a limited time; the studio is told, and it ends when they leave or time runs out", async () => {
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const t = await makeApp({}, undefined, { mailer: { send: async (m) => void sent.push(m) } });
+    const maren = await signIn(t, { email: "maren@example.com" });
+    const site = await website(t, maren, { name: "Okoro" });
+    const ops = await operator(t);
+    const inside = `/api/v1/orgs/${maren.org.slug}`;
+
+    // Not before asking: an operator is not a member.
+    assert.equal((await get(t, ops, `${inside}/projects`)).status, 404);
+    // Someone who is not an operator cannot ask at all; a reason is required.
+    const sol = await signIn(t, { email: "sol@example.com" });
+    assert.equal((await send(t, sol, "POST", `/api/v1/admin/studios/${maren.org.id}/enter`, { reason: "curious" })).status, 404);
+    assert.equal((await send(t, ops, "POST", `/api/v1/admin/studios/${maren.org.id}/enter`, {})).status, 400);
+
+    const entered = await json<{ slug: string; until: string }>(
+        await send(t, ops, "POST", `/api/v1/admin/studios/${maren.org.id}/enter`, { reason: "The preview is blank; looking into it" }),
+    );
+    assert.equal(entered.slug, maren.org.slug);
+    const minutes = (new Date(entered.until).getTime() - Date.now()) / 60_000;
+    assert.ok(minutes > 55 && minutes <= 60);
+
+    // Inside: what an admin can do, and it is listed among their studios as a visit.
+    const projects = await json<{ projects: Project[] }>(await get(t, ops, `${inside}/projects`));
+    assert.deepEqual(
+        projects.projects.map((p) => p.id),
+        [site.id],
+    );
+    assert.equal((await send(t, ops, "PATCH", `${inside}/projects/${site.id}`, { name: "Okoro Ceramics" })).status, 200);
+    const mine = await json<{ orgs: { id: string; role: string; visiting?: string }[] }>(await get(t, ops, "/api/v1/orgs"));
+    const visit = mine.orgs.find((o) => o.id === maren.org.id);
+    assert.equal(visit?.role, "admin");
+    assert.equal(visit?.visiting, entered.until);
+    // Not the owner: the studio cannot be exported or deleted by a visitor.
+    assert.equal((await send(t, ops, "POST", `${inside}/export`)).status, 404);
+    assert.equal((await send(t, ops, "DELETE", inside)).status, 404);
+    // And only this studio.
+    assert.equal((await get(t, ops, `/api/v1/orgs/${sol.org.slug}/projects`)).status, 404);
+
+    // The studio knows: its activity has the visit and what was done, and its owner was told.
+    await new Promise((r) => setTimeout(r, 30));
+    const activity = await json<{ entries: { action: string; detail: Record<string, unknown> | null }[] }>(
+        await get(t, maren, `${inside}/audit`),
+    );
+    const enter = activity.entries.find((e) => e.action === "operator.enter");
+    assert.equal(enter?.detail?.reason, "The preview is blank; looking into it");
+    assert.ok(activity.entries.some((e) => e.action === "project.update" || e.action === "project.rename"));
+    const notices = await json<{ notifications: { title: string; body: string }[] }>(await get(t, maren, "/api/v1/notifications"));
+    assert.equal(notices.notifications[0]?.title, `Someone who runs Atelier opened ${maren.org.name}`);
+    assert.match(notices.notifications[0]?.body ?? "", /The preview is blank; looking into it/);
+    assert.equal(sent.filter((m) => m.to === "maren@example.com").length, 1);
+    // The operator is not among its members.
+    const members = await json<{ members: { email: string }[] }>(await get(t, maren, `${inside}/members`));
+    assert.deepEqual(
+        members.members.map((m) => m.email),
+        ["maren@example.com"],
+    );
+
+    // Leaving ends it at once.
+    assert.equal((await send(t, ops, "POST", `/api/v1/admin/studios/${maren.org.id}/leave`)).status, 200);
+    assert.equal((await get(t, ops, `${inside}/projects`)).status, 404);
+    assert.ok(
+        (await json<{ entries: { action: string }[] }>(await get(t, maren, `${inside}/audit`))).entries.some(
+            (e) => e.action === "operator.leave",
+        ),
+    );
+
+    // So does the time running out.
+    await t.store.operatorVisits.start(ops.user.id, maren.org.id, new Date(Date.now() - 1000));
+    assert.equal((await get(t, ops, `${inside}/projects`)).status, 404);
+    // A visit left behind does not help someone who is no longer an operator.
+    await t.store.operatorVisits.start(sol.user.id, maren.org.id, new Date(Date.now() + 60_000));
+    assert.equal((await get(t, sol, `${inside}/projects`)).status, 404);
+});

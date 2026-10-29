@@ -94,6 +94,7 @@ on 2026-10-10 at the owner's request, and each is a setting):
 | The conversation with the assistant | 12 months | `RETAIN_MESSAGES_DAYS` |
 | Earlier versions of a piece of wording | The newest 20 of each piece, and anything from the last 90 days | `RETAIN_REVISIONS_KEPT`, `RETAIN_REVISIONS_DAYS` |
 | A file removed from the media library | 30 days, then deleted from storage | `RETAIN_REMOVED_MEDIA_DAYS` |
+| What visitors sent through a website's forms | 12 months | `RETAIN_FORMS_DAYS` |
 | The activity record | 24 months | `RETAIN_AUDIT_DAYS` |
 | Notifications | 90 days | fixed |
 
@@ -106,8 +107,27 @@ append-only for the serving database role, so its limit is applied at start-up
 by the owner role.
 
 Deleting a website removes its workspace, its live site and its uploaded
-files. **Not built:** deleting a whole studio, exporting a studio's data, and
-monthly aggregates of usage (usage records are small and are all kept).
+files.
+
+**A whole studio** (branch `studio-people`, `routes/studio.ts`):
+
+- **A copy of everything.** Its owner can download one archive (a .tar) of
+  every website: pages, wording and its history, the conversation with the
+  assistant, the publishing record, uploaded files, the members and usage. It
+  is asked for with a recent sign-in and delivered by a link that works for five
+  minutes for that person only; it is streamed, so its size does not matter.
+- **Deleting it.** Its owner, with a recent sign-in and the studio's name typed
+  out. Live websites are taken down first (if one cannot be, nothing is
+  deleted), then workspaces and uploaded files, then every record under the
+  studio. Its other members are told. A personal studio cannot be deleted. The
+  activity record and usage figures outlive the studio (they hold its id and
+  no content).
+- **Usage by month** (`GET …/usage/monthly`): requests, working time and tokens
+  for the last twelve months, computed from the usage records, which are all
+  kept. There is no separate table of aggregates. Each month also shows an
+  **estimated cost**: as a request finishes, its tokens are multiplied by the
+  list price of the model in use (from the model catalog) and recorded as
+  `agent.cost_micros`. Requests on the built-in model have no price.
 
 ## 6. Alerting
 

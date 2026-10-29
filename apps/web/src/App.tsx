@@ -12,6 +12,7 @@ import { OrgSettings, type SettingsTab } from "./pages/OrgSettings";
 import { Studio } from "./pages/Studio";
 import { Welcome } from "./pages/Welcome";
 import { Dots, ToastProvider, UpdateNotice, Wordmark } from "./ui/kit";
+import { ReportHost } from "./ui/Report";
 
 // Routes:
 //   /                      landing (public; adapts when signed in)
@@ -28,7 +29,7 @@ type Route =
     | { name: "operator"; tab: OperatorTab }
     | { name: "org"; org: string }
     | { name: "settings"; org: string; tab: SettingsTab }
-    | { name: "editor" | "content"; org: string; project: string }
+    | { name: "editor" | "content"; org: string; project: string; messages?: boolean }
     | { name: "legacy-editor"; project: string };
 
 const SLUG = "([a-z0-9-]+)";
@@ -39,14 +40,17 @@ function match(path: string): Route {
     if (path === "/login") return { name: "login" };
     if (path === "/studio") return { name: "studio" };
     if (path === "/welcome") return { name: "welcome" };
-    if (path === "/admin" || path === "/admin/") return { name: "operator", tab: "studios" };
+    // "/operator" is where notifications sent before 2026-10-11 point; it is the same place.
+    if (path === "/admin" || path === "/admin/" || path === "/operator" || path === "/operator/")
+        return { name: "operator", tab: "studios" };
     if (path === "/admin/activity") return { name: "operator", tab: "activity" };
+    if (path === "/admin/reports") return { name: "operator", tab: "reports" };
     let m = path.match(new RegExp(`^/o/${SLUG}/?$`));
     if (m?.[1]) return { name: "org", org: m[1] };
     m = path.match(new RegExp(`^/o/${SLUG}/settings(?:/([a-z]+))?/?$`));
     if (m?.[1]) return { name: "settings", org: m[1], tab: TABS.includes(m[2] as SettingsTab) ? (m[2] as SettingsTab) : "general" };
-    m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/content/?$`));
-    if (m?.[1] && m[2]) return { name: "content", org: m[1], project: m[2] };
+    m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/content(/messages)?/?$`));
+    if (m?.[1] && m[2]) return { name: "content", org: m[1], project: m[2], messages: Boolean(m[3]) };
     m = path.match(new RegExp(`^/o/${SLUG}/p/${SLUG}/?$`));
     if (m?.[1] && m[2]) return { name: "editor", org: m[1], project: m[2] };
     // Links from before organisations were in the URL.
@@ -127,7 +131,8 @@ export function App() {
     const orgSlug = "org" in route ? route.org : null;
     const org = orgSlug ? orgs?.find((o) => o.slug === orgSlug) : undefined;
     useEffect(() => {
-        if (org) localStorage.setItem(LAST_ORG, org.slug);
+        // A studio being visited is not "where this person was last": their own is.
+        if (org && !org.visiting) localStorage.setItem(LAST_ORG, org.slug);
     }, [org]);
 
     const boot = (
@@ -184,14 +189,16 @@ export function App() {
     } else if (route.name === "settings") {
         page = <OrgSettings key={org.id} session={session} org={org} orgs={orgs} tab={route.tab} onOrgsChanged={reloadOrgs} {...common} />;
     } else if (route.name === "editor" || route.name === "content") {
-        page = <ProjectRoute slug={route.project} view={route.name} session={session} org={org} {...common} />;
+        page = <ProjectRoute slug={route.project} view={route.name} messages={route.messages} session={session} org={org} {...common} />;
     } else {
         page = boot;
     }
 
     return (
         <ToastProvider>
+            {org?.visiting && session && <VisitNotice org={org} />}
             {page}
+            <ReportHost />
             <UpdateNotice />
         </ToastProvider>
     );
@@ -200,6 +207,8 @@ export function App() {
 function ProjectRoute(props: {
     slug: string;
     view: "editor" | "content";
+    // Open the Content page on what visitors sent.
+    messages?: boolean;
     session: Session;
     org: Org;
     theme: "paper" | "night";
@@ -227,9 +236,14 @@ function ProjectRoute(props: {
     }
     if (project === null) return <Missing title="That website isn't" body="It may have been removed, or the link is wrong." />;
     // Keyed by project so switching projects resets all editor state.
-    if (props.view === "content") return <Content key={project.id} project={project} {...props} />;
+    if (props.view === "content")
+        return <Content key={project.id} project={project} {...props} startOn={props.messages ? "messages" : "wording"} />;
     return (
-        <MediaProvider a={mediaApi} projectId={project.id} canEdit={can.edit(props.org.role) && project.archivedAt === null}>
+        <MediaProvider
+            a={mediaApi}
+            projectId={project.id}
+            canEdit={can.edit(project.myRole ?? props.org.role) && project.archivedAt === null}
+        >
             <Editor key={project.id} project={project} onProjectChanged={setProject} {...props} />
         </MediaProvider>
     );
@@ -256,6 +270,34 @@ function Missing({ title, body, whole }: { title: string; body: string; whole?: 
                     Back to your studio
                 </button>
             </div>
+        </div>
+    );
+}
+
+// An operator is inside a studio they do not belong to. Said plainly for as long as they
+// are, with when it ends and the way out, so it is never mistaken for a studio of their own.
+function VisitNotice({ org }: { org: Org }) {
+    const [leaving, setLeaving] = useState(false);
+    const until = org.visiting ? new Date(org.visiting).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const leave = async () => {
+        setLeaving(true);
+        await api.operatorLeave(org.id).catch(() => {});
+        window.location.assign("/admin");
+    };
+    return (
+        <div className="visit-notice" role="status">
+            <span>
+                <strong>
+                    <span className="visit-more">You are inside </span>
+                    {org.name}
+                    <span className="visit-more"> as an operator</span>
+                    <span className="visit-less">: operator visit</span>
+                </strong>
+                , until {until}.<span className="visit-more"> Its owners have been told, and what you do here is in its activity.</span>
+            </span>
+            <button type="button" className="btn btn-sm" disabled={leaving} onClick={() => void leave()}>
+                Leave this studio
+            </button>
         </div>
     );
 }

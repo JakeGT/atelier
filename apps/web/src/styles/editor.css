@@ -1,7 +1,7 @@
 .editor {
     --chat-w: clamp(320px, 27vw, 420px);
     --side-w: 300px;
-    height: 100dvh;
+    height: calc(100dvh - var(--visit-bar, 0px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1163,6 +1163,32 @@
     margin-left: 0;
 }
 
+/* What the assistant said as it worked: set apart from what it did, quieter, with no number. */
+.msg-steps li.step-said,
+.working-steps li.step-said {
+    list-style: none;
+    /* Not a step: the numbering carries on past it. */
+    counter-increment: list-item 0;
+    margin: 6px 0 6px -18px;
+    padding-left: 10px;
+    border-left: 2px solid var(--line-strong);
+    color: var(--ink-3);
+    font-style: italic;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* What it is doing now, in its own words. */
+.working-note {
+    /* In line with the heading above it and the line below. */
+    margin: 8px 0 0 34px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .msg-note {
     padding: 12px 14px;
     border: 1px dashed var(--line-strong);
@@ -1510,4 +1536,559 @@
 .side .tabs button {
     padding-inline: 7px;
     font-size: 13px;
+}
+
+/* ---- entries: drag to reorder; a picture's focal point ------------------------------ */
+
+.item-grip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    cursor: grab;
+    user-select: none;
+}
+
+.item-grip svg {
+    width: 13px;
+    height: 13px;
+}
+
+.item-dragging {
+    opacity: 0.45;
+}
+
+.item-over {
+    border-color: var(--seal);
+    box-shadow: 0 0 0 2px var(--seal);
+}
+
+.focal-picture {
+    position: relative;
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto;
+    line-height: 0;
+    cursor: crosshair;
+    border-radius: var(--radius-m);
+    overflow: hidden;
+}
+
+.focal-picture img {
+    display: block;
+    max-width: 100%;
+    max-height: 300px;
+    user-select: none;
+}
+
+.focal-picture i {
+    position: absolute;
+    width: 26px;
+    height: 26px;
+    margin: -13px 0 0 -13px;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    box-shadow:
+        0 0 0 2px var(--seal),
+        0 2px 8px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    transition:
+        left 0.2s,
+        top 0.2s;
+}
+
+.focal .field-help {
+    display: block;
+    margin-top: 8px;
+}
+
+/* ---- one history ----------------------------------------------------------------------- */
+
+.history-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 16px;
+}
+
+.history-filter button {
+    padding: 4px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: none;
+    font-size: 12px;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.history-filter button.on {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+}
+
+.tl-kind {
+    margin: 0 0 2px;
+    font-size: 10px;
+}
+
+.share-first {
+    display: block;
+    margin-top: 14px;
+}
+
+.share-link {
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+/* ---- design: looks and sections ------------------------------------------------------- */
+
+.design-tabs {
+    margin: 14px 0 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.design-about {
+    margin-top: 16px;
+    max-width: 70ch;
+}
+
+/* Asking for a look of the website's own: across the top of the looks, words on the left, the button on the right. */
+.design-own {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin-top: 16px;
+    padding: 14px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+    background: var(--surface);
+}
+
+.design-own > span {
+    display: grid;
+    gap: 2px;
+    flex: 1 1 280px;
+    min-width: 0;
+}
+
+.gallery > li .muted.design-place {
+    font-size: 11px;
+    min-height: 0;
+}
+
+/* ---- the assistant asks ---- */
+
+.msg-question {
+    display: grid;
+    gap: 14px;
+    padding: 14px 16px 12px;
+    border: 1px solid var(--seal);
+    border-radius: var(--radius-l);
+    background: var(--seal-wash);
+}
+
+.question-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--seal-deep);
+}
+
+.question-eyebrow svg {
+    width: 14px;
+    height: 14px;
+}
+
+.question {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.question legend {
+    padding: 0;
+    font-weight: 600;
+}
+
+.question-why {
+    margin: -4px 0 0;
+    font-size: 13px;
+}
+
+.question-options {
+    display: grid;
+    gap: 6px;
+}
+
+.question-option {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface-raised);
+    cursor: pointer;
+}
+
+.question-option.on {
+    border-color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.question-option input {
+    flex: none;
+    accent-color: var(--seal);
+    translate: 0 2px;
+}
+
+.question-first {
+    margin-left: auto;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.question-own {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    background: var(--surface-raised);
+    color: inherit;
+    font: inherit;
+}
+
+.question:disabled {
+    opacity: 0.6;
+}
+
+.question-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.question-note {
+    margin: 0;
+    font-size: 12.5px;
+}
+
+/* ---- how much it asks: the slider, always in view ---- */
+
+.asking {
+    min-width: 0;
+    margin: 4px 2px 6px;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+}
+
+.asking-full {
+    margin: 0;
+}
+
+.asking-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px 12px;
+    float: left;
+    width: 100%;
+    padding: 0;
+}
+
+.asking-head label {
+    cursor: pointer;
+}
+
+.asking-name {
+    font-size: 13px;
+}
+
+.asking-now {
+    margin: 8px 0 2px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.asking:disabled {
+    opacity: 0.55;
+}
+
+/* The buttons under the message box share its whole width. */
+.menu-wrap.ideas {
+    gap: 6px;
+}
+
+.menu-wrap.ideas > .btn,
+.menu-wrap.ideas > label {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: max-content;
+}
+
+/* How much it asks, under the message box: a button like the two above it, which opens the
+   slider in place. The panel grows and shrinks smoothly; nothing changes on hover. */
+.asking-fold {
+    padding: 0 2px 4px;
+}
+
+.asking-fold-button {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+    color: var(--ink-2);
+}
+
+.asking-fold-button strong {
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.asking-fold-chevron {
+    transition: rotate 0.3s var(--ease);
+}
+
+.asking-fold.open .asking-fold-chevron {
+    rotate: 180deg;
+}
+
+.asking-fold-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+        grid-template-rows 0.32s var(--ease),
+        opacity 0.25s var(--ease);
+}
+
+.asking-fold.open .asking-fold-panel {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.asking-fold-panel > div {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.asking-fold-inner {
+    min-width: 0;
+    margin: 6px 0 2px;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .asking-fold-panel,
+    .asking-fold-chevron {
+        transition: none;
+    }
+}
+
+/* ---- the slider, drawn: a line with a stop for each choice and a handle that glides ---- */
+
+.ask-track {
+    --thumb: 20px;
+    position: relative;
+    min-width: 0;
+}
+
+/* The line runs between the centres of the first and last stops. */
+.ask-line {
+    position: relative;
+    height: var(--thumb);
+    margin: 0 calc(var(--thumb) / 2);
+    pointer-events: none;
+}
+
+.ask-line::before,
+.ask-fill {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 4px;
+    border-radius: 2px;
+    translate: 0 -50%;
+}
+
+/* The line itself reaches both edges, so it lines up with the words above and below it;
+   the stops sit half a handle in, so the handle rests flush with each edge. */
+.ask-line::before {
+    left: calc(var(--thumb) / -2);
+    right: calc(var(--thumb) / -2);
+    background: var(--line-strong);
+}
+
+.ask-fill {
+    left: calc(var(--thumb) / -2);
+    width: calc(var(--at) * 100% + var(--thumb) / 2);
+    background: var(--seal);
+    transition: width 0.35s var(--ease);
+}
+
+.ask-stop {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--i) * 100%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    translate: -50% -50%;
+    transition: background 0.3s var(--ease);
+}
+
+/* On the part of the line already passed, a stop is a lighter mark on the colour. */
+.ask-stop.passed {
+    background: color-mix(in srgb, var(--surface-raised) 70%, var(--seal));
+}
+
+.ask-handle {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--at) * 100%);
+    width: var(--thumb);
+    height: var(--thumb);
+    border: 2px solid var(--seal);
+    border-radius: 50%;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    translate: -50% -50%;
+    transition:
+        left 0.35s var(--ease-spring),
+        scale 0.2s var(--ease),
+        box-shadow 0.2s var(--ease);
+}
+
+.ask-handle::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    background: var(--seal);
+}
+
+/* The real control lies over the drawing, invisible: it takes the pointer and the keyboard. */
+.ask-track input[type="range"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: var(--thumb);
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.ask-track:hover .ask-handle {
+    scale: 1.1;
+}
+
+.ask-track:has(input:active) .ask-handle {
+    scale: 0.94;
+    box-shadow: 0 0 0 6px var(--seal-wash);
+}
+
+.ask-track:has(input:focus-visible) .ask-handle {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+}
+
+.ask-names {
+    position: relative;
+    height: 20px;
+    margin: 6px calc(var(--thumb) / 2) 0;
+}
+
+.ask-names button {
+    position: absolute;
+    top: 0;
+    left: calc(var(--i) * 100%);
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--ink-3);
+    font: inherit;
+    font-size: 12.5px;
+    line-height: 16px;
+    white-space: nowrap;
+    cursor: pointer;
+    translate: -50% 0;
+    transition: color 0.25s var(--ease);
+}
+
+.ask-names button.first {
+    translate: calc(var(--thumb) / -2) 0;
+}
+
+.ask-names button.last {
+    translate: calc(-100% + var(--thumb) / 2) 0;
+}
+
+.ask-names button:hover {
+    color: var(--ink);
+}
+
+.ask-names button.on {
+    color: var(--ink);
+    font-weight: 500;
+}
+
+/* Where there is no room to name every stop, the two ends are named. */
+.ask-track-ends .ask-names .middle {
+    display: none;
+}
+
+.ask-track-ends .ask-names button {
+    font-size: 11.5px;
+}
+
+fieldset:disabled .ask-track {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ask-fill,
+    .ask-handle,
+    .ask-stop {
+        transition: none;
+    }
+}
+
+/* In the settings box the line sits under the heading (which is floated to span the box). */
+.asking .ask-track {
+    clear: both;
+    padding-top: 10px;
+}
+
+.asking .ask-track input[type="range"] {
+    top: 10px;
+}
+
+/* On a narrow chat panel the setting's button wraps onto two lines rather than widening the panel. */
+.asking-fold {
+    min-width: 0;
+}
+
+.asking-fold-button {
+    flex-wrap: wrap;
+    row-gap: 0;
+    min-width: 0;
+    height: auto;
+    white-space: normal;
 }

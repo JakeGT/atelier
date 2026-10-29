@@ -229,7 +229,10 @@ test("every tenant-scoped table has RLS forced and a policy", { skip }, async ()
         SELECT c.relname, c.relforcerowsecurity AS forced,
                (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
         FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id'
-        WHERE c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace AND c.relname <> 'audit_log'`;
+        WHERE c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace
+          -- Two tables look across studios on purpose and are read by operator routes only:
+          -- the audit log, and reports about Atelier itself (ADR-0020).
+          AND c.relname NOT IN ('audit_log', 'feedback_reports')`;
     assert.ok(rows.length >= 9);
     for (const r of rows) {
         assert.equal(r.forced, true, `${r.relname} does not FORCE RLS`);
@@ -772,6 +775,8 @@ test("media library: records are per studio; a removed file is kept until it is 
         decorative: false,
         bytes: 1234,
         variants: [{ name: "shop-abc123-480.webp", width: 480, bytes: 100 }],
+        focal: null,
+        poster: null,
         uploadedBy: null,
     });
     assert.deepEqual(asset.variants, [{ name: "shop-abc123-480.webp", width: 480, bytes: 100 }]);
@@ -783,6 +788,19 @@ test("media library: records are per studio; a removed file is kept until it is 
     assert.equal(await store.media.remove(b.tenantId, a.projectId, asset.id), null);
 
     assert.equal((await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "", decorative: true }))?.decorative, true);
+    // A focal point is set, kept when not mentioned, and cleared with null.
+    assert.deepEqual(
+        (await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "x", decorative: false, focal: { x: 25, y: 80 } }))?.focal,
+        { x: 25, y: 80 },
+    );
+    assert.deepEqual((await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "y", decorative: false }))?.focal, {
+        x: 25,
+        y: 80,
+    });
+    assert.equal(
+        (await store.media.describe(a.tenantId, a.projectId, asset.id, { alt: "y", decorative: false, focal: null }))?.focal,
+        null,
+    );
     assert.ok((await store.media.remove(a.tenantId, a.projectId, asset.id))?.deletedAt);
     assert.equal((await store.media.list(a.tenantId, a.projectId)).length, 0);
     assert.equal((await store.media.list(a.tenantId, a.projectId, true)).length, 1);
@@ -841,6 +859,17 @@ test("retention queries: old messages and old versions of wording go; the newest
             authorId: null,
         });
     }
+    // The latest changes to one website's wording, newest first, each naming its document; another studio sees none.
+    const recent = await store.content.recentRevisions(a.tenantId, a.projectId, 3);
+    assert.deepEqual(
+        recent.map((r) => [r.kind, r.slug, r.rev]),
+        [
+            ["page", "home", 5],
+            ["page", "home", 4],
+            ["page", "home", 3],
+        ],
+    );
+    assert.equal((await store.content.recentRevisions(b.tenantId, a.projectId, 10)).length, 0);
     const future = new Date(Date.now() + 60_000);
     const past = new Date(Date.now() - 60_000);
     assert.equal(await store.content.pruneRevisions(a.tenantId, past, 2), 0);
@@ -857,4 +886,198 @@ test("retention queries: old messages and old versions of wording go; the newest
     const other = await store.content.get(b.tenantId, b.projectId, "page", "home");
     assert.equal((await store.content.revisions(b.tenantId, other?.id ?? "")).length, 5);
     assert.equal((await store.messages.list(b.tenantId, b.projectId)).length, 1);
+});
+
+test("per-website roles, usage by month, and deleting a studio, against the database itself", { skip }, async () => {
+    const a = await studio("del-a");
+    const b = await studio("del-b");
+    await store.memberships.add({ tenantId: a.tenantId, userId: a.userId, role: "viewer" });
+
+    // A role on one website belongs to that studio alone.
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, "editor");
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, "admin");
+    assert.deepEqual(await store.projectMembers.list(a.tenantId, a.projectId), [{ userId: a.userId, role: "admin" }]);
+    assert.deepEqual(await store.projectMembers.forUser(a.tenantId, a.userId), [{ projectId: a.projectId, role: "admin" }]);
+    assert.deepEqual(await store.projectMembers.list(b.tenantId, a.projectId), []);
+    await assert.rejects(store.projectMembers.set(b.tenantId, a.projectId, a.userId, "editor"));
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, null);
+    assert.deepEqual(await store.projectMembers.forUser(a.tenantId, a.userId), []);
+    await store.projectMembers.set(a.tenantId, a.projectId, a.userId, "editor");
+
+    await store.usage.record({ tenantId: a.tenantId, projectId: a.projectId, kind: "agent.runs", units: 2, sourceId: `m-${suffix}-1` });
+    await store.usage.record({ tenantId: a.tenantId, projectId: a.projectId, kind: "agent.runs", units: 3, sourceId: `m-${suffix}-2` });
+    assert.deepEqual(await store.usage.monthly(a.tenantId, new Date(0)), [
+        { month: new Date().toISOString().slice(0, 7), kind: "agent.runs", units: 5 },
+    ]);
+    assert.deepEqual(await store.usage.monthly(b.tenantId, new Date(0)), []);
+
+    // Deleting a studio takes everything recorded under it, and nothing of anyone else's.
+    await store.organizations.delete(a.tenantId);
+    assert.equal(await store.organizations.findById(a.tenantId), null);
+    assert.equal(await store.projects.findById(a.tenantId, a.projectId), null);
+    for (const table of ["projects", "content_documents", "content_revisions", "memberships", "project_members"]) {
+        const [row] = await owner.sql
+            .unsafe(`SELECT count(*)::int AS n FROM ${table} WHERE tenant_id = '${a.tenantId}'`)
+            .catch(() => [{ n: -1 }]);
+        // The owner role cannot read these tables (FORCE RLS); the serving role, as that studio, sees none.
+        assert.ok(row?.n === 0 || row?.n === -1, `${table}: ${row?.n}`);
+    }
+    assert.equal((await store.content.list(a.tenantId, a.projectId)).length, 0);
+    assert.equal((await store.memberships.list(a.tenantId)).length, 0);
+    assert.ok(!(await store.organizations.listAll()).some((s) => s.id === a.tenantId));
+    assert.ok(await store.organizations.findById(b.tenantId));
+    assert.ok(await store.projects.findById(b.tenantId, b.projectId));
+    assert.ok(await store.users.findById(a.userId), "the person outlives the studio");
+});
+
+test("a studio's own templates belong to it alone", { skip }, async () => {
+    const a = await studio("tpl-a");
+    const b = await studio("tpl-b");
+    const made = await store.studioTemplates.create({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        name: "Shop",
+        description: "A shop",
+        files: [{ path: "index.html", content: Buffer.from("<h1>x</h1>").toString("base64") }],
+        content: [{ kind: "page", slug: "home", draft: { headline: "x" }, fields: [{ key: "headline", label: "Headline", type: "text" }] }],
+        sourceProject: a.projectId,
+        createdBy: a.userId,
+    });
+    assert.deepEqual((await store.studioTemplates.get(a.tenantId, made.id))?.content[0]?.fields, [
+        { key: "headline", label: "Headline", type: "text" },
+    ]);
+    assert.equal((await store.studioTemplates.list(a.tenantId)).length, 1);
+    assert.equal((await store.studioTemplates.list(b.tenantId)).length, 0);
+    assert.equal(await store.studioTemplates.get(b.tenantId, made.id), null);
+    await store.studioTemplates.remove(b.tenantId, made.id);
+    assert.ok(await store.studioTemplates.get(a.tenantId, made.id));
+    await store.studioTemplates.remove(a.tenantId, made.id);
+    assert.equal(await store.studioTemplates.get(a.tenantId, made.id), null);
+});
+
+test("what visitors send through a form belongs to its studio, and goes with its website", { skip }, async () => {
+    const a = await studio("form-a");
+    const b = await studio("form-b");
+    const made = await store.forms.add({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        form: "contact",
+        data: { name: "Grace", message: "Hello" },
+        preview: false,
+    });
+    assert.deepEqual(made.data, { name: "Grace", message: "Hello" });
+    assert.equal(await store.forms.unread(a.tenantId, a.projectId), 1);
+    // Another studio cannot read it, mark it, delete it, or file something under this website.
+    assert.equal((await store.forms.list(b.tenantId, a.projectId)).length, 0);
+    await store.forms.markRead(b.tenantId, a.projectId);
+    await store.forms.remove(b.tenantId, a.projectId, made.id);
+    assert.equal(await store.forms.unread(a.tenantId, a.projectId), 1);
+    await assert.rejects(
+        store.forms.add({
+            id: randomUUID(),
+            tenantId: b.tenantId,
+            projectId: a.projectId,
+            form: "contact",
+            data: { x: "y" },
+            preview: false,
+        }),
+    );
+    await store.forms.markRead(a.tenantId, a.projectId);
+    assert.ok((await store.forms.list(a.tenantId, a.projectId))[0]?.readAt);
+    assert.equal(await store.forms.purgeBefore(a.tenantId, new Date(Date.now() - 86_400_000)), 0);
+    assert.equal(await store.forms.purgeBefore(a.tenantId, new Date(Date.now() + 86_400_000)), 1);
+    await store.forms.add({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        form: "signup",
+        data: { email: "g@example.com" },
+        preview: true,
+    });
+    await store.projects.delete(a.tenantId, a.projectId);
+    assert.equal((await store.forms.list(a.tenantId, a.projectId)).length, 0);
+});
+
+test("the assistant's questions belong to their studio; one set is open per website", { skip }, async () => {
+    const a = await studio("ask-a");
+    const b = await studio("ask-b");
+    const q = [{ question: "Who is it for?", why: "Tone", options: ["Families", "Chefs"] }];
+    const first = await store.questions.ask({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        sessionId: null,
+        questions: q,
+    });
+    const second = await store.questions.ask({
+        id: randomUUID(),
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        sessionId: null,
+        questions: q,
+    });
+    assert.equal((await store.questions.open(a.tenantId, a.projectId))?.id, second.id);
+    assert.equal(await store.questions.close(a.tenantId, a.projectId, first.id, ["x"], a.userId), false);
+    assert.equal(await store.questions.open(b.tenantId, a.projectId), null);
+    assert.equal(await store.questions.close(b.tenantId, a.projectId, second.id, ["x"], b.userId), false);
+    assert.equal(await store.questions.close(a.tenantId, a.projectId, second.id, ["Chefs"], a.userId), true);
+    assert.equal(await store.questions.open(a.tenantId, a.projectId), null);
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.askLevel, 1);
+    assert.equal((await store.projects.update(a.tenantId, a.projectId, { askLevel: 3 })).askLevel, 3);
+    assert.equal((await store.projects.update(a.tenantId, a.projectId, { name: "Renamed" })).askLevel, 3);
+});
+
+test("reports about Atelier are kept across studios and can be closed, not deleted", { skip }, async () => {
+    const a = await studio("fb-a");
+    const made = await store.feedback.add({
+        id: randomUUID(),
+        source: "assistant",
+        kind: "tool",
+        text: "page_look had no tablet size.",
+        context: { studio: "A", website: "Site" },
+        tenantId: a.tenantId,
+        projectId: a.projectId,
+        userId: null,
+    });
+    assert.equal(made.status, "open");
+    assert.ok((await store.feedback.list({ status: "open" })).some((r) => r.id === made.id));
+    assert.equal((await store.feedback.setStatus(made.id, "done"))?.closedAt !== null, true);
+    assert.ok(!(await store.feedback.list({ status: "open" })).some((r) => r.id === made.id));
+    assert.equal((await store.feedback.setStatus(made.id, "open"))?.closedAt, null);
+    assert.equal(await store.feedback.setStatus(randomUUID(), "done"), null);
+    // It outlives the website it came from.
+    await store.projects.delete(a.tenantId, a.projectId);
+    assert.ok((await store.feedback.list()).some((r) => r.id === made.id));
+});
+
+test("a website records when its cover was taken", { skip }, async () => {
+    const a = await studio("cover-a");
+    const b = await studio("cover-b");
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, null);
+    const at = new Date("2026-10-11T10:00:00.000Z");
+    await store.projects.setCover(b.tenantId, a.projectId, at);
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, null);
+    await store.projects.setCover(a.tenantId, a.projectId, at);
+    assert.equal((await store.projects.findById(a.tenantId, a.projectId))?.coverAt, at.toISOString());
+});
+
+test("an operator's visit to a studio is kept until it ends or runs out", { skip }, async () => {
+    const a = await studio("visit-a");
+    const b = await studio("visit-b");
+    const until = new Date(Date.now() + 60_000);
+    const visit = await store.operatorVisits.start(b.userId, a.tenantId, until);
+    assert.equal(visit.until, until.toISOString());
+    assert.deepEqual(
+        (await store.operatorVisits.active(b.userId)).map((v) => v.studioId),
+        [a.tenantId],
+    );
+    assert.equal((await store.operatorVisits.active(a.userId)).length, 0);
+    // Asking again moves the end; it does not make a second visit.
+    await store.operatorVisits.start(b.userId, a.tenantId, new Date(Date.now() + 120_000));
+    assert.equal((await store.operatorVisits.active(b.userId)).length, 1);
+    assert.equal((await store.operatorVisits.active(b.userId, new Date(Date.now() + 180_000))).length, 0);
+    assert.equal(await store.operatorVisits.end(b.userId, a.tenantId), true);
+    assert.equal(await store.operatorVisits.end(b.userId, a.tenantId), false);
+    assert.equal((await store.operatorVisits.active(b.userId)).length, 0);
 });

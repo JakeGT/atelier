@@ -21,6 +21,8 @@ export interface Org {
     personalOf: string | null;
     // The signed-in person's role in this organisation.
     role: Role;
+    // Set when an operator is inside this studio without belonging to it: when the visit ends.
+    visiting?: string;
 }
 
 export interface Member {
@@ -56,7 +58,33 @@ export interface AuditEntry {
     detail: Record<string, unknown> | null;
 }
 
+// A member of the studio as they stand on one website.
+export interface ProjectMember {
+    userId: string;
+    name: string;
+    email: string;
+    studioRole: Role;
+    // Their role on this website; `differs` when it is not their role in the studio.
+    role: Role;
+    differs: boolean;
+    // Owners and admins have the same role everywhere.
+    fixed: boolean;
+}
+export interface MonthUsage {
+    month: string;
+    requests: number;
+    minutes: number;
+    tokensIn: number;
+    tokensOut: number;
+    // Estimated US dollars at the model's list price; null when no price was known.
+    cost: number | null;
+}
+
 export interface Project {
+    // This person's role on this website (it can differ from their role in the studio).
+    myRole?: Role;
+    // When the picture of its home page was last taken; absent or null if it has none yet.
+    coverAt?: string | null;
     id: string;
     tenantId: string;
     slug: string;
@@ -107,10 +135,35 @@ export interface ModelList {
     unavailable: boolean;
 }
 
+// A look: a whole design language a website can wear. `previewUrl` shows it.
+export interface DesignLook {
+    id: string;
+    name: string;
+    description: string;
+    previewUrl: string;
+    imageUrl?: string;
+    // The look made for this website alone, rather than one of the ready-made ones.
+    own?: boolean;
+}
+// A ready-made section of a page.
+export interface DesignLayout {
+    id: string;
+    name: string;
+    description: string;
+    place: "top" | "body" | "bottom";
+    previewUrl: string;
+}
+
 export interface Template {
     id: string;
     name: string;
     description: string;
+    // One of this studio's own (a website saved as a template).
+    own?: boolean;
+    // Where it can be looked at.
+    previewUrl?: string;
+    // A picture of it, when there is one: shown at once, with the live page for a closer look.
+    imageUrl?: string;
 }
 
 // What an operator sees of each studio.
@@ -156,11 +209,20 @@ export interface Checkpoint {
     date: string;
 }
 
+// One thing that happened to a website, for its history: the assistant changed its
+// files (a version), its wording was changed, or it was published.
+export type HistoryEntry =
+    | { type: "version"; at: string; title: string; sha: string; current: boolean }
+    | { type: "wording"; at: string; kind: string; slug: string; rev: number; by: string | null; current: boolean }
+    | { type: "published"; at: string; number: number; live: boolean; putBack: boolean };
+
 export interface AgentToolEvent {
     name: string;
     state: string;
     // For file tools: which file, relative to the website.
     target?: string | null;
+    // For a step named "say": what the assistant said as it worked. Its reply is not a step.
+    said?: string;
 }
 
 export interface AgentResult {
@@ -195,6 +257,8 @@ export interface Pulse {
     run: Run | null;
     runBy: { id: string; name: string; you: boolean } | null;
     stamp: number;
+    // How much the assistant asks on this website (someone else may have changed it).
+    askLevel?: number;
 }
 
 export interface ThreadMessage {
@@ -241,6 +305,34 @@ export interface SitePage {
     examples: { tag: string; text: string }[];
 }
 
+// A report about Atelier itself: from a person, or from the assistant about the system it works in.
+export interface FeedbackReport {
+    id: string;
+    source: "person" | "assistant";
+    kind: string;
+    text: string;
+    context: Record<string, string>;
+    status: "open" | "done";
+    createdAt: string;
+}
+
+// What the assistant has stopped to ask the person.
+export interface AssistantQuestions {
+    id: string;
+    questions: { question: string; why: string; options: string[] }[];
+}
+
+// What a visitor sent through one of a website's forms.
+export interface FormMessage {
+    id: string;
+    form: string;
+    data: Record<string, string>;
+    // Sent from the private preview while trying the form, not by a visitor.
+    preview: boolean;
+    createdAt: string;
+    readAt: string | null;
+}
+
 // A file in a website's media library.
 export interface MediaAsset {
     id: string;
@@ -255,6 +347,10 @@ export interface MediaAsset {
     decorative: boolean;
     bytes: number;
     variants: { name: string; width: number }[];
+    // Where the subject of a picture is (percent from the left and top), if it has been set.
+    focal: { x: number; y: number } | null;
+    // A video's still picture.
+    poster: string | null;
     createdAt: string;
 }
 export interface MediaLibrary {
@@ -272,7 +368,9 @@ export interface ContentField {
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
     // image: a file from the media library, held as its path ("media/<name>").
     // items: a list whose entries each have several parts, described by `itemFields`.
-    type: "text" | "long" | "rich" | "list" | "image" | "items";
+    // link: where something leads. number. date: "2026-10-10". yesno: shows or hides a part of a page.
+    // video: a clip from the media library.
+    type: "text" | "long" | "rich" | "list" | "image" | "items" | "link" | "number" | "date" | "yesno" | "video";
     help?: string;
     // Checked when the website is published.
     required?: boolean;
@@ -284,7 +382,7 @@ export interface ContentField {
 export interface ItemField {
     key: string;
     label: string;
-    type: "text" | "long" | "rich" | "image" | "link";
+    type: "text" | "long" | "rich" | "image" | "link" | "number" | "date";
     help?: string;
     required?: boolean;
     max?: number;
@@ -447,6 +545,10 @@ export const api = {
     },
     templates: () => get<{ templates: Template[] }>("/api/v1/templates").then((b) => b.templates),
     // Operators only.
+    // Go into a studio you do not belong to, for a limited time; its owners are shown the reason.
+    operatorEnter: (id: string, reason: string) =>
+        post<{ slug: string; until: string | null }>(`/api/v1/admin/studios/${id}/enter`, { reason }),
+    operatorLeave: (id: string) => post<{ ok: true }>(`/api/v1/admin/studios/${id}/leave`),
     operatorOverview: () => get<OperatorOverview>("/api/v1/admin/studios"),
     operatorUpdate: (
         id: string,
@@ -457,6 +559,21 @@ export const api = {
             flags?: StudioSummary["flags"];
         },
     ) => patch<{ studio: StudioSummary }>(`/api/v1/admin/studios/${id}`, changes),
+    // A report about Atelier itself, to whoever runs it.
+    report: (body: {
+        kind: "problem" | "idea";
+        text: string;
+        page: string;
+        org?: string;
+        project?: string;
+        screen?: string;
+        build?: string;
+    }) => post<{ ok: true }>("/api/v1/feedback", body),
+    operatorReports: (status?: "open" | "done") =>
+        get<{ reports: FeedbackReport[]; open: number }>(`/api/v1/admin/feedback${status ? `?status=${status}` : ""}`),
+    setReportStatus: (id: string, status: "open" | "done") =>
+        patch<{ report: FeedbackReport }>(`/api/v1/admin/feedback/${id}`, { status }).then((b) => b.report),
+    reportsDocumentUrl: "/api/v1/admin/feedback.md",
     operatorActivity: () => get<{ entries: AuditEntry[] }>("/api/v1/admin/audit").then((b) => b.entries),
     // The introduction is finished or skipped: it is not shown again.
     finishOnboarding: () => post<{ ok: boolean }>("/api/v1/me/onboarded"),
@@ -473,6 +590,25 @@ export function orgApi(org: string) {
         update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
             patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
+        // The design kit: looks and sections. `look`: show the sections wearing this look.
+        design: (look?: string) => get<{ looks: DesignLook[]; layouts: DesignLayout[] }>(`${o}/design${look ? `?look=${look}` : ""}`),
+        // This website's own look (null if it was not built with one), and itself in each look.
+        projectDesign: (projectId: string) => get<{ look: string | null; looks: DesignLook[] }>(`${p(projectId)}/design`),
+        setLook: (projectId: string, look: string) => put<{ ok: true; look: string }>(`${p(projectId)}/look`, { look }),
+        // Every starting point for a new website here: Atelier's own and this studio's.
+        templates: () => get<{ templates: Template[] }>(`${o}/templates`).then((b) => b.templates),
+        saveTemplate: (projectId: string, name: string, description: string) =>
+            post<{ template: Template }>(`${p(projectId)}/template`, { name, description }).then((b) => b.template),
+        removeTemplate: (id: string) => del<{ ok: true }>(`${o}/templates/${encodeURIComponent(id)}`),
+        monthlyUsage: () => get<{ months: MonthUsage[] }>(`${o}/usage/monthly`).then((b) => b.months),
+        // A link, good for five minutes, that downloads everything in the studio.
+        exportStudio: () => post<{ url: string }>(`${o}/export`).then((b) => b.url),
+        // For good. `confirm` is the studio's name, typed out.
+        deleteStudio: (confirm: string) => send("DELETE", o, { confirm }).then((r) => parse<{ ok: true }>(r)),
+        projectMembers: (projectId: string) => get<{ members: ProjectMember[] }>(`${p(projectId)}/members`).then((b) => b.members),
+        // `role` null: back to their role in the studio.
+        setProjectRole: (projectId: string, userId: string, role: "admin" | "editor" | "viewer" | null) =>
+            put<{ ok: true }>(`${p(projectId)}/members/${userId}`, { role }),
         providers: () => get<{ providers: ProviderInfo[] }>(`${o}/providers`).then((b) => b.providers),
         connectProvider: (id: string, apiKey: string) => put<{ ok: boolean; verified: boolean }>(`${o}/providers/${id}`, { apiKey }),
         disconnectProvider: (id: string) => del<{ ok: boolean }>(`${o}/providers/${id}`),
@@ -489,8 +625,12 @@ export function orgApi(org: string) {
 
         listProjects: (archived = false) =>
             get<{ projects: Project[] }>(`${o}/projects${archived ? "?archived=1" : ""}`).then((b) => b.projects),
-        createProject: (name: string, template?: string | null) =>
-            post<{ project: Project }>(`${o}/projects`, { name, ...(template ? { template } : {}) }).then((b) => b.project),
+        createProject: (name: string, template?: string | null, askLevel?: number) =>
+            post<{ project: Project }>(`${o}/projects`, {
+                name,
+                ...(template ? { template } : {}),
+                ...(askLevel === undefined ? {} : { askLevel }),
+            }).then((b) => b.project),
         updateProject: (projectId: string, changes: { name?: string; agentInstructions?: string | null; agentModel?: string | null }) =>
             patch<{ project: Project }>(p(projectId), changes).then((b) => b.project),
         archiveProject: (projectId: string) => post<{ project: Project }>(`${p(projectId)}/archive`).then((b) => b.project),
@@ -509,13 +649,22 @@ export function orgApi(org: string) {
         extendRun: (projectId: string, runId: string) => post<{ run: Run }>(`${p(projectId)}/runs/${runId}/extend`).then((b) => b.run),
         pulse: (projectId: string, typing: boolean) =>
             post<Pulse>(`${p(projectId)}/pulse`, { typing }).then((b) => ({ ...b, run: wholeRun(b.run) })),
+        // Answers to what the assistant asked: the same request carries on with them.
+        answer: (projectId: string, sessionId: string, id: string, answers: string[]) =>
+            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { answers: { id, answers } }).then((b) => b.run),
+        setAsking: (projectId: string, level: number) =>
+            put<{ askLevel: number }>(`${p(projectId)}/asking`, { level }).then((b) => b.askLevel),
         thread: (projectId: string) =>
-            get<{ messages: ThreadMessage[]; activeRun: Run | null; authors: Record<string, string> }>(`${p(projectId)}/messages`).then(
-                (b) => ({
-                    ...b,
-                    activeRun: wholeRun(b.activeRun),
-                }),
-            ),
+            get<{
+                messages: ThreadMessage[];
+                activeRun: Run | null;
+                authors: Record<string, string>;
+                question?: AssistantQuestions | null;
+                askLevel?: number;
+            }>(`${p(projectId)}/messages`).then((b) => ({
+                ...b,
+                activeRun: wholeRun(b.activeRun),
+            })),
         getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => wholeRun(b.run)),
 
         listCheckpoints: (projectId: string) =>
@@ -539,6 +688,13 @@ export function orgApi(org: string) {
 
         // For each page of the website, the pieces of wording it shows ("page/home#headline").
         contentMap: (projectId: string) => get<{ pages: SitePage[] }>(`${p(projectId)}/content/map`).then((b) => b.pages),
+        listMessages: (projectId: string) => get<{ messages: FormMessage[]; unread: number }>(`${p(projectId)}/submissions`),
+        readMessages: (projectId: string) => post<{ ok: true }>(`${p(projectId)}/submissions/read`),
+        removeMessage: (projectId: string, id: string) => del<{ ok: true }>(`${p(projectId)}/submissions/${id}`),
+        messagesCsvUrl: (projectId: string) => `${p(projectId)}/submissions.csv`,
+        // The picture of a website's home page, if one has been taken. The time in the address lets it be kept until the next one.
+        coverUrl: (project: Pick<Project, "id" | "coverAt">) =>
+            project.coverAt ? `${p(project.id)}/cover?v=${encodeURIComponent(project.coverAt)}` : undefined,
         listMedia: (projectId: string) => get<MediaLibrary>(`${p(projectId)}/media`),
         uploadMedia: (projectId: string, file: File, about: { alt: string; decorative: boolean }) => {
             const form = new FormData();
@@ -549,14 +705,18 @@ export function orgApi(org: string) {
                 .then((r) => parse<{ asset: MediaAsset }>(r))
                 .then((b) => b.asset);
         },
-        describeMedia: (projectId: string, id: string, about: { alt: string; decorative: boolean }) =>
-            patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${id}`, about).then((b) => b.asset),
+        describeMedia: (
+            projectId: string,
+            id: string,
+            about: { alt: string; decorative: boolean; focal?: { x: number; y: number } | null },
+        ) => patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${id}`, about).then((b) => b.asset),
         removeMedia: (projectId: string, id: string, anyway = false) =>
             del<{ ok: true }>(`${p(projectId)}/media/${id}${anyway ? "?anyway=1" : ""}`),
         // The smallest copy of an image there is, for showing it in the library.
-        mediaUrl: (projectId: string, asset: Pick<MediaAsset, "name" | "variants">) =>
-            `${p(projectId)}/media/file/${asset.variants[0]?.name ?? asset.name}`,
+        mediaUrl: (projectId: string, asset: Pick<MediaAsset, "name" | "variants"> & { poster?: string | null }) =>
+            `${p(projectId)}/media/file/${asset.poster ?? asset.variants[0]?.name ?? asset.name}`,
 
+        history: (projectId: string) => get<{ entries: HistoryEntry[] }>(`${p(projectId)}/history`).then((b) => b.entries),
         contentHistory: (projectId: string, kind: string, slug: string) =>
             get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${kind}/${slug}/revisions`).then((b) => b.revisions),
         restoreContent: (projectId: string, kind: string, slug: string, rev: number) =>
@@ -568,6 +728,8 @@ export function orgApi(org: string) {
             const { release } = await post<{ release: Release }>(`${p(projectId)}/releases`);
             return (await post<{ release: Release }>(`${p(projectId)}/releases/${release.number}/publish`)).release;
         },
+        // A link that shows the website as it is now to anyone who has it, without publishing.
+        share: (projectId: string) => post<{ url: string }>(`${p(projectId)}/share`).then((b) => b.url),
         // Takes the website offline; its files and history stay.
         unpublish: (projectId: string) => post<{ ok: boolean }>(`${p(projectId)}/unpublish`),
         rollback: (projectId: string, number: number) =>

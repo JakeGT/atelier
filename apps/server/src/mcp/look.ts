@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { LAYOUT_NOTICES } from "./layout.ts";
 
 // The assistant's eyes: a headless browser inside the workspace that opens a
 // page of the website the way a visitor's browser would and takes pictures of
@@ -24,6 +25,9 @@ const SIZES: Record<Size, { width: number; height: number; mobile: boolean }> = 
 // A picture taller than this is hard for a model to read; a long page is given in parts.
 const PART_HEIGHT = 1400;
 const MAX_PARTS = 3;
+// One part looked at close up: how much of its surroundings is kept, and how large its picture is made.
+const CLOSE_UP_MARGIN = 24;
+const CLOSE_UP_PIXELS = 1500;
 const IDLE_MS = 90_000;
 
 export interface Look {
@@ -41,6 +45,11 @@ export interface Look {
     // The main things on the stretch looked at, top to bottom, with where they are and
     // how big: what a model that cannot read pictures has to go on.
     outline: string[];
+    // Near-misses of layout on the stretch looked at: almost lined up, almost centred, unevenly
+    // spaced. Offered as worth a look; some are meant.
+    notices: string[];
+    // When one part was looked at close up: how much larger than life the picture is.
+    enlarged?: number;
 }
 
 export function browserPath(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -55,6 +64,7 @@ interface Pending {
 
 export class Browser {
     private readonly path: string;
+    private readonly proxy: string | null;
     private child: ChildProcess | null = null;
     private socket: WebSocket | null = null;
     private dir: string | null = null;
@@ -63,9 +73,16 @@ export class Browser {
     private readonly listeners = new Set<(method: string, params: Record<string, unknown>, sessionId?: string) => void>();
     private idle: NodeJS.Timeout | null = null;
     private starting: Promise<void> | null = null;
+    private stuck = false;
+    // One look at a time: a workspace has one processor, and two pages drawn at once are both slow.
+    private queue: Promise<unknown> = Promise.resolve();
 
-    constructor(path: string) {
+    // `proxy`: the workspace's way out to the web, when it has one, so that what a page loads
+    // from other addresses (a font service, a picture) is in the pictures too.
+    constructor(path: string, proxy?: string | null) {
         this.path = path;
+        this.proxy = proxy || null;
+        process.once("exit", this.kill);
     }
 
     private async start(): Promise<void> {
@@ -85,12 +102,13 @@ export class Browser {
                 "--disable-extensions",
                 "--disable-background-networking",
                 "--disable-sync",
-                "--no-proxy-server",
+                ...(this.proxy ? [`--proxy-server=${this.proxy}`, "--proxy-bypass-list=127.0.0.1;localhost"] : ["--no-proxy-server"]),
                 "--remote-debugging-port=0",
                 `--user-data-dir=${this.dir}`,
                 "about:blank",
             ],
-            { stdio: ["ignore", "ignore", "pipe"] },
+            // Its own process group, so closing it takes its helper processes with it.
+            { stdio: ["ignore", "ignore", "pipe"], detached: true },
         );
         this.child = child;
         const endpoint = await new Promise<string>((resolve, reject) => {
@@ -148,6 +166,8 @@ export class Browser {
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.pending.delete(id);
+                // A browser that has stopped answering will not start again by being asked: the next look gets a new one.
+                this.stuck = true;
                 reject(new Error(`the browser did not answer (${method})`));
             }, 30_000);
             this.pending.set(id, {
@@ -164,20 +184,53 @@ export class Browser {
         });
     }
 
+    // Stops the browser and its helpers at once. Also what happens when this process ends,
+    // so a browser never outlives whoever was looking.
+    private readonly kill = (): void => {
+        const pid = this.child?.pid;
+        if (pid) {
+            try {
+                process.kill(-pid, "SIGKILL");
+            } catch {
+                this.child?.kill("SIGKILL");
+            }
+        }
+        this.child = null;
+    };
+
     async close(): Promise<void> {
         if (this.idle) clearTimeout(this.idle);
         this.socket?.close();
         this.socket = null;
-        this.child?.kill("SIGKILL");
-        this.child = null;
+        this.kill();
         this.starting = null;
+        this.stuck = false;
         if (this.dir) await rm(this.dir, { recursive: true, force: true }).catch(() => {});
         this.dir = null;
     }
 
     // Opens `url` at a visitor's screen size and returns pictures of it from `from` pixels down.
-    async look(url: string, size: Size, from = 0): Promise<Look> {
+    // Looks wait their turn, and one that fails because the browser itself gave up (it stopped
+    // answering, or closed) is tried once more with a new browser.
+    // `closeUp`: a CSS selector. The picture is then of that one part of the page, enlarged.
+    look(url: string, size: Size, from = 0, closeUp?: string): Promise<Look> {
+        const run = async (): Promise<Look> => {
+            try {
+                return await this.once(url, size, from, closeUp);
+            } catch (err) {
+                if (!/did not answer|browser closed|not running|did not start|could not connect/.test((err as Error).message)) throw err;
+                await this.close();
+                return await this.once(url, size, from, closeUp);
+            }
+        };
+        const turn = this.queue.then(run, run);
+        this.queue = turn.catch(() => {});
+        return turn;
+    }
+
+    private async once(url: string, size: Size, from: number, closeUp?: string): Promise<Look> {
         if (this.idle) clearTimeout(this.idle);
+        if (this.stuck) await this.close();
         if (!this.socket) {
             this.starting ??= this.start();
             try {
@@ -215,6 +268,13 @@ export class Browser {
                 await this.send(
                     "Emulation.setDeviceMetricsOverride",
                     { width: screen.width, height: screen.height, deviceScaleFactor: 1, mobile: screen.mobile },
+                    sessionId,
+                );
+                // The page as it ends up: movement is switched off, as for a visitor who asked their device
+                // for less of it. Otherwise things waiting to be scrolled to would look missing.
+                await this.send(
+                    "Emulation.setEmulatedMedia",
+                    { features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
                     sessionId,
                 );
                 const loaded = new Promise<void>((resolve) => {
@@ -259,14 +319,24 @@ export class Browser {
                                 if (ox > 8 && oy > 8) overlaps.push(say(a.el) + " and " + say(b.el) + " overlap by " + ox + "x" + oy + "px");
                             }
                             const cut = key.filter((b) => /^(H\\d|P|LI|BUTTON|A)$/.test(b.el.tagName) && b.el.scrollWidth > b.el.clientWidth + 4 && getComputedStyle(b.el).overflowX !== "visible").slice(0, 5).map((b) => say(b.el) + " is cut off: it needs " + b.el.scrollWidth + "px and has " + b.el.clientWidth + "px");
-                            const edge = key.filter((b) => /^(H\\d|P|LI|BUTTON)$/.test(b.el.tagName) && b.el.textContent.trim() && (b.x < 4 || b.x + b.w > w - 4) && b.w < w + 2).slice(0, 5).map((b) => say(b.el) + " touches the edge of the screen");
-                            return { outline, overlaps, cut, edge, title: document.title, height: Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0), scrollWidth: d.scrollWidth, viewport: w, wide, broken, tiny, empty: !document.body || (document.body.innerText.trim().length === 0 && !document.body.querySelector("img,canvas,svg,video,picture")) };
+                            const edge = key.filter((b) => /^(H\\d|P|LI|BUTTON)$/.test(b.el.tagName) && b.el.textContent.trim() && (b.x < 4 || b.x + b.w > w - 4) && b.w < w + 2 && !b.el.closest("[data-k-track]")).slice(0, 5).map((b) => say(b.el) + " touches the edge of the screen");
+                            // Drawn but not visible: an element given a colour and a size that ends up with no area.
+                            // The usual cause is a width or height on an inline element (a span), which browsers ignore.
+                            const painted = (el) => { const s = getComputedStyle(el); return (s.backgroundColor && s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent") || s.backgroundImage !== "none"; };
+                            const unseen = [...document.body.querySelectorAll("*")].filter((el) => {
+                                if (el.children.length || el.textContent.trim() || ["BR", "HR", "SCRIPT", "STYLE", "IMG", "INPUT", "SVG", "PATH"].includes(el.tagName.toUpperCase())) return false;
+                                const s = getComputedStyle(el), r = el.getBoundingClientRect();
+                                if (s.display === "none" || s.visibility === "hidden") return false;
+                                return painted(el) && (r.width < 1 || r.height < 1);
+                            }).slice(0, 6).map((el) => { const s = getComputedStyle(el); return name(el) + " has a colour but takes up no space" + (s.display === "inline" ? ": it is an inline element (" + el.tagName.toLowerCase() + "), so its width and height are ignored; give it display:block" : " (" + Math.round(el.getBoundingClientRect().width) + "x" + Math.round(el.getBoundingClientRect().height) + "px)"); });
+                            return { unseen, outline, overlaps, cut, edge, title: document.title, height: Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0), scrollWidth: d.scrollWidth, viewport: w, wide, broken, tiny, empty: !document.body || (document.body.innerText.trim().length === 0 && !document.body.querySelector("img,canvas,svg,video,picture")) };
                         })()`,
                     },
                     sessionId,
                 )) as {
                     result?: {
                         value?: {
+                            unseen: string[];
                             outline: { y: number; bottom: number; line: string }[];
                             overlaps: string[];
                             cut: string[];
@@ -289,7 +359,13 @@ export class Browser {
                     problems.push(
                         `The page is wider than the screen (${m.scrollWidth}px on a ${m.viewport}px screen), so it scrolls sideways. Too wide: ${m.wide.join("; ") || "unknown"}.`,
                     );
-                for (const src of m.broken) problems.push(`A picture did not load: ${src}`);
+                for (const src of m.broken)
+                    problems.push(
+                        !this.proxy && /^(https?:)?\/\//.test(src ?? "")
+                            ? `A picture from another address cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${src}`
+                            : `A picture did not load: ${src}`,
+                    );
+                for (const u of m.unseen) problems.push(`Cannot be seen: ${u}.`);
                 for (const o of m.overlaps) problems.push(`Overlapping: ${o}.`);
                 for (const c of m.cut) problems.push(`Cut off: ${c}.`);
                 for (const e of m.edge) problems.push(`No margin: ${e}.`);
@@ -297,31 +373,69 @@ export class Browser {
                 for (const id of failed) {
                     const u = requests.get(id) ?? "";
                     if (u && !m.broken.some((b) => u.endsWith(b ?? "")) && problems.length < 12)
-                        problems.push(`Something the page asked for did not load: ${u.replace(/^https?:\/\/127\.0\.0\.1:\d+\//, "")}`);
+                        problems.push(
+                            this.proxy || /^https?:\/\/127\.0\.0\.1[:/]/.test(u)
+                                ? `Something the page asked for did not load: ${u.replace(/^https?:\/\/127\.0\.0\.1:\d+\//, "").slice(0, 160)}`
+                                : // This browser has no way out of the workspace, so nothing from another address can be seen here.
+                                  `Loaded from another address, which cannot be reached from here, so it is missing from these pictures (visitors will get it if the address is right): ${u.slice(0, 160)}`,
+                        );
+                }
+                const noticed = (
+                    (await this.send("Runtime.evaluate", { returnByValue: true, expression: LAYOUT_NOTICES }, sessionId)) as {
+                        result?: { value?: { y: number; bottom: number; line: string }[] };
+                    }
+                ).result?.value;
+                const within = (top: number, bottom: number) => ({
+                    outline: m.outline
+                        .filter((o) => o.bottom > top && o.y < bottom)
+                        .slice(0, 60)
+                        .map((o) => o.line),
+                    notices: (noticed ?? [])
+                        .filter((n) => n.bottom > top && n.y < bottom)
+                        .slice(0, 12)
+                        .map((n) => n.line),
+                });
+                const shot = async (clip: { x: number; y: number; width: number; height: number; scale: number }) =>
+                    (
+                        (await this.send(
+                            "Page.captureScreenshot",
+                            { format: "jpeg", quality: 72, captureBeyondViewport: true, clip },
+                            sessionId,
+                        )) as { data: string }
+                    ).data;
+                const about = { title: m.title, size, width: screen.width, pageHeight: m.height, problems };
+                if (closeUp) {
+                    const found = (
+                        (await this.send(
+                            "Runtime.evaluate",
+                            {
+                                returnByValue: true,
+                                expression: `(() => { try { const el = document.querySelector(${JSON.stringify(closeUp)}); if (!el) return { none: true }; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top + scrollY, w: r.width, h: r.height }; } catch { return { bad: true }; } })()`,
+                            },
+                            sessionId,
+                        )) as { result?: { value?: { none?: boolean; bad?: boolean; x: number; y: number; w: number; h: number } } }
+                    ).result?.value;
+                    if (!found || found.bad) throw new Error(`"${closeUp}" is not a CSS selector`);
+                    if (found.none || found.w < 1 || found.h < 1)
+                        throw new Error(`nothing visible on the page matches "${closeUp}" at this width`);
+                    // A little of what surrounds it is kept, to see how it sits among its neighbours.
+                    const x = Math.max(0, Math.floor(found.x - CLOSE_UP_MARGIN));
+                    const y = Math.max(0, Math.floor(found.y - CLOSE_UP_MARGIN));
+                    const width = Math.max(1, Math.min(screen.width - x, Math.ceil(found.w + 2 * CLOSE_UP_MARGIN)));
+                    const height = Math.min(PART_HEIGHT, Math.ceil(found.h + 2 * CLOSE_UP_MARGIN), Math.max(1, m.height - y));
+                    const scale = Math.round(Math.max(1, Math.min(3, CLOSE_UP_PIXELS / Math.max(width, height))) * 100) / 100;
+                    const picture = await shot({ x, y, width, height, scale });
+                    return { ...about, from: y, to: y + height, pictures: [picture], enlarged: scale, ...within(y, y + height) };
                 }
                 const start = Math.max(0, Math.min(Math.floor(from), Math.max(0, m.height - 200)));
                 const pictures: string[] = [];
                 let y = start;
                 while (y < m.height && pictures.length < MAX_PARTS) {
                     const height = Math.min(PART_HEIGHT, m.height - y);
-                    const shot = (await this.send(
-                        "Page.captureScreenshot",
-                        {
-                            format: "jpeg",
-                            quality: 72,
-                            captureBeyondViewport: true,
-                            clip: { x: 0, y, width: screen.width, height, scale: 1 },
-                        },
-                        sessionId,
-                    )) as { data: string };
-                    pictures.push(shot.data);
+                    pictures.push(await shot({ x: 0, y, width: screen.width, height, scale: 1 }));
                     y += height;
                 }
-                const outline = m.outline
-                    .filter((o) => o.bottom > start && o.y < y)
-                    .slice(0, 60)
-                    .map((o) => o.line);
-                return { title: m.title, size, width: screen.width, pageHeight: m.height, from: start, to: y, pictures, problems, outline };
+                return { ...about, from: start, to: y, pictures, ...within(start, y) };
             } finally {
                 this.listeners.delete(on);
             }

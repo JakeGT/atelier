@@ -1,12 +1,12 @@
-import { ArrowLeft, PauseCircle, PlayCircle } from "lucide-react";
+import { ArrowLeft, Check, Download, LogIn, PauseCircle, PlayCircle, Undo2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
-import type { AuditEntry, OperatorOverview, Session, StudioSummary } from "../lib/api";
+import type { AuditEntry, FeedbackReport, OperatorOverview, Session, StudioSummary } from "../lib/api";
 import { api, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo } from "../lib/hooks";
 import { Dialog, Dots, UserMenu, useToast, Wordmark } from "../ui/kit";
 
-export type OperatorTab = "studios" | "activity";
+export type OperatorTab = "studios" | "activity" | "reports";
 
 interface Props {
     session: Session;
@@ -44,22 +44,149 @@ export function Operator({ session, tab, theme, onToggleTheme }: Props) {
                     Operator <em>console.</em>
                 </h1>
                 <div className="tabs settings-tabs" role="tablist">
-                    {(["studios", "activity"] as const).map((t) => (
+                    {(["studios", "reports", "activity"] as const).map((t) => (
                         <button
                             key={t}
                             type="button"
                             role="tab"
                             aria-selected={tab === t}
                             className={tab === t ? "on" : ""}
-                            onClick={() => navigate(t === "studios" ? "/admin" : "/admin/activity")}
+                            onClick={() => navigate(t === "studios" ? "/admin" : `/admin/${t}`, { quiet: true })}
                         >
-                            {t === "studios" ? "Studios" : "Activity"}
+                            {t === "studios" ? "Studios" : t === "reports" ? "Reports" : "Activity"}
                         </button>
                     ))}
                 </div>
-                {tab === "studios" ? <Studios /> : <Activity />}
+                {tab === "studios" ? <Studios /> : tab === "reports" ? <Reports /> : <Activity />}
             </main>
         </div>
+    );
+}
+
+const REPORT_KINDS: Record<string, string> = {
+    problem: "Something is wrong",
+    idea: "An idea",
+    tool: "A tool did not work as described",
+    rules: "The rules were unclear",
+    missing: "Something it needed was missing",
+    other: "Something else",
+};
+
+// What people, and the assistant, have said about Atelier itself. Read, act on, mark as dealt with.
+function Reports() {
+    const toast = useToast();
+    const [showing, setShowing] = useState<"open" | "done">("open");
+    const [reports, setReports] = useState<FeedbackReport[] | null>(null);
+    const [open, setOpen] = useState(0);
+    const load = useCallback(
+        () =>
+            api.operatorReports(showing).then(
+                (b) => {
+                    setReports(b.reports);
+                    setOpen(b.open);
+                },
+                (err: Error) => toast(err.message, "error"),
+            ),
+        [showing, toast],
+    );
+    useEffect(() => {
+        setReports(null);
+        void load();
+    }, [load]);
+    const mark = async (r: FeedbackReport, status: "open" | "done") => {
+        try {
+            await api.setReportStatus(r.id, status);
+            await load();
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    };
+    return (
+        <section className="reports">
+            <p className="muted settings-about">
+                What people have reported from the account menu, and what the assistant has said got in its way while working. Reports from
+                the assistant are about Atelier's tools and rules, not about anyone's website.
+            </p>
+            <div className="reports-bar">
+                <div className="tabs" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={showing === "open"}
+                        className={showing === "open" ? "on" : ""}
+                        onClick={() => setShowing("open")}
+                    >
+                        To look at ({open})
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={showing === "done"}
+                        className={showing === "done" ? "on" : ""}
+                        onClick={() => setShowing("done")}
+                    >
+                        Dealt with
+                    </button>
+                </div>
+                {open > 0 && (
+                    <a className="btn btn-sm" href={api.reportsDocumentUrl} download>
+                        <Download /> Download everything to look at, as one document
+                    </a>
+                )}
+            </div>
+            {reports === null ? (
+                <Dots />
+            ) : reports.length === 0 ? (
+                <p className="muted">
+                    {showing === "open" ? "Nothing to look at. Reports appear here as they are sent." : "Nothing has been dealt with yet."}
+                </p>
+            ) : (
+                <ul className="reports-list">
+                    {reports.map((r) => (
+                        <li key={r.id} className="report-item">
+                            <div className="report-head">
+                                <span className={`chip ${r.source === "assistant" ? "" : "chip-draft"}`}>
+                                    {r.source === "assistant" ? "From the assistant" : "From a person"}
+                                </span>
+                                <strong>{REPORT_KINDS[r.kind] ?? r.kind}</strong>
+                                <span className="muted" title={new Date(r.createdAt).toLocaleString()}>
+                                    {timeAgo(r.createdAt)}
+                                </span>
+                            </div>
+                            <p className="report-text">{r.text}</p>
+                            <p className="muted report-context">
+                                {[
+                                    r.context.from,
+                                    r.context.studio,
+                                    r.context.website,
+                                    r.context.page,
+                                    r.context.model,
+                                    r.context.screen,
+                                    r.context.browser,
+                                ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                            </p>
+                            <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => void mark(r, r.status === "open" ? "done" : "open")}
+                            >
+                                {r.status === "open" ? (
+                                    <>
+                                        <Check /> Mark as dealt with
+                                    </>
+                                ) : (
+                                    <>
+                                        <Undo2 /> Put back to look at
+                                    </>
+                                )}
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </section>
     );
 }
 
@@ -181,6 +308,23 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
         }
     }
 
+    // Going in: for an hour, as an admin of the studio, with its owners told why.
+    const [reason, setReason] = useState("");
+    async function enter() {
+        setBusy(true);
+        try {
+            const visit = await api.operatorEnter(studio.id, reason.trim());
+            // A fresh start, so the studio is among the ones this session can open.
+            window.location.assign(`/o/${visit.slug}`);
+        } catch (err) {
+            if (err instanceof ReauthRequired) {
+                toast("Please confirm your sign-in, then try that again.", "error");
+                setTimeout(reauthenticate, 1400);
+            } else toast((err as Error).message, "error");
+            setBusy(false);
+        }
+    }
+
     function save(e: FormEvent) {
         e.preventDefault();
         const max = websites.trim() === "" ? null : Number(websites);
@@ -242,6 +386,29 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
                 <p className="field-help">
                     Leave a limit empty to use the default. A studio's owner can also set a daily token limit of their own.
                 </p>
+
+                {!suspended && (
+                    <div className="operator-enter">
+                        <p className="eyebrow">Go into this studio</p>
+                        <p className="field-help">
+                            To help someone, you can open their studio for 60 minutes. Inside you can do what an admin of the studio can
+                            (you cannot delete or export it). Its owners are told at once, with your reason, and everything you do is
+                            written to the studio's activity.
+                        </p>
+                        <label className="field-line">
+                            <span>Why you are going in (the owners see this)</span>
+                            <input
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value)}
+                                maxLength={300}
+                                placeholder="The preview is blank; looking into it"
+                            />
+                        </label>
+                        <button type="button" className="btn" disabled={busy || reason.trim().length < 3} onClick={() => void enter()}>
+                            <LogIn /> Open {studio.name} for 60 minutes
+                        </button>
+                    </div>
+                )}
 
                 <div className="dialog-actions dialog-actions-split">
                     {suspended ? (

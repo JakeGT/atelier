@@ -85,6 +85,10 @@ export const projectSchema = z.object({
     // Guidance the owner gives the assistant for this website, and an optional model.
     agentInstructions: z.string().nullable(),
     agentModel: z.string().nullable(),
+    // How much the assistant asks before it acts: 0 decides everything itself … 3 assumes nothing.
+    askLevel: z.number().int().min(0).max(3),
+    // When the picture of its home page (shown on its card) was last taken; null if it has none yet.
+    coverAt: z.string().datetime().nullable(),
     archivedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
 });
@@ -98,9 +102,9 @@ export type Project = z.infer<typeof projectSchema>;
 // ---- P1 entities (content store + release workflow) ----
 
 // How one field of a content document is shown and edited (ADR-0014).
-export const FIELD_TYPES = ["text", "long", "rich", "list", "image", "items"] as const;
+export const FIELD_TYPES = ["text", "long", "rich", "list", "image", "items", "link", "number", "date", "yesno", "video"] as const;
 // The parts of one item in a list of items ("a service": its name, summary, photograph).
-export const ITEM_FIELD_TYPES = ["text", "long", "rich", "image", "link"] as const;
+export const ITEM_FIELD_TYPES = ["text", "long", "rich", "image", "link", "number", "date"] as const;
 const fieldBase = {
     key: z.string().regex(/^[A-Za-z][\w-]{0,63}$/),
     // In the person's words: "Headline", not "heroTitle".
@@ -115,10 +119,11 @@ export const itemFieldSchema = z.object({ ...fieldBase, type: z.enum(ITEM_FIELD_
 export const contentFieldSchema = z.object({
     ...fieldBase,
     // text: one line. long: several lines. rich: a little formatting. list: one item per line.
-    // image: a file from the media library ("media/<name>"). items: a list whose entries
-    // each have several parts, described by `itemFields`.
+    // image, video: a file from the media library ("media/<name>"). items: a list whose
+    // entries each have several parts, described by `itemFields`. link: where something
+    // leads. number. date: "2026-10-10". yesno: true or false, to show or hide a part of a page.
     type: z.enum(FIELD_TYPES),
-    itemFields: z.array(itemFieldSchema).min(1).max(12).optional(),
+    itemFields: z.array(itemFieldSchema).min(1).max(40).optional(),
 });
 export type ItemField = z.infer<typeof itemFieldSchema>;
 export type ContentField = z.infer<typeof contentFieldSchema>;
@@ -158,6 +163,10 @@ export const mediaAssetSchema = z.object({
     // Everything stored for it, variants included.
     bytes: z.number().int(),
     variants: z.array(z.object({ name: z.string(), width: z.number().int(), bytes: z.number().int() })),
+    // Where the subject of a picture is, as percentages from the left and top; null = the middle.
+    focal: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }).nullable(),
+    // A video's still picture: another file stored with it.
+    poster: z.string().nullable(),
     uploadedBy: z.string().uuid().nullable(),
     createdAt: z.string().datetime(),
     deletedAt: z.string().datetime().nullable(),
@@ -253,7 +262,9 @@ export const agentMessageSchema = z.object({
     // "note": the request was stopped or ran out of time; it can be carried on.
     role: z.enum(["user", "assistant", "error", "note"]),
     text: z.string(),
-    tools: z.array(z.object({ name: z.string(), state: z.string(), target: z.string().nullable().optional() })).nullable(),
+    tools: z
+        .array(z.object({ name: z.string(), state: z.string(), target: z.string().nullable().optional(), said: z.string().optional() }))
+        .nullable(),
     runId: z.string().uuid().nullable(),
     // Who wrote it (a person's request); null for the assistant's replies.
     authorId: z.string().uuid().nullable(),
@@ -283,7 +294,9 @@ export const invitationSchema = z.object({
     expiresAt: z.string().datetime(),
 });
 
-export const USAGE_KINDS = ["agent.input_tokens", "agent.output_tokens", "agent.runs", "agent.seconds"] as const;
+// `agent.cost_micros`: an estimate in millionths of a US dollar, from the tokens
+// used and the model's list price at the time. The provider's bill is what counts.
+export const USAGE_KINDS = ["agent.input_tokens", "agent.output_tokens", "agent.runs", "agent.seconds", "agent.cost_micros"] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
 export type Member = z.infer<typeof memberSchema>;

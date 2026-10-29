@@ -55,6 +55,9 @@ export interface OrganizationStore {
             flags?: Organization["flags"];
         },
     ): Promise<Organization>;
+    // Removes the studio and everything recorded under it (members, websites and
+    // all that belongs to them). The activity record and usage figures outlive it.
+    delete(id: string): Promise<void>;
     // Every studio, for the operator. Not tenant-scoped: only operator routes may call it.
     listAll(): Promise<StudioSummary[]>;
 }
@@ -83,6 +86,7 @@ export interface ProjectPatch {
     name?: string;
     agentInstructions?: string | null;
     agentModel?: string | null;
+    askLevel?: number;
     archived?: boolean;
 }
 
@@ -97,6 +101,8 @@ export interface ProjectStore {
     // Where the website is hosted: its project there, and its stable public address.
     // `productionRef`: omitted keeps the address, null clears it (the website was taken offline).
     setHosting(tenantId: string, id: string, hosting: { hostingRef: string; productionRef?: string | null }): Promise<Project>;
+    // A new picture of the home page was taken.
+    setCover(tenantId: string, id: string, at: Date): Promise<void>;
     // Removes the project and everything that hangs off it (content, releases, conversation).
     delete(tenantId: string, id: string): Promise<void>;
 }
@@ -126,6 +132,88 @@ export interface UsageStore {
     record(input: { tenantId: string; projectId: string | null; kind: UsageKind; units: number; sourceId: string }): Promise<void>;
     totals(tenantId: string, since: Date): Promise<UsageTotals[]>;
     total(tenantId: string, kinds: UsageKind[], since: Date): Promise<number>;
+    // Per calendar month (UTC, "2026-10") and kind, since `since`.
+    monthly(tenantId: string, since: Date): Promise<{ month: string; kind: string; units: number }[]>;
+}
+
+// Questions the assistant asked the person, and what it was told.
+export interface AgentQuestionSet {
+    id: string;
+    projectId: string;
+    sessionId: string | null;
+    questions: { question: string; why: string; options: string[] }[];
+    answers: string[] | null;
+    askedAt: string;
+    closedAt: string | null;
+}
+export interface AgentQuestionStore {
+    // Asking again sets aside whatever was still open.
+    ask(input: {
+        id: string;
+        tenantId: string;
+        projectId: string;
+        sessionId: string | null;
+        questions: AgentQuestionSet["questions"];
+    }): Promise<AgentQuestionSet>;
+    // The questions waiting for an answer, if any.
+    open(tenantId: string, projectId: string): Promise<AgentQuestionSet | null>;
+    // Closes the open set: with answers, or (null) set aside unanswered. False if it was not open.
+    close(tenantId: string, projectId: string, id: string, answers: string[] | null, userId: string | null): Promise<boolean>;
+}
+
+// What a visitor sent through one of a website's forms.
+export interface FormSubmission {
+    id: string;
+    projectId: string;
+    form: string;
+    data: Record<string, string>;
+    preview: boolean;
+    createdAt: string;
+    readAt: string | null;
+}
+export interface FormStore {
+    add(input: {
+        id: string;
+        tenantId: string;
+        projectId: string;
+        form: string;
+        data: Record<string, string>;
+        preview: boolean;
+    }): Promise<FormSubmission>;
+    list(tenantId: string, projectId: string, limit?: number): Promise<FormSubmission[]>;
+    unread(tenantId: string, projectId: string): Promise<number>;
+    markRead(tenantId: string, projectId: string): Promise<void>;
+    remove(tenantId: string, projectId: string, id: string): Promise<void>;
+    // Retention: removes submissions older than `before`; returns how many.
+    purgeBefore(tenantId: string, before: Date): Promise<number>;
+}
+
+// A website a studio saved to begin other websites from.
+export interface StudioTemplate {
+    id: string;
+    tenantId: string;
+    name: string;
+    description: string;
+    files: { path: string; content: string }[];
+    content: { kind: string; slug: string; draft: Record<string, unknown>; fields: ContentField[] | null }[];
+    sourceProject: string | null;
+    createdAt: string;
+}
+export interface StudioTemplateStore {
+    create(template: Omit<StudioTemplate, "createdAt"> & { createdBy: string | null }): Promise<StudioTemplate>;
+    list(tenantId: string): Promise<StudioTemplate[]>;
+    get(tenantId: string, id: string): Promise<StudioTemplate | null>;
+    remove(tenantId: string, id: string): Promise<void>;
+}
+
+// A member's role on one website where it differs from their role in the studio.
+export type ProjectRole = "admin" | "editor" | "viewer";
+export interface ProjectMemberStore {
+    list(tenantId: string, projectId: string): Promise<{ userId: string; role: ProjectRole }[]>;
+    // null: back to their role in the studio.
+    set(tenantId: string, projectId: string, userId: string, role: ProjectRole | null): Promise<void>;
+    // Every website on which this person's role differs.
+    forUser(tenantId: string, userId: string): Promise<{ projectId: string; role: ProjectRole }[]>;
 }
 
 // Content is written only as drafts. `published` changes only when a release
@@ -147,6 +235,8 @@ export interface ContentStore {
     snapshot(tenantId: string, projectId: string): Promise<ContentDocument[]>;
     revisions(tenantId: string, documentId: string): Promise<ContentRevision[]>;
     revision(tenantId: string, documentId: string, rev: number): Promise<ContentRevision | null>;
+    // The latest changes to a website's wording, newest first, with which document each was to.
+    recentRevisions(tenantId: string, projectId: string, limit: number): Promise<(ContentRevision & { kind: string; slug: string })[]>;
     // Retention: removes earlier versions older than `before`, always keeping each
     // document's newest `keep` (and so its current one). Returns how many went.
     pruneRevisions(tenantId: string, before: Date, keep: number): Promise<number>;
@@ -238,7 +328,12 @@ export interface MediaStore {
     // What the library shows; `withRemoved` adds files taken out of it but not yet purged.
     list(tenantId: string, projectId: string, withRemoved?: boolean): Promise<MediaAsset[]>;
     get(tenantId: string, projectId: string, id: string): Promise<MediaAsset | null>;
-    describe(tenantId: string, projectId: string, id: string, patch: { alt: string; decorative: boolean }): Promise<MediaAsset | null>;
+    describe(
+        tenantId: string,
+        projectId: string,
+        id: string,
+        patch: { alt: string; decorative: boolean; focal?: MediaAsset["focal"] },
+    ): Promise<MediaAsset | null>;
     // Takes it out of the library; the file is purged later.
     remove(tenantId: string, projectId: string, id: string): Promise<MediaAsset | null>;
     // Removed before `before`, across the tenant's websites: ready to purge.
@@ -286,6 +381,42 @@ export interface DomainStore {
 }
 
 // Append-only. Not tenant-scoped: entries outlive what they describe.
+// An operator inside a studio they do not belong to, until a set time.
+export interface OperatorVisit {
+    userId: string;
+    studioId: string;
+    startedAt: string;
+    until: string;
+}
+export interface OperatorVisitStore {
+    // Starts a visit, or moves the end of one already under way.
+    start(userId: string, studioId: string, until: Date): Promise<OperatorVisit>;
+    // Ends it. False if there was none.
+    end(userId: string, studioId: string): Promise<boolean>;
+    // This operator's visits that have not run out.
+    active(userId: string, now?: Date): Promise<OperatorVisit[]>;
+}
+
+// A report about Atelier itself, for whoever runs it.
+export interface FeedbackReport {
+    id: string;
+    source: "person" | "assistant";
+    kind: string;
+    text: string;
+    context: Record<string, string>;
+    tenantId: string | null;
+    projectId: string | null;
+    userId: string | null;
+    status: "open" | "done";
+    createdAt: string;
+    closedAt: string | null;
+}
+export interface FeedbackStore {
+    add(report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt">): Promise<FeedbackReport>;
+    list(filter?: { status?: "open" | "done"; limit?: number }): Promise<FeedbackReport[]>;
+    setStatus(id: string, status: "open" | "done"): Promise<FeedbackReport | null>;
+}
+
 export interface AuditStore {
     record(entry: {
         tenantId: string | null;
@@ -329,8 +460,14 @@ export interface Store {
     deployments: DeploymentStore;
     domains: DomainStore;
     media: MediaStore;
+    projectMembers: ProjectMemberStore;
+    studioTemplates: StudioTemplateStore;
+    forms: FormStore;
+    questions: AgentQuestionStore;
     notifications: NotificationStore;
     audit: AuditStore;
+    feedback: FeedbackStore;
+    operatorVisits: OperatorVisitStore;
     loginSessions: LoginSessionStore;
     close(): Promise<void>;
 }

@@ -359,6 +359,53 @@ test("the assistant can look at a page: a real browser runs inside the workspace
     assert.match(seen.outline[0] ?? "", /^h1 'Hello' at left 32px, top 24px/);
 });
 
+test("a link to show someone: a preview deployment through the real deployer, with the live website untouched", async () => {
+    const before = (await pagesState()).sites[site]?.files["/index.html"];
+    inside(ws.container, `printf '<h1>not published yet</h1>' > /workspace/index.html`);
+    assert.ok(commit(ws.container).ok);
+    const res = await call("POST", `/projects/${ws.id}/share`);
+    assert.equal(res.status, 201, await res.clone().text());
+    const { url } = (await res.json()) as { url: string };
+    assert.match(url, /^https:\/\/dep-\d+\./);
+    // What visitors see has not changed.
+    assert.equal((await pagesState()).sites[site]?.files["/index.html"], before);
+});
+
+test("design kit: a website starts in a look, and changing the look rewrites one file in the real workspace", async () => {
+    const { project } = await json<{ project: { id: string } }>(
+        await call("POST", "/projects", { name: "E2E Look", template: "look:editorial" }),
+    );
+    const { session } = await json<{ session: { status: string; workspaceId: string } }>(
+        await call("POST", `/projects/${project.id}/sessions`),
+    );
+    assert.equal(session.status, "ready");
+    const first = (file: string) => inside(session.workspaceId, `head -c 40 /workspace/${file}`).out;
+    assert.match(first("theme.css"), /^\/\* atelier-look: editorial /);
+    assert.match(inside(session.workspaceId, "ls /workspace").out, /index\.html[\s\S]*kit\.css[\s\S]*theme\.css/);
+    const page = inside(session.workspaceId, "cat /workspace/index.html").out;
+    assert.equal((await call("PUT", `/projects/${project.id}/look`, { look: "midnight" })).status, 200);
+    assert.match(first("theme.css"), /^\/\* atelier-look: midnight /);
+    assert.equal(inside(session.workspaceId, "cat /workspace/index.html").out, page);
+    assert.match(
+        inside(session.workspaceId, "cd /workspace && git log --format=%s").out,
+        /^Changed the look to Midnight\nStarted with the Editorial look$/,
+    );
+
+    // Its card gets a picture of the home page: taken by the browser in the real workspace, a few
+    // seconds after the change, of the page wearing the look it was just given.
+    let coverAt: string | null = null;
+    for (let i = 0; i < 40 && !coverAt; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        coverAt = (await json<{ project: { coverAt: string | null } }>(await call("GET", `/projects/${project.id}`))).project.coverAt;
+    }
+    assert.ok(coverAt, "no cover was taken within 40 seconds");
+    const cover = await call("GET", `/projects/${project.id}/cover`);
+    assert.equal(cover.headers.get("content-type"), "image/webp");
+    const bytes = Buffer.from(await cover.arrayBuffer());
+    assert.equal(bytes.subarray(0, 4).toString("latin1"), "RIFF");
+    assert.ok(bytes.length > 1500, `the cover is only ${bytes.length} bytes`);
+});
+
 test("only the deployer holds the hosting credential, and a workspace cannot reach it", async () => {
     const tokenOf = (name: string) =>
         inspect<Inspect>(name)
@@ -390,7 +437,7 @@ test("archiving stops the workspace; deleting removes it and its files", async (
     await json(await call("POST", `/projects/${ws.id}/sessions`));
     assert.equal(inspect<Inspect>(ws.container).State.Running, true);
     // (Rolling back changed what is live, not the working files.)
-    assert.match(inside(ws.container, "cat /workspace/index.html").out, /<title>Seen<\/title>/);
+    assert.match(inside(ws.container, "cat /workspace/index.html").out, /not published yet/);
 
     await json(await call("POST", `/projects/${ws.id}/archive`));
     // Archived, the published website is still up; deleting takes it down.

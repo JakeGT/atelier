@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Bold, Italic, Link2, List, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bold, GripVertical, Italic, Link2, List, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ContentDocument, ContentField } from "../lib/api";
 import { timeAgo } from "../lib/hooks";
@@ -56,6 +56,8 @@ export function shapeOf(key: string, value: unknown): Shape {
     if (typeof value === "boolean") return { key, label, type: "yesno" };
     if (typeof value === "string") {
         if (MEDIA.test(value)) return { key, label, type: "image" };
+        if (/^media\/[a-z0-9][a-z0-9-]*\.(mp4|webm)$/.test(value)) return { key, label, type: "video" };
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return { key, label, type: "date" };
         if (LINK.test(value.trim())) return { key, label, type: "link" };
         if (/<(p|br|strong|em|b|i|ul|ol|li|a|h[2-4]|blockquote)[\s>/]/i.test(value)) return { key, label, type: "rich" };
         return { key, label, type: value.length > 90 || value.includes("\n") ? "long" : "text" };
@@ -214,7 +216,10 @@ function Field({ shape, value, onChange, readOnly, id, focus, where }: FieldProp
                         disabled={readOnly}
                         onChange={(e) => onChange(e.target.checked)}
                     />
-                    <span>{shape.label}</span>
+                    <span>
+                        {shape.label}
+                        <span className="field-note"> · {value === true ? "shown on the website" : "hidden on the website"}</span>
+                    </span>
                 </label>
                 {where}
                 {help}
@@ -225,8 +230,8 @@ function Field({ shape, value, onChange, readOnly, id, focus, where }: FieldProp
     return (
         <div className="field">
             {label}
-            {shape.type === "image" ? (
-                <PictureField value={str} onChange={onChange} readOnly={readOnly} />
+            {shape.type === "image" || shape.type === "video" ? (
+                <PictureField value={str} onChange={onChange} readOnly={readOnly} kind={shape.type} />
             ) : shape.type === "rich" ? (
                 <RichEditor id={id} value={str} onChange={onChange} readOnly={readOnly} focus={focus === true} />
             ) : shape.type === "long" || shape.type === "list" ? (
@@ -245,7 +250,7 @@ function Field({ shape, value, onChange, readOnly, id, focus, where }: FieldProp
             ) : (
                 <input
                     id={id}
-                    type={shape.type === "number" ? "number" : "text"}
+                    type={shape.type === "number" ? "number" : shape.type === "date" ? "date" : "text"}
                     value={str}
                     readOnly={readOnly}
                     placeholder={shape.type === "link" ? "A web address, or a page such as about.html" : undefined}
@@ -285,6 +290,19 @@ function Items({
         if (it) next.splice(i + by, 0, it);
         onChange(next);
     };
+    // Dragging an entry by its handle moves it; Move up and Move down do the same without a mouse.
+    const [dragging, setDragging] = useState<number | null>(null);
+    const [over, setOver] = useState<number | null>(null);
+    const drop = (to: number) => {
+        if (dragging !== null && dragging !== to) {
+            const next = [...value];
+            const [it] = next.splice(dragging, 1);
+            if (it) next.splice(to, 0, it);
+            onChange(next);
+        }
+        setDragging(null);
+        setOver(null);
+    };
     const one = shape.label.replace(/ies$/i, "y").replace(/s$/i, "").toLowerCase();
     const full = shape.max !== undefined && value.length >= shape.max;
     // An entry is known by its first line of text, when it has one.
@@ -297,9 +315,40 @@ function Items({
         <div className="items">
             {value.length === 0 && <p className="muted">Nothing here yet.</p>}
             {value.map((entry, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: entries have no identity of their own; position is what they are
-                <fieldset key={i} className="item">
+                <fieldset
+                    // biome-ignore lint/suspicious/noArrayIndexKey: entries have no identity of their own; position is what they are
+                    key={i}
+                    className={`item ${dragging === i ? "item-dragging" : ""} ${over === i && dragging !== null && dragging !== i ? "item-over" : ""}`}
+                    onDragOver={(e) => {
+                        if (dragging === null) return;
+                        e.preventDefault();
+                        setOver(i);
+                    }}
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        drop(i);
+                    }}
+                >
                     <legend className="mono muted">
+                        {!readOnly && value.length > 1 && (
+                            // biome-ignore lint/a11y/noStaticElementInteractions: a drag handle; Move up and Move down do the same from the keyboard
+                            <span
+                                className="item-grip"
+                                draggable
+                                onDragStart={(e) => {
+                                    setDragging(i);
+                                    e.dataTransfer.effectAllowed = "move";
+                                    e.dataTransfer.setData("text/plain", String(i));
+                                }}
+                                onDragEnd={() => {
+                                    setDragging(null);
+                                    setOver(null);
+                                }}
+                                title="Drag to move this entry"
+                            >
+                                <GripVertical /> Drag to move ·{" "}
+                            </span>
+                        )}
                         {i + 1} of {value.length}
                         {titleOf(entry)}
                     </legend>

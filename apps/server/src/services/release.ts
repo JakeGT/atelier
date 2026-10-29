@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Project, Release } from "@atelier/shared";
 import type { Store } from "../store/types.ts";
 import { contentProblems } from "./contentChecks.ts";
+import { formActions, formNames } from "./forms.ts";
 import { type DeployInput, type Hosting, HostingError, siteName } from "./hosting.ts";
 import { filesOf, mimeOfName, storageKey } from "./media.ts";
 import type { MediaStorage } from "./mediaStorage.ts";
@@ -34,6 +35,7 @@ export class ReleaseService {
     private readonly hosting: Hosting | null;
     private readonly prefix: string;
     private readonly storage: MediaStorage | null;
+    private readonly forms: { origin: string; secret: string } | null;
     // One deployment per website at a time.
     private readonly deploying = new Set<string>();
 
@@ -43,7 +45,10 @@ export class ReleaseService {
         hosting: Hosting | null = null,
         prefix = "atl-",
         storage: MediaStorage | null = null,
+        // Where forms send to (this server's public address) and the key their links are signed with.
+        forms: { origin: string; secret: string } | null = null,
     ) {
+        this.forms = forms;
         this.storage = storage;
         this.store = store;
         this.runtime = runtime;
@@ -128,9 +133,78 @@ export class ReleaseService {
                 width: asset.width,
                 height: asset.height,
                 variants: asset.variants.map((v) => ({ name: v.name, width: v.width })),
+                focal: asset.focal,
+                poster: asset.poster,
             });
         }
         return { media, mediaInfo };
+    }
+
+    // A link to show someone the website as it is now, without publishing it: the
+    // current files and wording go to the host as a preview, at an address nobody
+    // can guess and that search engines are told not to list. The live website and
+    // the release history are untouched. Each call makes a new link.
+    async share(tenantId: string, projectId: string): Promise<{ url: string }> {
+        const hosting = this.hosting;
+        if (!hosting) throw new ReleaseError("a link to show someone needs hosting, which is not set up on this server", 409);
+        const project = await this.store.projects.findById(tenantId, projectId);
+        const head = project ? await this.runtime.head(projectId).catch(() => null) : null;
+        if (!project || !head) throw new ReleaseError("there is nothing to show yet: ask your assistant to build the website first", 409);
+        if (this.deploying.has(projectId)) throw new ReleaseError("this website is being published; try again in a moment", 409);
+        this.deploying.add(projectId);
+        try {
+            const archive = await this.runtime.exportTree(projectId, head);
+            const site = await this.site(tenantId, project);
+            const content = (await this.store.content.list(tenantId, projectId))
+                .filter((d) => d.draft !== null)
+                .map((d) => ({ kind: d.kind, slug: d.slug, content: d.draft }));
+            const result = await hosting.deploy({
+                site,
+                archive,
+                branch: "preview",
+                canonicalHost: null,
+                commit: head,
+                content,
+                // A link to show someone is still a trial: what is sent through it is marked as such.
+                forms: this.formsFor(tenantId, projectId, archive, true),
+                ...(await this.mediaFor(tenantId, projectId, archive, content)),
+            });
+            const deployment = await this.store.deployments.create({
+                id: randomUUID(),
+                tenantId,
+                projectId,
+                releaseId: null,
+                kind: "preview",
+                provider: "cloudflare-pages",
+                url: result.url,
+                state: "building",
+            });
+            await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });
+            // The website now has a project at the host, so that deleting or unpublishing it clears this too.
+            await this.store.projects.setHosting(tenantId, projectId, { hostingRef: site, productionRef: project.productionRef });
+            return { url: result.url };
+        } catch (err) {
+            if (err instanceof ReleaseError) throw err;
+            const site = err instanceof HostingError && err.kind === "site";
+            if (!site) console.error(`preview deploy failed for ${projectId}: ${(err as Error).message}`);
+            throw new ReleaseError(
+                site ? (err as Error).message : "the link could not be made just now; try again in a moment",
+                site ? 422 : 502,
+            );
+        } finally {
+            this.deploying.delete(projectId);
+        }
+    }
+
+    // Where each form in the website's pages sends to, for the host to write into them.
+    private formsFor(tenantId: string, projectId: string, archive: Uint8Array, preview: boolean): Record<string, string> {
+        if (!this.forms) return {};
+        return formActions(
+            this.forms.origin,
+            this.forms.secret,
+            { tenantId, projectId, preview },
+            formNames(Buffer.from(archive).toString("latin1")),
+        );
     }
 
     // The website's project at the host, named once and kept.
@@ -246,6 +320,7 @@ export class ReleaseService {
                 canonicalHost: await this.canonicalHost(tenantId, projectId, site),
                 commit: release.codeSha,
                 content,
+                forms: this.formsFor(tenantId, projectId, archive, false),
                 ...(await this.mediaFor(tenantId, projectId, archive, content)),
             });
             await this.store.deployments.finish(tenantId, deployment.id, { state: "live", providerRef: result.id, url: result.url });

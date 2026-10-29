@@ -56,7 +56,7 @@ export function mediaRoutes(api: Api): void {
                   .trim()
                   .slice(0, 300);
         const where = { tenantId: project.tenantId, projectId: project.id };
-        const files = [prepared.main, ...prepared.variants];
+        const files = [prepared.main, ...prepared.variants, ...(prepared.poster ? [prepared.poster] : [])];
         try {
             for (const f of files) await storage.put(storageKey(where, f.name), f.body, f.mime);
         } catch (err) {
@@ -81,6 +81,8 @@ export function mediaRoutes(api: Api): void {
             decorative,
             bytes: files.reduce((n, f) => n + f.body.length, 0),
             variants: prepared.variants.map((v) => ({ name: v.name, width: v.width, bytes: v.body.length })),
+            focal: null,
+            poster: prepared.poster?.name ?? null,
             uploadedBy: c.get("user").id,
         });
         await audit(c, "media.upload", `media:${asset.id}`, { name: asset.name, bytes: asset.bytes });
@@ -88,10 +90,16 @@ export function mediaRoutes(api: Api): void {
     });
 
     route("patch", `${PROJECT}/media/:id`, "media.write", async (c) => {
-        const body = (await c.req.json().catch(() => null)) as { alt?: unknown; decorative?: unknown } | null;
+        const body = (await c.req.json().catch(() => null)) as { alt?: unknown; decorative?: unknown; focal?: unknown } | null;
         const decorative = body?.decorative === true;
         const alt = decorative ? "" : typeof body?.alt === "string" ? body.alt.trim().slice(0, 300) : "";
-        const asset = await store.media.describe(c.get("org").id, c.get("project").id, param(c, "id"), { alt, decorative });
+        // `focal`: { x, y } in percent to set it, null to put it back in the middle, absent to leave it.
+        const point = body?.focal as { x?: unknown; y?: unknown } | null | undefined;
+        const ok = (n: unknown): n is number => typeof n === "number" && n >= 0 && n <= 100;
+        if (point !== undefined && point !== null && !(ok(point.x) && ok(point.y)))
+            return c.json({ error: "focal must be { x, y } between 0 and 100" }, 400);
+        const focal = point === undefined ? undefined : point === null ? null : { x: point.x as number, y: point.y as number };
+        const asset = await store.media.describe(c.get("org").id, c.get("project").id, param(c, "id"), { alt, decorative, focal });
         return asset ? c.json({ asset: shown(asset) }) : c.json({ error: "not found" }, 404);
     });
 
@@ -182,6 +190,9 @@ export function mediaRoutes(api: Api): void {
                 width: a.width,
                 height: a.height,
                 smallerCopies: a.variants.map((v) => ({ path: `media/${v.name}`, width: v.width })),
+                // A video's still picture, and where a picture's subject is (percent from left and top).
+                poster: a.poster ? `media/${a.poster}` : null,
+                focal: a.focal,
             })),
         });
     });

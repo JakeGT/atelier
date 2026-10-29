@@ -383,3 +383,19 @@ test("the overview reports unpublished changes", async () => {
     assert.equal(after.hasChanges, false);
     assert.equal(after.liveRelease?.number, 1);
 });
+
+test("deleting a website deletes it in one step; without a recent sign-in nothing changes at all", async () => {
+    const t = await makeApp();
+    // Signed in a while ago: asked to confirm, and the website is exactly as it was (not archived).
+    const stale = await signIn(t, { authTime: Date.now() - 60 * 60_000 });
+    const project = await createProject(t, stale.api, stale.write);
+    const refused = await t.app.request(`${stale.api}/projects/${project.id}`, { method: "DELETE", headers: stale.write });
+    assert.equal(refused.status, 401);
+    assert.deepEqual(await refused.json(), { error: "reauth_required" });
+    assert.equal((await t.store.projects.findById(stale.org.id, project.id))?.archivedAt ?? null, null);
+
+    // Having confirmed: gone, with no separate archiving first.
+    const fresh = await signIn(t, { tenantId: stale.org.id, role: "owner" });
+    assert.equal((await t.app.request(`${fresh.api}/projects/${project.id}`, { method: "DELETE", headers: fresh.write })).status, 200);
+    assert.equal(await t.store.projects.findById(stale.org.id, project.id), null);
+});

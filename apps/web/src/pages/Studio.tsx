@@ -1,10 +1,27 @@
-import { Archive, ArchiveRestore, ArrowUp, ArrowUpRight, CloudOff, Ellipsis, Globe, PencilLine, Plus, Trash2, Type } from "lucide-react";
+import {
+    Archive,
+    ArchiveRestore,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    ArrowUpRight,
+    CloudOff,
+    Ellipsis,
+    Globe,
+    LayoutTemplate,
+    PencilLine,
+    Plus,
+    Trash2,
+    Type,
+} from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AskLevelSlider } from "../editor/Asking";
 import type { Org, Project, Session, Template } from "../lib/api";
 import { api, can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
-import { navigate, type Theme, timeAgo, useClickOutside } from "../lib/hooks";
+import { navigate, type Theme, timeAgo, useClickOutside, useDragScroll } from "../lib/hooks";
 import { Cover } from "../ui/Cover";
+import { Gallery } from "../ui/Gallery";
 import { Dialog, Dots, useToast } from "../ui/kit";
 import { StudioNav } from "../ui/StudioNav";
 
@@ -28,6 +45,10 @@ interface StudioProps {
     onToggleTheme: () => void;
 }
 
+const ASK_KEPT = "atelier.askLevel";
+// A deletion waiting for the person to confirm their sign-in; finished when they return.
+const PENDING_DELETE = "atelier.pendingDelete";
+
 export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme }: StudioProps) {
     const toast = useToast();
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
@@ -40,10 +61,75 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     // Starter templates: a finished small website to begin from, instead of an empty page.
     const [templates, setTemplates] = useState<Template[]>([]);
     const [template, setTemplate] = useState<string | null>(null);
+    // How much the assistant asks on the new website. What was chosen last is offered again.
+    const [askLevel, setAskLevelState] = useState(() => {
+        const kept = Number(window.localStorage.getItem(ASK_KEPT));
+        return Number.isInteger(kept) && kept >= 0 && kept <= 3 && window.localStorage.getItem(ASK_KEPT) !== null ? kept : 1;
+    });
+    const setAskLevel = (level: number) => {
+        setAskLevelState(level);
+        window.localStorage.setItem(ASK_KEPT, String(level));
+    };
+    const loadTemplates = useCallback(() => a.templates().then(setTemplates, () => api.templates().then(setTemplates, () => {})), [a]);
     useEffect(() => {
-        api.templates().then(setTemplates, () => {});
-    }, []);
-    const chosen = templates.find((t) => t.id === template);
+        void loadTemplates();
+    }, [loadTemplates]);
+    // Looks an empty website can start in, offered beside the templates.
+    const [looks, setLooks] = useState<Template[]>([]);
+    useEffect(() => {
+        a.design().then(
+            (d) =>
+                setLooks(
+                    d.looks.map((l) => ({
+                        id: `look:${l.id}`,
+                        name: `${l.name} look`,
+                        description: l.description,
+                        previewUrl: l.previewUrl,
+                        imageUrl: l.imageUrl,
+                    })),
+                ),
+            () => {},
+        );
+    }, [a]);
+    // Everything a website can start from, in the order it is offered: the studio's own
+    // templates, then looks (an empty website in a finished design), then finished websites.
+    const starts: (Template & { tag: string })[] = [
+        ...templates.filter((t) => t.own).map((t) => ({ ...t, tag: "Yours" })),
+        ...looks.map((t) => ({ ...t, name: t.name.replace(/ look$/, ""), tag: "Look" })),
+        ...templates.filter((t) => !t.own).map((t) => ({ ...t, tag: "Website" })),
+    ];
+    const chosen = starts.find((t) => t.id === template);
+    const [choosing, setChoosing] = useState(false);
+    const designsRow = useDragScroll<HTMLDivElement>();
+    // Saving a website as one of the studio's own starting points.
+    const [saving, setSaving] = useState<Project | null>(null);
+    const [templateName, setTemplateName] = useState("");
+    const [templateAbout, setTemplateAbout] = useState("");
+    async function saveAsTemplate(e: FormEvent) {
+        e.preventDefault();
+        if (!saving) return;
+        setBusy(true);
+        try {
+            await a.saveTemplate(saving.id, templateName.trim(), templateAbout.trim());
+            toast(`“${templateName.trim()}” is now a starting point for new websites in this studio.`);
+            setSaving(null);
+            await loadTemplates();
+        } catch (err) {
+            toast((err as Error).message, "error");
+        } finally {
+            setBusy(false);
+        }
+    }
+    async function removeTemplate(t: Template) {
+        try {
+            await a.removeTemplate(t.id);
+            if (template === t.id) setTemplate(null);
+            toast(`“${t.name}” was removed. Websites already made from it are not affected.`);
+            await loadTemplates();
+        } catch (err) {
+            toast((err as Error).message, "error");
+        }
+    }
     const [deleting, setDeleting] = useState<Project | null>(null);
     const [unpublishing, setUnpublishing] = useState<Project | null>(null);
     const nameRef = useRef<HTMLInputElement>(null);
@@ -74,7 +160,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
         }
         setBusy(true);
         try {
-            const project = await a.createProject(name.trim(), template);
+            const project = await a.createProject(name.trim(), template, askLevel);
             if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
             navigate(`/o/${org.slug}/p/${project.slug}`);
         } catch (err) {
@@ -123,23 +209,36 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
 
     async function remove(p: Project) {
         try {
-            // A website is archived (stopped and frozen) before it can be deleted.
-            if (!p.archivedAt) {
-                await a.archiveProject(p.id);
-                setDeleting({ ...p, archivedAt: new Date().toISOString() });
-            }
             await a.deleteProject(p.id);
             setDeleting(null);
             toast(`${p.name} was deleted.`);
             await load();
         } catch (err) {
             if (err instanceof ReauthRequired) {
-                void load();
-                toast("Please confirm your sign-in, then delete again. The website is archived in the meantime.", "error");
+                // Nothing has changed yet. The deletion is remembered and finished when they come back signed in.
+                sessionStorage.setItem(PENDING_DELETE, JSON.stringify({ id: p.id, at: Date.now() }));
+                toast("Please confirm your sign-in. The website is deleted as soon as you have.", "error");
                 setTimeout(reauthenticate, 1200);
-            } else toast((err as Error).message, "error");
+            } else {
+                // A step failed part-way: the website may have been put away, so show where it is now.
+                void load();
+                toast((err as Error).message, "error");
+            }
         }
     }
+    // Back from confirming a sign-in that a deletion was waiting for: finish it.
+    const resumed = useRef(false);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, when the websites have loaded
+    useEffect(() => {
+        if (resumed.current || projects === null) return;
+        const raw = sessionStorage.getItem(PENDING_DELETE);
+        if (!raw) return;
+        resumed.current = true;
+        sessionStorage.removeItem(PENDING_DELETE);
+        const pending = JSON.parse(raw) as { id: string; at: number };
+        const project = [...projects, ...archived].find((x) => x.id === pending.id);
+        if (project && Date.now() - pending.at < 10 * 60_000) void remove(project);
+    }, [projects, archived]);
 
     return (
         <div className="studio">
@@ -179,29 +278,93 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 value={brief}
                                 onChange={(e) => setBrief(e.target.value)}
                                 onKeyDown={onBriefKey}
-                                rows={3}
+                                rows={2}
                                 aria-label="Describe the website"
                             />
-                            <p className="brief-start">
-                                {chosen
-                                    ? `${chosen.description} It is there the moment you open the website; then ask your assistant to make it yours.`
-                                    : "Your assistant builds the first page from your description, or you start in the editor with nothing."}
-                            </p>
+                            {/* The designs and templates are shown, not hidden behind a button: a row of
+                                live miniatures to pick from, with the rest one step away. */}
+                            <div className="designs" role="radiogroup" aria-labelledby="designs-label">
+                                <div className="designs-head">
+                                    <p className="designs-label" id="designs-label">
+                                        <strong>Pick a design to start from</strong>
+                                        <span className="muted"> · or leave it empty and describe what you want</span>
+                                    </p>
+                                    {(designsRow.more.before || designsRow.more.after) && (
+                                        <div className="designs-move">
+                                            <span className="muted designs-hint">Drag the row, or</span>
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm"
+                                                disabled={!designsRow.more.before}
+                                                onClick={() => designsRow.step(-1)}
+                                            >
+                                                <ArrowLeft /> Back
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm"
+                                                disabled={!designsRow.more.after}
+                                                onClick={() => designsRow.step(1)}
+                                            >
+                                                More <ArrowRight />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="designs-row" ref={designsRow.ref}>
+                                    {[
+                                        { id: "", name: "An empty page", description: "", tag: "" } as Template & { tag: string },
+                                        ...starts,
+                                    ].map((t) => {
+                                        const id = t.id || null;
+                                        return (
+                                            <label key={t.id || "blank"} className={`design ${template === id ? "on" : ""}`}>
+                                                <input
+                                                    type="radio"
+                                                    name="design"
+                                                    checked={template === id}
+                                                    onChange={() => setTemplate(id)}
+                                                />
+                                                <span className="gallery-thumb" aria-hidden="true">
+                                                    {t.imageUrl ? (
+                                                        <img src={t.imageUrl} alt="" loading="lazy" draggable={false} />
+                                                    ) : t.previewUrl ? (
+                                                        <iframe
+                                                            src={t.previewUrl}
+                                                            title={`${t.name}, shown small`}
+                                                            sandbox=""
+                                                            loading="lazy"
+                                                            tabIndex={-1}
+                                                        />
+                                                    ) : (
+                                                        <span className="gallery-blank">Empty</span>
+                                                    )}
+                                                </span>
+                                                <span className="design-name">
+                                                    {t.name}
+                                                    {t.tag && <span className="design-tag mono muted">{t.tag}</span>}
+                                                </span>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                                <button type="button" className="btn btn-sm designs-all" onClick={() => setChoosing(true)}>
+                                    <LayoutTemplate /> See all {starts.length} designs and templates, larger
+                                </button>
+                            </div>
+                            <div className="brief-asking">
+                                <AskLevelSlider level={askLevel} onChange={setAskLevel} row />
+                            </div>
                             <div className="brief-foot">
-                                <fieldset className="starters">
-                                    <legend className="starters-label">Start from</legend>
-                                    {[{ id: null as string | null, name: "An empty page" }, ...templates].map((t) => (
-                                        <label key={t.id ?? "blank"} className={`starter ${template === t.id ? "on" : ""}`}>
-                                            <input
-                                                type="radio"
-                                                name="template"
-                                                checked={template === t.id}
-                                                onChange={() => setTemplate(t.id)}
-                                            />
-                                            {t.name}
-                                        </label>
-                                    ))}
-                                </fieldset>
+                                <span className="starters">
+                                    <span className="starters-label">Starts from</span>
+                                    <strong className="starter-chosen">{chosen ? chosen.name : "An empty page"}</strong>
+                                    <span className="starter-about muted">
+                                        {chosen
+                                            ? `${chosen.description} It is there the moment you open the website.`
+                                            : "Your assistant builds the first page from your description."}
+                                    </span>
+                                </span>
                                 <button type="submit" className="btn btn-seal" disabled={busy}>
                                     {busy ? (
                                         <Dots />
@@ -256,7 +419,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                             navigate(`/o/${org.slug}/p/${p.slug}`);
                                         }}
                                     >
-                                        <Cover seed={p.id} label={p.name} />
+                                        <Cover seed={p.id} label={p.name} src={a.coverUrl(p)} />
                                         <div className="card-meta">
                                             <strong>{p.name}</strong>
                                             <span className="mono muted">
@@ -272,6 +435,11 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                         onUnpublish={() => setUnpublishing(p)}
                                         onArchive={() => void archive(p)}
                                         onDelete={() => setDeleting(p)}
+                                        onTemplate={() => {
+                                            setTemplateName(p.name);
+                                            setTemplateAbout("");
+                                            setSaving(p);
+                                        }}
                                     />
                                 </div>
                             ))}
@@ -343,6 +511,50 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                     </div>
                 </Dialog>
             )}
+            {choosing && (
+                <Gallery
+                    templates={templates}
+                    looks={looks}
+                    chosen={template}
+                    mayManage={mayManage}
+                    onChoose={setTemplate}
+                    onRemove={(t) => void removeTemplate(t)}
+                    onClose={() => setChoosing(false)}
+                />
+            )}
+            {saving && (
+                <Dialog onClose={() => setSaving(null)}>
+                    <form onSubmit={saveAsTemplate}>
+                        <p className="eyebrow">Save as a template</p>
+                        <h2>{saving.name}</h2>
+                        <p>
+                            New websites in this studio can then start as a copy of this one as it is now: its pages, its wording and the
+                            pictures it uses. Changing this website afterwards does not change the template.
+                        </p>
+                        <label className="field-line">
+                            <span className="eyebrow">Name of the template</span>
+                            <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} maxLength={80} required />
+                        </label>
+                        <label className="field-line">
+                            <span className="eyebrow">What it is good for</span>
+                            <input
+                                value={templateAbout}
+                                onChange={(e) => setTemplateAbout(e.target.value)}
+                                maxLength={240}
+                                placeholder="A one-page site for a restaurant, with a menu and opening hours"
+                            />
+                        </label>
+                        <div className="dialog-actions">
+                            <button type="button" className="btn" onClick={() => setSaving(null)} disabled={busy}>
+                                Cancel
+                            </button>
+                            <button type="submit" className="btn btn-primary" disabled={busy || !templateName.trim()}>
+                                {busy ? <Dots /> : "Save as a template"}
+                            </button>
+                        </div>
+                    </form>
+                </Dialog>
+            )}
             {deleting && <ConfirmDelete project={deleting} onCancel={() => setDeleting(null)} onConfirm={() => void remove(deleting)} />}
         </div>
     );
@@ -356,6 +568,7 @@ function CardMenu({
     onUnpublish,
     onArchive,
     onDelete,
+    onTemplate,
 }: {
     project: Project;
     href: string;
@@ -363,6 +576,7 @@ function CardMenu({
     onUnpublish: () => void;
     onArchive: () => void;
     onDelete: () => void;
+    onTemplate: () => void;
 }) {
     const [open, setOpen] = useState(false);
     // Opens upward when there is no room below (the last row of the shelf).
@@ -412,6 +626,9 @@ function CardMenu({
                     )}
                     {mayManage && (
                         <>
+                            <button type="button" role="menuitem" onClick={run(onTemplate)}>
+                                <LayoutTemplate /> Save as a template…
+                            </button>
                             <div className="menu-rule" />
                             {project.productionRef && (
                                 <button type="button" role="menuitem" onClick={run(onUnpublish)}>

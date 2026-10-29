@@ -119,3 +119,4 @@ mistakes. Further reading:
 - Nielsen Norman Group, [Proximity of consequential options](https://www.nngroup.com/articles/proximity-consequential-options/): keep dangerous actions away from harmless ones.
 - Automattic design system, [Destructive actions](https://system.automattic.design/foundations/destructive-actions/): confirm what cannot be undone; do not rely on colour alone.
 - Christopher Butler, [In Defense of Text Labels](https://chrbutler.com/in-defense-of-text-labels).
+- [Audit of the screens added on 2026-10-10](audit-2026-10-10-phase-5.md)

@@ -57,6 +57,9 @@ export function containerSpec(cfg: ProvisionerConfig, projectId: string, runtime
         WorkingDir: "/app",
         Labels: { [MANAGED]: "true", [PROJECT]: projectId, [INSTANCE]: cfg.instance },
         HostConfig: {
+            // A small first process that clears away finished ones. Without it every closed browser
+            // leaves its helpers behind as dead entries that count towards PidsLimit, until none can start.
+            Init: true,
             ReadonlyRootfs: true,
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],

@@ -184,6 +184,51 @@ test("the assistant can describe fields with its own token, and nothing else new
     assert.equal(documents[0]?.fields?.[0]?.label, "Headline");
 });
 
+test("what the assistant saves is added to what is saved, unless it says otherwise", async () => {
+    const { t } = await setup();
+    const token = t.agent.calls.at(-1)?.agentToken ?? assert.fail("no token");
+    const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const at = "/api/agent/content/page/about";
+    const put = async (path: string, body: unknown) => {
+        const res = await t.app.request(path, { method: "PUT", headers: auth, body: JSON.stringify(body) });
+        return { status: res.status, ...(await json<{ document?: ContentDocument; error?: string }>(res)) };
+    };
+    const keys = (d?: ContentDocument) => [Object.keys(d?.draft ?? {}).sort(), (d?.fields ?? []).map((f) => `${f.key}:${f.label}`)];
+    const text = (key: string, label = key) => ({ key, label, type: "text" });
+
+    await put(at, { headline: "About us", intro: "Since 1990", hours: "9 to 5" });
+    await put(`${at}/fields`, { fields: [text("headline"), text("intro"), text("hours")] });
+    // A few values and one field sent later: the rest is still there.
+    await put(at, { intro: "Since 1989", phone: "01234" });
+    const added = await put(`${at}/fields`, { fields: [text("intro", "Introduction"), text("phone")] });
+    assert.deepEqual(keys(added.document), [
+        ["headline", "hours", "intro", "phone"],
+        ["headline:headline", "hours:hours", "intro:Introduction", "phone:phone"],
+    ]);
+    assert.equal(added.document?.draft?.intro, "Since 1989");
+    // Taking a value away takes its field with it.
+    assert.deepEqual(keys((await put(`${at}?remove=hours`, {})).document), [
+        ["headline", "intro", "phone"],
+        ["headline:headline", "intro:Introduction", "phone:phone"],
+    ]);
+    // Asked to replace: what is sent is all there is.
+    await put(`${at}?replace=1`, { headline: "Hello" });
+    assert.deepEqual(keys((await put(`${at}/fields?replace=1`, { fields: [text("headline")] })).document), [
+        ["headline"],
+        ["headline:headline"],
+    ]);
+
+    // A page may have many more fields than it once could, and what is wrong with one is said.
+    const many = Array.from({ length: 150 }, (_, i) => text(`f${i}`));
+    assert.equal((await put(`${at}/fields`, { fields: many })).document?.fields?.length, 151);
+    const long = await put(`${at}/fields`, { fields: [{ key: "note", label: "Note", type: "text", help: "x".repeat(300) }] });
+    assert.equal(long.status, 400);
+    assert.match(long.error ?? "", /field "note", help: .*200/);
+    const tooMany = await put(`${at}/fields?replace=1`, { fields: Array.from({ length: 501 }, (_, i) => text(`g${i}`)) });
+    assert.match(tooMany.error ?? "", /up to 500 fields and this has 501/);
+    assert.match((await put(`${at}/fields`, { fields: "headline" })).error ?? "", /must be a list/);
+});
+
 test("the deployer fills pages from the content it is given, and leaves unbound pages byte-for-byte alone", () => {
     const dir = mkdtempSync(join(tmpdir(), "atelier-fill-"));
     const plain = "<h1>Plain</h1>\n<p>no closing tags";
@@ -243,4 +288,51 @@ test("the page map says which pages show which pieces of wording, and follows th
     // Someone outside the studio cannot read it.
     const other = await signIn(t);
     assert.equal((await get(t, other, `${other.api}/projects/${p.split("/").pop()}/content/map`)).status, 404);
+});
+
+test("one history: versions, wording changes and publishes together, newest first, each saying what can be done", async () => {
+    const { t, who, p, save, publish } = await setup();
+    type Entry = {
+        type: string;
+        at: string;
+        current?: boolean;
+        by?: string | null;
+        kind?: string;
+        slug?: string;
+        rev?: number;
+        number?: number;
+        live?: boolean;
+        title?: string;
+    };
+    const history = async () => (await json<{ entries: Entry[] }>(await get(t, who, `${p}/history`))).entries;
+    await save({ headline: "One" });
+    await save({ headline: "Two" });
+    assert.equal((await publish()).status, 200);
+    const entries = await history();
+    assert.deepEqual(entries.map((e) => e.type).sort(), ["published", "version", "wording", "wording"]);
+    for (let i = 1; i < entries.length; i++) assert.ok((entries[i - 1]?.at ?? "") >= (entries[i]?.at ?? ""), "newest first");
+    const wording = entries.filter((e) => e.type === "wording");
+    assert.deepEqual(
+        wording.map((e) => [e.kind, e.slug, e.rev, e.current, e.by]),
+        [
+            ["page", "home", 2, true, who.user.name],
+            ["page", "home", 1, false, who.user.name],
+        ],
+    );
+    assert.equal(entries.find((e) => e.type === "version")?.current, true);
+    assert.deepEqual([entries.find((e) => e.type === "published")?.number, entries.find((e) => e.type === "published")?.live], [1, true]);
+    // Going back to earlier wording is itself an entry, and becomes the current one.
+    assert.equal((await send(t, who, "POST", `${p}/content/page/home/revisions/1/restore`)).status, 200);
+    const after = (await history()).filter((e) => e.type === "wording");
+    assert.deepEqual(
+        after.map((e) => [e.rev, e.current]),
+        [
+            [3, true],
+            [2, false],
+            [1, false],
+        ],
+    );
+    // Someone outside the studio cannot read it.
+    const other = await signIn(t);
+    assert.equal((await get(t, other, `${other.api}/projects/${p.split("/").pop()}/history`)).status, 404);
 });

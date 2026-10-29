@@ -80,3 +80,24 @@ shared kernel remains the residual risk named in ADR-0003.
 
 **Sequencing (2026-10-10):** the VPS move is the last phase of the plan (P6 in
 docs/13), by the owner's decision. What this ADR leaves to the VPS waits for it.
+
+## Update, 2026-10-10: GitHub is off the allow-list
+
+What the assistant's engine downloaded from GitHub was one tool, `ripgrep`,
+fetched from a GitHub release the first time it searched files. The runtime
+image now carries `ripgrep` (and Chromium, ADR-0015), so nothing is fetched
+from GitHub. The allow-list is `opencode.ai`, `models.dev` and
+`registry.npmjs.org`. Checked by running the real assistant end to end with
+`github.com` and `githubusercontent.com` removed: it built a page and saved
+wording as before.
+
+`registry.npmjs.org` stays: the engine installs its own small plugin package
+there on first use in each workspace. Baking that in as well would leave only
+the engine's own two hosts.
+
+## Amended 2026-10-11
+
+By the owner's decision the assistant may use the public web (ADR-0022). The proxy runs in a new
+mode, `open`, in production: any public host on ports 80 and 443. Private, loopback and link-local
+addresses are refused as before, so the control plane, the database and the host stay unreachable.
+The allow-list remains for installations that want `enforce`.

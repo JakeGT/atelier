@@ -113,3 +113,33 @@ test("observe mode lets public hosts through and logs what enforce would refuse"
         proxy.close();
     }
 });
+
+test("open mode lets the public web through without remark, and still never a private address", async () => {
+    const lines: string[] = [];
+    const inside = createEgressProxy({ allow: [], mode: "open", log: (l) => lines.push(l), resolve: async () => "10.1.2.3" });
+    const port = await listen(inside);
+    try {
+        assert.match(await connectVia(port, "internal.example:443"), /403/);
+        assert.match(lines[0] ?? "", /private address/);
+        // An address rather than a name, and an unusual port, are refused as ever.
+        assert.match(await connectVia(port, "93.184.216.34:443"), /403/);
+        assert.match(await connectVia(port, "anything.example:22"), /403/);
+    } finally {
+        inside.close();
+    }
+    // A public host is judged allowed (the connection itself may then fail here, where there is nothing to reach).
+    const said: string[] = [];
+    const out = createEgressProxy({ allow: [], mode: "open", log: (l) => said.push(l), resolve: async () => "203.0.113.9" });
+    const p2 = await listen(out);
+    try {
+        const answer = await Promise.race([
+            connectVia(p2, "fonts.example:443"),
+            new Promise<string>((r) => setTimeout(() => r("pending"), 400)),
+        ]);
+        assert.ok(!/403/.test(answer), answer);
+        assert.ok(!said.some((l) => /denied|observe/.test(l)), said.join("|"));
+    } finally {
+        out.close();
+        out.closeAllConnections?.();
+    }
+});

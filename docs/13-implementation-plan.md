@@ -193,9 +193,9 @@ images.
 
 - **gVisor spike:** the current host is Docker Desktop, which has no `runsc`. The
   provisioner hook exists; the spike moves to the VPS migration (ADR-0012).
-- **Per-project role overrides** (`project_members`): no one has needed a role
-  that differs per website yet. Organisation roles cover the plan's acceptance
-  criteria. Revisit with the agency use case.
+- **Per-project role overrides** (`project_members`): deferred here, built on
+  `studio-people` (2026-10-10): an editor or viewer can have a different role
+  on one website.
 - **Build ceilings:** there are no builds until P3.
 - **Plan-then-build mode and the media library** (competitive backlog items
   pencilled into P2): moved to P3/P4, as neither is needed for multi-tenancy.
@@ -236,7 +236,9 @@ Goal: one real deploy target + custom domain per project.
   Cloudflare itself through the production deployer (2026-10-10): deploy,
   redeploy, redeploy an earlier version, delete. Custom domains have not been
   exercised against Cloudflare (that needs a real domain).
-- **Deferred:** preview deployments as a feature; a sandboxed build (needed
+- **Preview deployments** were deferred here and built on `gallery-previews`
+  (2026-10-10) as "a link to show someone".
+- **Deferred:** a sandboxed build (needed
   only once frameworks are allowed); the content snapshot in the published
   site (P5); the remote git mirror of project code (ADR-0009), so workspace
   volumes are still not backed up.
@@ -306,9 +308,12 @@ give the operator control. (No billing.)
   cross-studio totals.
 - **Also done here, from E5.0 (step a):** each item in the editor's Wording
   panel opens a pop-up with room to edit.
-- **Not done:** per-tenant feature flags beyond those two switches; cost in
-  money (only tokens are known; prices belong to each studio's provider); a
-  template gallery with previews; templates supplied by a studio.
+- **Not done:** per-tenant feature flags beyond those two switches.
+- **Cost in money** is now estimated (`cost-estimate`, 2026-10-10): when a
+  request finishes, tokens x the model's list price is recorded, and shown
+  month by month as "about $x". The provider's bill is what counts.
+- **Done later (`gallery-previews`, 2026-10-10):** a template gallery with
+  live previews, and templates a studio saves from its own websites.
 
 **E4.1 was brought forward** (branch `p4-byok`, 2026-10-10, at the owner's
 request, ahead of P3): provider keys per studio, the key-holding model proxy
@@ -390,8 +395,9 @@ current host. What needs the VPS is P6, which is last.
   below.
 - E5.1 (moved to E2.6: gVisor + escape tests are P2, per ADR-0003.)
 - E5.2 Retention/redaction policies; per-tenant data deletion; monthly aggregates.
-  **Built (`p5-media`):** a daily job with the periods in docs/12 §5. **Not
-  built:** deleting a whole studio, monthly aggregates of usage.
+  **Built:** a daily job with the periods in docs/12 §5 (`p5-media`);
+  deleting a whole studio, a download of everything in it, and usage by month
+  (`studio-people`).
 - E5.3 Alerting (build/publish failure, stall, spend over ceiling). **Built
   (`p5-media`):** notifications in the app and by e-mail (docs/12 §6).
 - E5.5 The assistant checks and sees its own work (ADR-0015, asked for and
@@ -399,6 +405,24 @@ current host. What needs the VPS is P6, which is last.
   but nobody can edit, used by the assistant before it finishes and shown on the
   Content page; and a browser in the workspace so the assistant can look at a
   page at phone and desktop width.
+- E5.6 The design kit (ADR-0016, `design-kit`): looks and ready-made sections.
+- E5.7 Interactive sections and forms (ADR-0017, asked for and built 2026-10-10
+  on `interactive-forms`): no framework; the kit's own small script; forms on
+  published websites are received by Atelier and read under Content → Messages
+  from visitors.
+- E5.8 Movement with GSAP (ADR-0018, asked for and built 2026-10-11 on
+  `motion-gsap`): written by the assistant, speed and feel from the look.
+- E5.9 The assistant asks, and the person chooses how much (ADR-0019, asked
+  for and built 2026-10-11 on `assistant-questions`).
+- E5.10 Reports about Atelier from people and from the assistant (ADR-0020,
+  asked for and built 2026-10-11 on `feedback-reports`).
+- E5.11 Website covers (asked for and built 2026-10-11 on `website-covers`):
+  a picture of each website's home page on its card, retaken after every change.
+- E5.12 Operators can go into a studio for a limited time, in the open
+  (ADR-0021, asked for and built 2026-10-11 on `operator-access`).
+- E5.13 The assistant is limited only where safety requires it: a look of the website's own, any
+  font, no steering to ready-made designs; page previews made reliable
+  (ADR-0022, asked for and built 2026-10-11 on `own-look`).
 - E5.4 moved to P6 (the VPS move), which the owner decided on 2026-10-10 is the final piece of work.
 
 ### E5.0 Content studio — breakdown
@@ -406,8 +430,9 @@ current host. What needs the VPS is P6, which is last.
 **Steps a–h are built** (a on `p4-operator-templates`; b–e on
 `p5-content-studio`; f–h on `p5-media`, 2026-10-10), with the differences
 listed in ADR-0014's two "As built" sections. Lists of items with several fields and limits
-checked at publish followed on `p5-finish`. Still to do: number, date and
-yes/no fields, a focal point for images, poster images for video.
+checked at publish followed on `p5-finish`; link, number, date, yes/no and
+video fields, drag to reorder, focal points, video stills and one combined
+history on `content-finish`.
 
 | Step | What it delivers | Depends on |
 | --- | --- | --- |

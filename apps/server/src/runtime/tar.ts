@@ -72,3 +72,52 @@ export function readTar(archive: Buffer, limits: { maxEntries: number }): TarEnt
     }
     return entries;
 }
+
+// ---- writing ---------------------------------------------------------------------------------
+// The other direction, for handing a person their own data (a studio's export):
+// one entry at a time, so a large archive is never held in memory.
+
+const field = (header: Buffer, value: string, start: number, length: number): void => {
+    header.write(value.slice(0, length), start, length, "utf8");
+};
+
+// A file's header block, its bytes, and the padding to the next block.
+export function tarEntry(path: string, body: Uint8Array, modified = new Date()): Buffer {
+    let name = path.replace(/^\/+/, "");
+    let prefix = "";
+    if (Buffer.byteLength(name) > 100) {
+        // ustar: a long path is split at a slash into a prefix (155) and a name (100).
+        const cut = name.lastIndexOf("/", Math.min(name.length - 1, 154));
+        if (cut <= 0 || Buffer.byteLength(name.slice(cut + 1)) > 100 || Buffer.byteLength(name.slice(0, cut)) > 155)
+            throw new Error(`path too long for an archive: ${name.slice(0, 80)}`);
+        prefix = name.slice(0, cut);
+        name = name.slice(cut + 1);
+    }
+    const header = Buffer.alloc(BLOCK);
+    field(header, name, 0, 100);
+    field(header, "0000644\0", 100, 8);
+    field(header, "0000000\0", 108, 8);
+    field(header, "0000000\0", 116, 8);
+    field(header, `${body.length.toString(8).padStart(11, "0")}\0`, 124, 12);
+    field(
+        header,
+        `${Math.floor(modified.getTime() / 1000)
+            .toString(8)
+            .padStart(11, "0")}\0`,
+        136,
+        12,
+    );
+    header.fill(0x20, 148, 156);
+    field(header, "0", 156, 1);
+    field(header, "ustar\0", 257, 6);
+    field(header, "00", 263, 2);
+    field(header, prefix, 345, 155);
+    let sum = 0;
+    for (const byte of header) sum += byte;
+    field(header, `${sum.toString(8).padStart(6, "0")}\0 `, 148, 8);
+    const padding = (BLOCK - (body.length % BLOCK)) % BLOCK;
+    return Buffer.concat([header, Buffer.from(body), Buffer.alloc(padding)]);
+}
+
+// What ends an archive.
+export const TAR_END = Buffer.alloc(BLOCK * 2);
