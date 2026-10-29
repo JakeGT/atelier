@@ -137,6 +137,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     // The website's versions are known (an empty list then means an empty website, not "still opening").
     const [known, setKnown] = useState(false);
 
+    // When the person last started a new conversation with the assistant, if they have.
+    const [conversationAt, setConversationAt] = useState<string | null>(null);
     const loadThread = useCallback(async () => {
         try {
             const thread = await a.thread(pid);
@@ -146,6 +148,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             setActiveRun(thread.activeRun);
             setQuestion(thread.question ?? null);
             if (typeof thread.askLevel === "number") setAskLevel(thread.askLevel);
+            setConversationAt(thread.conversationAt ?? null);
         } catch {
             setMessages((m) => m ?? []);
         }
@@ -337,6 +340,17 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             void loadThread();
         } catch (err) {
             note("error", (err as Error).message);
+        }
+    };
+
+    const newConversation = async () => {
+        if (activeRun) return;
+        try {
+            setConversationAt(await a.newConversation(pid));
+            setQuestion(null);
+            void loadThread();
+        } catch (err) {
+            toast((err as Error).message, "error");
         }
     };
 
@@ -614,6 +628,8 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                     onStop={stopRun}
                     onMoreTime={moreTime}
                     onCarryOn={() => void carryOn()}
+                    conversationAt={conversationAt}
+                    onNewConversation={() => void newConversation()}
                     asked={activeRun ? null : question}
                     onAnswer={(answers) => void answer(answers)}
                     askLevel={askLevel}

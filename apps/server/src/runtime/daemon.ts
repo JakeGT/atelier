@@ -57,6 +57,9 @@ app.post("/runs", async (c) => {
         apiUrl?: unknown;
         agentToken?: unknown;
         resume?: unknown;
+        conversation?: unknown;
+        earlier?: unknown;
+        news?: unknown;
         vision?: unknown;
     } | null;
     if (
@@ -77,6 +80,9 @@ app.post("/runs", async (c) => {
         apiUrl: body.apiUrl,
         agentToken: body.agentToken,
         resume: body.resume === true,
+        conversation: typeof body.conversation === "string" ? body.conversation.slice(0, 100) : undefined,
+        earlier: typeof body.earlier === "string" ? body.earlier : undefined,
+        news: typeof body.news === "string" ? body.news : undefined,
         vision: body.vision === true,
     });
     if (run === "busy") return c.json({ error: "busy" }, 409);

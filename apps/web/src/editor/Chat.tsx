@@ -1,6 +1,6 @@
-import { ArrowUp, Clock, Lightbulb, MessageSquareWarning, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, Clock, Lightbulb, MessageSquarePlus, MessageSquareWarning, Play, RotateCcw, Square } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { clock, isSaid, stepDone, stepItems, summary } from "../lib/activity";
 import type { AssistantQuestions, Pulse, Run, ThreadMessage } from "../lib/api";
 import { useClickOutside } from "../lib/hooks";
@@ -11,7 +11,7 @@ import { AskLevelSlider, QuestionCard } from "./Asking";
 import { UploadButton } from "./Media";
 import { Prose } from "./Prose";
 
-export type Message = Pick<ThreadMessage, "id" | "role" | "text" | "tools"> & { authorId?: string | null };
+export type Message = Pick<ThreadMessage, "id" | "role" | "text" | "tools"> & { authorId?: string | null; createdAt?: string };
 
 const SUGGESTIONS = [
     "Build a home page with a hero, three features and a contact section",
@@ -44,6 +44,10 @@ interface ChatProps {
     onStop: () => void;
     onMoreTime: () => void;
     onCarryOn: () => void;
+    // When the person last started a new conversation (the assistant keeps in mind only what was
+    // said since), and how they start another.
+    conversationAt?: string | null;
+    onNewConversation?: () => void;
     onRetryWorkspace?: () => void;
     // What the assistant has stopped to ask, and how much it asks on this website.
     asked?: AssistantQuestions | null;
@@ -74,12 +78,18 @@ export function Chat(props: ChatProps) {
     const busy = run !== null;
     const steps = run?.steps.length ?? 0;
     const [ideasOpen, setIdeasOpen] = useState(false);
+    // The first message of the conversation the assistant has in mind; what is above it, it does not.
+    const since = props.conversationAt ?? null;
+    const begins = since ? messages.findIndex((m) => !m.createdAt || m.createdAt > since) : -1;
+    const begun = since !== null && begins === -1 && messages.length > 0;
+    const anythingSaid = since ? begins !== -1 : messages.length > 0;
+    const [ending, setEnding] = useState(false);
     const ideasRef = useClickOutside(useCallback(() => setIdeasOpen(false), []));
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the conversation grows or the work moves on
     useEffect(() => {
         scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-    }, [messages.length, busy, steps]);
+    }, [messages.length, busy, steps, ending, begun]);
 
     // Grow the composer with its content, up to a limit.
     // biome-ignore lint/correctness/useExhaustiveDependencies: resize when the text changes
@@ -139,45 +149,49 @@ export function Chat(props: ChatProps) {
                     </div>
                 ) : (
                     <div className="thread">
-                        {messages.map((m) => (
-                            <article key={m.id} className={`msg msg-${m.role}`}>
-                                {m.role === "user" ? (
-                                    <>
-                                        {/* With several people on one website, each request says who asked. */}
-                                        {m.authorId && m.authorId !== me && authors[m.authorId] && (
-                                            <span className="msg-author">{authors[m.authorId]}</span>
-                                        )}
-                                        <p>{m.text}</p>
-                                    </>
-                                ) : m.role === "error" ? (
-                                    <>
-                                        <p>{m.text}</p>
-                                        <button
-                                            type="button"
-                                            className="btn btn-sm"
-                                            onClick={() => reportProblem(`The assistant said: “${m.text}”`)}
-                                        >
-                                            <MessageSquareWarning /> Report this problem
-                                        </button>
-                                    </>
-                                ) : m.role === "note" ? (
-                                    <>
-                                        <p>{m.text}</p>
-                                        <Steps tools={m.tools} label="What it had done" />
-                                        {m === last && !busy && ready && (
-                                            <button type="button" className="btn btn-sm btn-primary" onClick={props.onCarryOn}>
-                                                <Play /> Carry on from here
+                        {messages.map((m, i) => (
+                            <Fragment key={m.id}>
+                                {since && i === begins && i > 0 && <NewConversation />}
+                                <article className={`msg msg-${m.role}`}>
+                                    {m.role === "user" ? (
+                                        <>
+                                            {/* With several people on one website, each request says who asked. */}
+                                            {m.authorId && m.authorId !== me && authors[m.authorId] && (
+                                                <span className="msg-author">{authors[m.authorId]}</span>
+                                            )}
+                                            <p>{m.text}</p>
+                                        </>
+                                    ) : m.role === "error" ? (
+                                        <>
+                                            <p>{m.text}</p>
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm"
+                                                onClick={() => reportProblem(`The assistant said: “${m.text}”`)}
+                                            >
+                                                <MessageSquareWarning /> Report this problem
                                             </button>
-                                        )}
-                                    </>
-                                ) : (
-                                    <>
-                                        <Prose text={m.text || "Done."} />
-                                        <Steps tools={m.tools} label="What I did" />
-                                    </>
-                                )}
-                            </article>
+                                        </>
+                                    ) : m.role === "note" ? (
+                                        <>
+                                            <p>{m.text}</p>
+                                            <Steps tools={m.tools} label="What it had done" />
+                                            {m === last && !busy && ready && (
+                                                <button type="button" className="btn btn-sm btn-primary" onClick={props.onCarryOn}>
+                                                    <Play /> Carry on from here
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Prose text={m.text || "Done."} />
+                                            <Steps tools={m.tools} label="What I did" />
+                                        </>
+                                    )}
+                                </article>
+                            </Fragment>
                         ))}
+                        {begun && <NewConversation />}
                         {props.asked && !run && (
                             <QuestionCard
                                 key={props.asked.id}
@@ -187,6 +201,38 @@ export function Chat(props: ChatProps) {
                             />
                         )}
                         {run && <Working run={run} whose={theirs} canAct={ready} onStop={props.onStop} onMoreTime={props.onMoreTime} />}
+                        {props.onNewConversation &&
+                            anythingSaid &&
+                            !busy &&
+                            ready &&
+                            !locked &&
+                            (ending ? (
+                                <div className="new-conversation-ask">
+                                    <p>
+                                        Your assistant will no longer keep in mind what has been said so far. The messages stay here for you
+                                        to read, and the website is not changed. This cannot be undone.
+                                    </p>
+                                    <div>
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm btn-primary"
+                                            onClick={() => {
+                                                setEnding(false);
+                                                props.onNewConversation?.();
+                                            }}
+                                        >
+                                            <MessageSquarePlus /> Start a new conversation
+                                        </button>
+                                        <button type="button" className="btn btn-sm" onClick={() => setEnding(false)}>
+                                            Keep this conversation
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button type="button" className="btn btn-sm new-conversation" onClick={() => setEnding(true)}>
+                                    <MessageSquarePlus /> Start a new conversation
+                                </button>
+                            ))}
                     </div>
                 )}
             </div>
@@ -298,6 +344,16 @@ export function Chat(props: ChatProps) {
 
 // What the assistant did, one line that opens into the steps, with what it said along the
 // way among them. Folded away, so the reply above is the only thing to read unless asked.
+// Where one conversation ends and the next begins.
+function NewConversation() {
+    return (
+        <p className="new-conversation-mark">
+            <span>A new conversation began here</span>
+            Your assistant keeps in mind what is said below, not what is above.
+        </p>
+    );
+}
+
 function Steps({ tools, label }: { tools: Message["tools"]; label: string }) {
     const items = stepItems(tools ?? []);
     const done = items.filter((x) => !x.said).length;

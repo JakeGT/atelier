@@ -88,6 +88,9 @@ export interface ProjectPatch {
     agentModel?: string | null;
     askLevel?: number;
     archived?: boolean;
+    // A new conversation with the assistant starts now.
+    newConversation?: boolean;
+    changesSeen?: number;
 }
 
 export interface ProjectStore {

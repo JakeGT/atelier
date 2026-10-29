@@ -89,6 +89,11 @@ export const projectSchema = z.object({
     askLevel: z.number().int().min(0).max(3),
     // When the picture of its home page (shown on its card) was last taken; null if it has none yet.
     coverAt: z.string().datetime().nullable(),
+    // When the person last started a new conversation with the assistant; null if they never have.
+    // What was said before it is not carried into a request.
+    conversationAt: z.string().datetime().nullable(),
+    // How many of Atelier's own changes the assistant has been told about on this website.
+    changesSeen: z.number().int().nonnegative(),
     archivedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
 });

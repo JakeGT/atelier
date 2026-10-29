@@ -3,6 +3,7 @@ import { findLook, LOOK_PREFIX, THEME_FILE, themeCss } from "../design/looks.ts"
 import { lookIn, OWN, OWN_FILE } from "../design/ownLook.ts";
 import { signAgentToken, verifyAgentToken } from "../services/agentToken.ts";
 import { answersPrompt, answersText, isAskLevel } from "../services/asking.ts";
+import { CHANGES, changesSince, conversationSoFar } from "../services/changes.ts";
 import { starter } from "../services/designKit.ts";
 import { baseOf, fillHtml, isBound, lookupFrom } from "../services/fill.ts";
 import { formActions, formNames } from "../services/forms.ts";
@@ -208,9 +209,17 @@ export function workspaceRoutes(api: Api): void {
                 return (await runtime.readFile(project.id, "index.html")) ? "" : null;
             })
             .catch(() => undefined);
+        // The assistant carries the conversation on. Where it no longer has it in mind (a rebuilt
+        // workspace), it is given what was said, written out; and, once, what has changed in Atelier
+        // since this website was last worked on.
+        const said = await store.messages.list(org.id, project.id);
+        const news = said.some((m) => m.role === "user") ? changesSince(project.changesSeen) : "";
         try {
             const run = await runtime.startRun(project.id, {
                 prompt,
+                conversation: project.conversationAt ?? "first",
+                earlier: conversationSoFar(said, project.conversationAt),
+                news,
                 // The project's own model, else the organisation's, else the runtime's default.
                 model,
                 instructions: agentInstructions({ ...project, look }),
@@ -222,6 +231,7 @@ export function workspaceRoutes(api: Api): void {
             });
             presence.setRun(project.id, { runId: run.id, userId: c.get("user").id, name: c.get("user").name });
             if (waiting) await store.questions.close(org.id, project.id, waiting.id, answers, c.get("user").id);
+            if (project.changesSeen !== CHANGES.length) await store.projects.update(org.id, project.id, { changesSeen: CHANGES.length });
             await store.messages.add({
                 tenantId: org.id,
                 projectId: project.id,
@@ -430,7 +440,21 @@ export function workspaceRoutes(api: Api): void {
         }
         // What the assistant is waiting to be told, once it has stopped to ask.
         const question = activeRun || project.archivedAt ? null : await store.questions.open(tenantId, project.id);
-        return c.json({ messages, activeRun, authors, question, askLevel: project.askLevel });
+        return c.json({ messages, activeRun, authors, question, askLevel: project.askLevel, conversationAt: project.conversationAt });
+    });
+
+    // Start a new conversation: from here the assistant no longer has what was said before in
+    // mind. The messages stay where they are, and so does the website.
+    route("post", `${PROJECT}/conversation`, "project.edit", async (c) => {
+        const org = c.get("org");
+        const project = c.get("project");
+        if (presence.run(project.id)) return c.json({ error: "your assistant is working: stop it or wait for it to finish first" }, 409);
+        // A question it was waiting on belongs to the conversation that has ended.
+        const waiting = await store.questions.open(org.id, project.id);
+        if (waiting) await store.questions.close(org.id, project.id, waiting.id, null, c.get("user").id);
+        const next = await store.projects.update(org.id, project.id, { newConversation: true });
+        presence.touch(project.id);
+        return c.json({ conversationAt: next.conversationAt });
     });
 
     // How much the assistant asks before it acts on this website. Anyone who can ask it things can set it.

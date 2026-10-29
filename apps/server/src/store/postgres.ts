@@ -109,6 +109,8 @@ interface ProjectRow {
     agent_instructions: string | null;
     ask_level: number;
     cover_at: Ts | null;
+    conversation_at: Ts | null;
+    changes_seen: number;
     agent_model: string | null;
     archived_at: Ts | null;
     created_at: Ts;
@@ -215,7 +217,7 @@ const firstRow = <T>(rows: readonly T[]): T => {
 const ORG_COLS = "id, slug, name, status, default_model, max_projects, daily_token_limit, personal_of, flags";
 const INVITATION_COLS = "id, tenant_id, email, role, created_at, expires_at";
 const PROJECT_COLS =
-    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, ask_level, cover_at, archived_at, created_at";
+    "id, tenant_id, slug, name, status, content_schema_ref, agent_config_ref, preview_ref, production_ref, hosting_ref, template, agent_instructions, agent_model, ask_level, cover_at, conversation_at, changes_seen, archived_at, created_at";
 const CONTENT_COLS =
     "id, project_id, tenant_id, kind, slug, schema_version, draft, published, published_at, rev, fields, updated_by, updated_at";
 const SESSION_COLS = "id, project_id, tenant_id, workspace_id, model, status, started_at, ended_at";
@@ -270,6 +272,8 @@ const rowToProject = (r: ProjectRow): Project => ({
     agentModel: r.agent_model,
     askLevel: r.ask_level,
     coverAt: iso(r.cover_at),
+    conversationAt: iso(r.conversation_at),
+    changesSeen: r.changes_seen,
     archivedAt: iso(r.archived_at),
     createdAt: isoNow(r.created_at),
 });
@@ -720,6 +724,8 @@ export class PostgresStore implements Store {
                             agent_instructions = CASE WHEN ${patch.agentInstructions !== undefined} THEN ${patch.agentInstructions ?? null} ELSE agent_instructions END,
                             agent_model = CASE WHEN ${patch.agentModel !== undefined} THEN ${patch.agentModel ?? null} ELSE agent_model END,
                             ask_level = COALESCE(${patch.askLevel ?? null}, ask_level),
+                            conversation_at = CASE WHEN ${patch.newConversation === true} THEN now() ELSE conversation_at END,
+                            changes_seen = COALESCE(${patch.changesSeen ?? null}, changes_seen),
                             archived_at = CASE WHEN ${archive}::boolean IS NULL THEN archived_at WHEN ${archive}::boolean THEN now() ELSE NULL END,
                             status = CASE WHEN ${archive}::boolean IS NULL THEN status WHEN ${archive}::boolean THEN 'archived' ELSE 'active' END,
                             updated_at = now()

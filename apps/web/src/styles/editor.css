@@ -2092,3 +2092,47 @@ fieldset:disabled .ask-track {
     height: auto;
     white-space: normal;
 }
+
+/* ---- starting a new conversation with the assistant ------------------------------- */
+
+.new-conversation {
+    align-self: flex-start;
+    color: var(--ink-2);
+}
+
+.new-conversation-ask {
+    padding: 12px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-m);
+    font-size: 14px;
+    color: var(--ink-2);
+}
+
+.new-conversation-ask p {
+    margin: 0 0 10px;
+}
+
+.new-conversation-ask div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.new-conversation-mark {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 6px 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--line-strong);
+    font-size: 12.5px;
+    color: var(--ink-3, var(--ink-2));
+}
+
+.new-conversation-mark span {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+}

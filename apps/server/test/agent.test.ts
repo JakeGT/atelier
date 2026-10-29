@@ -131,6 +131,31 @@ test("carrying on continues the engine's last session; a normal request does not
     assert.ok(readFileSync(join(resumed.dir, "args"), "utf8").includes("--continue"));
 });
 
+test("a conversation the engine has in mind is continued; one it does not is started afresh with what was said, in writing", async () => {
+    const { readFileSync } = await import("node:fs");
+    const engine = fakeEngine(emit({ type: "text", part: { text: "ok" } }));
+    const args = () => readFileSync(join(engine.dir, "args"), "utf8");
+    const earlier = "What has been said so far.";
+    // Nothing in mind yet: afresh, with the conversation written out and anything it is to be told first.
+    await runWith(engine, { conversation: "first", earlier, news: "Atelier has changed.", prompt: "Make that bigger" });
+    assert.ok(!args().includes("--continue"));
+    assert.match(args(), /What has been said so far\.\s+Atelier has changed\.\s+Make that bigger/);
+    // The same conversation again: carried on, and not told twice what it already has in mind.
+    await runWith(engine, { conversation: "first", earlier, prompt: "And the footer" });
+    assert.ok(args().includes("--continue") && !args().includes("What has been said"));
+    // Carrying on a request that was stopped is the same conversation.
+    await runWith(engine, { conversation: "first", earlier, resume: true, prompt: "Carry on" });
+    assert.ok(args().includes("--continue"));
+    // A new conversation: afresh, whatever the engine last had in mind.
+    await runWith(engine, { conversation: "2026-10-12T10:00:00.000Z", earlier: "", prompt: "Something else" });
+    assert.ok(!args().includes("--continue") && !args().includes("What has been said"));
+    // Its memory gone (a rebuilt workspace keeps nothing of the engine's): afresh, given the conversation, even when asked to carry on.
+    const { rmSync } = await import("node:fs");
+    rmSync(join(engine.dir, "state"), { recursive: true });
+    await runWith(engine, { conversation: "2026-10-12T10:00:00.000Z", earlier, resume: true, prompt: "Carry on" });
+    assert.ok(!args().includes("--continue") && args().includes("What has been said"));
+});
+
 test("looking at a page is reported as which page and at what size, and nothing else", () => {
     const look = (input: unknown) =>
         parseRunOutput(
