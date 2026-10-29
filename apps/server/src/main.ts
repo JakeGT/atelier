@@ -93,16 +93,11 @@ if (config.databaseUrl) {
     console.warn("Using the in-memory store: nothing is kept when the server stops. Set DATABASE_URL to keep data.");
 }
 
-let oidc: OidcService | undefined;
+let oidc: (() => Promise<OidcService | undefined>) | undefined;
 if (config.oidc) {
-    try {
-        oidc = await OidcService.discover({ ...config.oidc, publicOrigin: config.publicOrigin });
-        console.log(`OIDC ready: ${config.oidc.providerName}`);
-    } catch (err) {
-        console.warn(
-            `OIDC discovery failed (${(err as Error).message}); sign-in is disabled until the provider exists and the server restarts.`,
-        );
-    }
+    // Looked up now, so the log says at once whether sign-in works, and again later if it fails.
+    oidc = OidcService.retrying({ ...config.oidc, publicOrigin: config.publicOrigin });
+    await oidc();
 } else if (config.authMode === "oidc") {
     console.warn("OIDC is not configured (set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET(_FILE)); sign-in is disabled.");
 }

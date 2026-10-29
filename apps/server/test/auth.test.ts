@@ -295,3 +295,52 @@ test("signing out at the provider says which client is asking, so the person is 
     // A provider with nowhere to sign out at: no redirect, and the person is simply signed out here.
     assert.equal(await OidcService.fromMetadata(opts, { issuer: opts.issuer }).logoutUrl(), undefined);
 });
+
+const OPTS = {
+    issuer: "https://idp.example/",
+    clientId: "atelier",
+    clientSecret: "stub",
+    publicOrigin: "https://atelier.example",
+    providerName: "stub",
+    adminGroup: "platform-admin",
+    trustEmail: true,
+    scopes: "openid",
+};
+
+test("a provider that cannot be reached is looked up again, once per wait, by one request at a time", async () => {
+    let calls = 0;
+    let reachable = false;
+    const discover = async () => {
+        calls++;
+        await new Promise((r) => setTimeout(r, 5));
+        if (!reachable) throw new Error("connect ECONNREFUSED");
+        return stubOidc();
+    };
+    const waiting = OidcService.retrying(OPTS, discover, 60_000);
+    assert.deepEqual(await Promise.all([waiting(), waiting()]), [undefined, undefined]);
+    assert.equal(calls, 1, "two sign-ins at once share one lookup");
+    reachable = true;
+    assert.equal(await waiting(), undefined, "inside the wait, no new lookup");
+    assert.equal(calls, 1);
+
+    const eager = OidcService.retrying(OPTS, discover, 0);
+    reachable = false;
+    assert.equal(await eager(), undefined);
+    reachable = true;
+    const found = await eager();
+    assert.ok(found);
+    assert.equal(await eager(), found, "once found, it is kept");
+    assert.equal(calls, 3);
+});
+
+test("sign-in works once the provider answers, without a restart, and says so in words until then", async () => {
+    let service: OidcService | undefined;
+    const t = await makeApp({ PUBLIC_ORIGIN: "https://atelier.example", AUTH_MODE: "oidc" }, async () => service);
+    const before = await t.app.request("/auth/login");
+    assert.equal(before.status, 302);
+    assert.equal(before.headers.get("location"), "/login?auth_error=unavailable");
+    service = stubOidc();
+    const after = await t.app.request("/auth/login");
+    assert.equal(after.status, 302);
+    assert.match(after.headers.get("location") ?? "", /^https:\/\/idp\.example\/authorize/);
+});

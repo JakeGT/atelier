@@ -44,6 +44,39 @@ export class OidcService {
         return new OidcService(opts, client);
     }
 
+    // Looks the provider up when sign-in first needs it, and again after a failure (at most once
+    // every `waitMs`). A provider that could not be reached when Atelier started, as when the
+    // platform moves to another machine, would otherwise leave sign-in off until a restart.
+    static retrying(
+        opts: OidcOptions,
+        discover: (opts: OidcOptions) => Promise<OidcService> = OidcService.discover,
+        waitMs = 30_000,
+    ): () => Promise<OidcService | undefined> {
+        let found: OidcService | undefined;
+        let pending: Promise<OidcService | undefined> | undefined;
+        let failedAt = Number.NEGATIVE_INFINITY;
+        return () => {
+            if (found) return Promise.resolve(found);
+            if (pending) return pending;
+            if (Date.now() - failedAt < waitMs) return Promise.resolve(undefined);
+            pending = discover(opts)
+                .then((service) => {
+                    found = service;
+                    console.log(`OIDC ready: ${opts.providerName}`);
+                    return service;
+                })
+                .catch((err: Error) => {
+                    failedAt = Date.now();
+                    console.warn(`OIDC discovery failed (${err.message}); sign-in will try again when someone next signs in.`);
+                    return undefined;
+                })
+                .finally(() => {
+                    pending = undefined;
+                });
+            return pending;
+        };
+    }
+
     // Builds the service from known provider metadata, without the discovery request.
     static fromMetadata(opts: OidcOptions, metadata: oauth.ServerMetadata): OidcService {
         return new OidcService(opts, new oauth.Configuration(metadata, opts.clientId, opts.clientSecret));

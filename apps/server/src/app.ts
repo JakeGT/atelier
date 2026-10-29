@@ -5,14 +5,13 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import type { Config } from "./config.ts";
 import { apiRoutes, type DeclaredRoute } from "./routes/api.ts";
-import { authRoutes } from "./routes/auth.ts";
+import { authRoutes, type OidcSource } from "./routes/auth.ts";
 import { configRoutes } from "./routes/config.ts";
 import { health } from "./routes/health.ts";
 import type { ModelCatalog } from "./services/catalog.ts";
 import type { Hosting } from "./services/hosting.ts";
 import type { MediaStorage } from "./services/mediaStorage.ts";
 import { type Mailer, Notifier } from "./services/notifier.ts";
-import type { OidcService } from "./services/oidc.ts";
 import type { WorkspaceRuntime } from "./services/runtime.ts";
 import type { SessionStore } from "./services/sessions.ts";
 import type { Template } from "./services/templates.ts";
@@ -22,7 +21,7 @@ export interface Deps {
     config: Config;
     store: Store;
     sessions: SessionStore;
-    oidc?: OidcService;
+    oidc?: OidcSource;
     runtime: WorkspaceRuntime;
     // Signs agent tokens. Always set by main.ts (an ephemeral key in dev).
     secretsKey: string;

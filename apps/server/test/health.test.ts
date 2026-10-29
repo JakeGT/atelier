@@ -25,7 +25,8 @@ test("config reports auth off and no oidc", async () => {
 test("auth login is unavailable without oidc", async () => {
     const { app } = await makeApp();
     const res = await app.request("/auth/login");
-    assert.equal(res.status, 503);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), "/login?auth_error=unavailable");
 });
 
 test("container runtime mode refuses to start without its secrets", async () => {
