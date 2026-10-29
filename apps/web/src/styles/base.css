@@ -342,6 +342,7 @@ textarea {
 
 .dialog-actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
     margin-top: 24px;
@@ -1407,4 +1408,45 @@ textarea {
     .visit-less {
         display: inline;
     }
+}
+
+/* A number in a circle: how many of something are new. */
+.count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--seal);
+    color: var(--paper, #fff);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* Waiting for something to be ready before it is shown. */
+.settling {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-m);
+    color: var(--ink-2);
+}
+
+.btn.disabled {
+    opacity: 0.45;
+    pointer-events: none;
 }

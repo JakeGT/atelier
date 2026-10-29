@@ -39,6 +39,8 @@ export interface DeployInput {
     branch: string;
     canonicalHost: string | null;
     commit: string | null;
+    // Which published version this is ("r12"): carried in the website's responses.
+    label?: string;
     // The release's content: pages are published with their wording filled in (ADR-0014).
     content?: { kind: string; slug: string; content: Record<string, unknown> | null }[];
     // The media library files this release uses, and what the library knows about them.
@@ -122,6 +124,7 @@ export class DeployerHosting implements Hosting {
         const query = new URLSearchParams({ branch: input.branch });
         if (input.canonicalHost) query.set("canonical", input.canonicalHost);
         if (input.commit) query.set("commit", input.commit);
+        if (input.label) query.set("label", input.label);
         const path = `/sites/${input.site}/deployments?${query}`;
         const forms = Object.keys(input.forms ?? {}).length > 0;
         if (!input.content?.length && !input.media?.length && !forms) return this.call<DeployResult>("POST", path, { body: input.archive });

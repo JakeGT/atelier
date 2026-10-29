@@ -428,6 +428,20 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                             </span>
                                         </div>
                                     </a>
+                                    {(p.unreadMessages ?? 0) > 0 && (
+                                        <a
+                                            className="card-messages"
+                                            href={`/o/${org.slug}/p/${p.slug}/messages`}
+                                            onClick={(e) => {
+                                                if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+                                                e.preventDefault();
+                                                navigate(`/o/${org.slug}/p/${p.slug}/messages`);
+                                            }}
+                                        >
+                                            <span className="count">{(p.unreadMessages ?? 0) > 99 ? "99+" : p.unreadMessages}</span>
+                                            {p.unreadMessages === 1 ? "new message from a visitor" : "new messages from visitors"}
+                                        </a>
+                                    )}
                                     <CardMenu
                                         project={p}
                                         href={`/o/${org.slug}/p/${p.slug}`}

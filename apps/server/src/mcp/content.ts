@@ -10,6 +10,7 @@ import { findLook, KIT_FILE, KIT_SCRIPT, LOOKS, lookOf, MOTION_FILES, STACKS, TH
 import { lookIn, makeOwnLook, OWN, OWN_FILE, OWN_VALUES, ownLookFiles, readOwnLook } from "../design/ownLook.ts";
 import { coverageReport } from "../services/coverage.ts";
 import { KIT_CSS, KIT_JS, MOTION_CONTENT, MOTION_TAGS } from "../services/designKit.ts";
+import { formsInPage } from "../services/forms.ts";
 import { Browser, browserPath } from "./look.ts";
 import { inside, readPages, serveSite } from "./site.ts";
 
@@ -125,12 +126,21 @@ server.tool(
     "Check that everything a visitor can read is wording the person can edit. Reads the website's pages as they are now and reports, per page: text and pictures not connected to content (`notEditable`), elements marked for a field that has nothing saved (`markedButNothingSaved`), and lists whose entries are written differently in the page but will all be shown as copies of the first (`entriesWillAllLookTheSame`); and overall: saved wording no page shows (`savedButOnNoPage`) and saved wording with no described field (`notDescribed`). Call it before you finish any request that added or changed pages or wording, and connect what it reports. Where connecting something would force the design to change, keep the design and mark it data-content-skip. Text that is truly not wording to edit (a decorative symbol, a version number) can be marked with the attribute data-content-skip instead.",
     {},
     async () => {
-        const report = coverageReport(await readPages(workspace), await savedDocuments());
+        const pages = await readPages(workspace);
+        const report = coverageReport(pages, await savedDocuments());
+        // Forms a visitor could fill in and send to nowhere: not named for Atelier, and with no address of their own.
+        const formsThatSendNowhere = pages.filter((p) => formsInPage(p.html).unconnected > 0).map((p) => p.path);
         const left = report.pages.reduce((n, p) => n + p.notEditable.length, 0);
         const summary = report.ok
             ? "Everything a visitor can read is connected to wording the person can edit."
             : `Not finished: ${left} pieces of text or pictures are not editable, ${report.pages.reduce((n, p) => n + p.markedButNothingSaved.length, 0)} marked elements have nothing saved, ${report.savedButOnNoPage.length} saved pieces are on no page, ${report.notDescribed.length} saved pieces have no described field.`;
-        return json({ summary, ...report });
+        return json({
+            summary: formsThatSendNowhere.length
+                ? `${summary} Also: ${formsThatSendNowhere.length} pages have a form that sends nowhere (\`formsThatSendNowhere\`): it has neither data-form nor an action, so what a visitor types is lost. If it is meant to be received, name it with data-form; if a script of the website's handles it, it is fine as it is.`
+                : summary,
+            ...report,
+            ...(formsThatSendNowhere.length ? { formsThatSendNowhere } : {}),
+        });
     },
 );
 

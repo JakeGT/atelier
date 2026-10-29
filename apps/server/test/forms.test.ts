@@ -131,14 +131,15 @@ test("a visitor sends a form: it is kept, the studio is told, and it can be read
             ["Grace", false],
         ],
     );
-    assert.equal(box.unread, 3);
+    // What was sent from the preview, as a trial, is not counted as new: only what visitors sent.
+    assert.equal(box.unread, 2);
     const notices = await json<{ notifications: { title: string; body: string; link: string }[] }>(
         await get(t, who, "/api/v1/notifications"),
     );
     assert.equal(notices.notifications.length, 2);
     assert.equal(notices.notifications.at(-1)?.title, "Okoro: someone sent the contact form");
     assert.match(notices.notifications.at(-1)?.body ?? "", /email: grace@example\.com/);
-    assert.equal(notices.notifications[0]?.link, `/o/${who.org.slug}/p/${project.slug}/content/messages`);
+    assert.equal(notices.notifications[0]?.link, `/o/${who.org.slug}/p/${project.slug}/messages`);
     assert.equal(sent.length, 2);
 
     const csv = await get(t, who, `${p}/submissions.csv`);

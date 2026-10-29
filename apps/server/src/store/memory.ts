@@ -787,8 +787,19 @@ export class MemoryStore implements Store {
                 .map(({ tenantId: _t, ...f }) => f),
         unread: async (tenantId, projectId) =>
             this.formLog.filter(
-                (f) => f.tenantId === tenantId && f.projectId === projectId && f.readAt === null && this.projectMap.has(f.projectId),
+                (f) =>
+                    f.tenantId === tenantId &&
+                    f.projectId === projectId &&
+                    f.readAt === null &&
+                    !f.preview &&
+                    this.projectMap.has(f.projectId),
             ).length,
+        unreadByProject: async (tenantId) => {
+            const out: Record<string, number> = {};
+            for (const f of this.formLog)
+                if (f.tenantId === tenantId && f.readAt === null && !f.preview) out[f.projectId] = (out[f.projectId] ?? 0) + 1;
+            return out;
+        },
         markRead: async (tenantId, projectId) => {
             for (const f of this.formLog) if (f.tenantId === tenantId && f.projectId === projectId && f.readAt === null) f.readAt = now();
         },

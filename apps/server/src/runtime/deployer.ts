@@ -98,6 +98,9 @@ export function deployerApp(opts: DeployerOptions): Hono {
         const branch = c.req.query("branch") ?? "main";
         const canonical = c.req.query("canonical") ? domainName(c.req.query("canonical") ?? "") : null;
         const commit = c.req.query("commit");
+        // Which published version this is, for the marker its responses carry.
+        const label = c.req.query("label");
+        if (label && !/^[a-z0-9-]{1,40}$/.test(label)) return c.json({ error: "invalid request" }, 400);
         if (!name || !BRANCH.test(branch) || (c.req.query("canonical") && !canonical) || (commit && !/^[0-9a-f]{40}$/.test(commit))) {
             return c.json({ error: "invalid request" }, 400);
         }
@@ -142,7 +145,7 @@ export function deployerApp(opts: DeployerOptions): Hono {
             }
             const site = siteFromArchive(archive, limits, fill, media);
             const { subdomain } = await pages.ensureProject(name);
-            const deployment = await pages.deploy(name, site, { branch, canonicalHost: canonical, commit });
+            const deployment = await pages.deploy(name, site, { branch, canonicalHost: canonical, commit, label });
             return c.json({ ...deployment, siteUrl: `https://${subdomain}` }, 201);
         } catch (err) {
             return failed(c, err);

@@ -156,10 +156,12 @@ export function siteFromArchive(
 // The `_headers` file sent with every deployment: the website's own rules, then
 // Atelier's. Preview addresses are never indexed; the *.pages.dev address is not
 // either once the website has its own domain, so search engines see one origin.
-export function headersFile(own: string | null, canonicalHost: string | null): string {
+// `label`: which published version this is, carried in every response so that whoever published
+// it can tell when the address has started serving it.
+export function headersFile(own: string | null, canonicalHost: string | null, label?: string | null): string {
     const rules = [
         own?.trim() ?? "",
-        "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin",
+        `/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin${label ? `\n  X-Atelier-Release: ${label}` : ""}`,
         "https://:version.:project.pages.dev/*\n  X-Robots-Tag: noindex",
         canonicalHost ? "https://:project.pages.dev/*\n  X-Robots-Tag: noindex" : "",
     ];
@@ -259,7 +261,7 @@ export class CloudflarePages {
 
     // Uploads what Cloudflare does not already hold, then creates the deployment.
     // `branch` "main" is production; anything else is a preview deployment.
-    async deploy(name: string, site: Site, opts: { branch: string; canonicalHost: string | null; commit?: string }) {
+    async deploy(name: string, site: Site, opts: { branch: string; canonicalHost: string | null; commit?: string; label?: string }) {
         const { jwt } = await this.call<{ jwt: string }>("GET", `${this.project(name)}/upload-token`);
         const byHash = new Map(site.files.map((f) => [f.hash, f]));
         const hashes = [...byHash.keys()];
@@ -297,7 +299,7 @@ export class CloudflarePages {
         form.append("manifest", JSON.stringify(Object.fromEntries(site.files.map((f) => [f.path, f.hash]))));
         form.append("branch", opts.branch);
         if (opts.commit) form.append("commit_hash", opts.commit);
-        form.append("_headers", new File([headersFile(site.headers, opts.canonicalHost)], "_headers"));
+        form.append("_headers", new File([headersFile(site.headers, opts.canonicalHost, opts.label)], "_headers"));
         if (site.redirects) form.append("_redirects", new File([site.redirects], "_redirects"));
         const deployment = await this.call<{ id: string; url: string }>("POST", `${this.project(name)}/deployments`, { body: form });
         return { id: deployment.id, url: deployment.url, files: site.files.length, uploaded: missing.length };

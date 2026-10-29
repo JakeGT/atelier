@@ -2185,3 +2185,88 @@ button.where:hover {
 .operator-enter .field-line {
     width: 100%;
 }
+
+/* ---- messages from visitors: the count on a website's card, and the forms check ---------- */
+
+.card-messages {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--ink);
+    text-decoration: none;
+}
+
+.card-messages:hover {
+    text-decoration: underline;
+}
+
+.forms-check {
+    margin-bottom: 28px;
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+}
+
+.forms-check-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.forms-check-head h2 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.forms-check ul,
+.published-forms {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.published-forms {
+    margin-top: 18px;
+}
+
+.forms-check li,
+.published-forms li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+}
+
+.forms-check li svg,
+.published-forms li svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+}
+
+.forms-check li.ok svg,
+.published-forms li.ok svg {
+    color: var(--live, #2f7d4f);
+}
+
+.forms-check li.bad svg,
+.published-forms li.bad svg {
+    color: var(--seal);
+}
+
+.forms-check li div {
+    display: grid;
+    gap: 2px;
+}
+
+.forms-check li span {
+    color: var(--ink-2);
+}

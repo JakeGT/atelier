@@ -1196,8 +1196,14 @@ export class PostgresStore implements Store {
                 this.withTenant(tenantId, async (tx) => {
                     const rows = await tx<
                         { n: string }[]
-                    >`SELECT count(*) AS n FROM form_submissions WHERE project_id = ${projectId} AND read_at IS NULL`;
+                    >`SELECT count(*) AS n FROM form_submissions WHERE project_id = ${projectId} AND read_at IS NULL AND NOT preview`;
                     return Number(rows[0]?.n ?? 0);
+                }),
+            unreadByProject: async (tenantId) =>
+                this.withTenant(tenantId, async (tx) => {
+                    const rows = await tx<{ project_id: string; n: string }[]>`
+                        SELECT project_id, count(*) AS n FROM form_submissions WHERE read_at IS NULL AND NOT preview GROUP BY project_id`;
+                    return Object.fromEntries(rows.map((r) => [r.project_id, Number(r.n)]));
                 }),
             markRead: async (tenantId, projectId) => {
                 await this.withTenant(

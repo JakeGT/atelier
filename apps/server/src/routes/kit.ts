@@ -15,6 +15,7 @@ import { signAgentToken } from "../services/agentToken.ts";
 import { ModelCatalog } from "../services/catalog.ts";
 import { Covers, type CoverTaker } from "../services/cover.ts";
 import type { Hosting } from "../services/hosting.ts";
+import { LiveCheck } from "../services/live.ts";
 import type { MediaStorage } from "../services/mediaStorage.ts";
 import { type Mailer, Notifier } from "../services/notifier.ts";
 import { Presence } from "../services/presence.ts";
@@ -56,6 +57,10 @@ export interface ApiDeps {
     // Starter templates; read from apps/server/templates unless given.
     templates?: Template[];
     // What takes a website's cover picture (the workspace runtime, unless a test supplies its own), and how soon after a change.
+    // How a published website is asked whether it is answering yet. Tests replace it.
+    siteFetch?: typeof fetch;
+    // How long asking for a link to show someone waits for it to open.
+    shareWaitMs?: number;
     coverTaker?: CoverTaker;
     coverDelayMs?: number;
 }
@@ -159,6 +164,7 @@ export function createApi(deps: ApiDeps) {
             origin: config.publicOrigin,
             secret: `${deps.secretsKey}:form`,
         }),
+        live: new LiveCheck(deps.runtime, { origin: config.publicOrigin, secret: `${deps.secretsKey}:form` }, deps.siteFetch),
         box: new SecretBox(deps.secretsKey),
         app,
         declared,

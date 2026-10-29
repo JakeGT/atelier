@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import { clientIp } from "../security.ts";
-import { cleanSubmission, FormLimiter, readFormToken } from "../services/forms.ts";
+import { checkMark, cleanSubmission, FormLimiter, readFormToken } from "../services/forms.ts";
 import { type Api, PROJECT, param } from "./kit.ts";
 
 // What a visitor may send in one go: words, not files.
@@ -77,6 +77,9 @@ export function formRoutes(api: Api): void {
         } catch {
             return answer(c, 400, "That could not be read", "Please try again from the website.");
         }
+        // Atelier checking a live form of its own: it got here, which is what was being asked. Nothing is kept.
+        const mark = entries.find(([k]) => k === "_atelier_check")?.[1];
+        if (typeof mark === "string" && mark === checkMark(param(c, "token"), key)) return c.json({ ok: true, check: true }, 200, OPEN);
         const data = cleanSubmission(entries);
         const thanks = () => answer(c, 200, "Thank you", "Your message has been sent.");
         // A robot filled the hidden field: it is told all is well and nothing is kept.
@@ -101,7 +104,7 @@ export function formRoutes(api: Api): void {
                 kind: "form.submission",
                 title: `${project.name}: someone sent the ${target.form} form`,
                 body: summary(data),
-                link: org ? `/o/${org.slug}/p/${project.slug}/content/messages` : null,
+                link: org ? `/o/${org.slug}/p/${project.slug}/messages` : null,
                 dedupe: null,
             });
         }

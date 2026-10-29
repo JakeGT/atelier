@@ -3,12 +3,15 @@ import {
     ArrowUpRight,
     Check,
     ChevronDown,
+    CircleAlert,
+    CircleCheck,
     CloudOff,
     Copy,
     ExternalLink,
     Eye,
     Globe,
     History,
+    Inbox,
     LayoutList,
     MessageSquare,
     Palette,
@@ -31,6 +34,7 @@ import type {
     Checkpoint,
     ContentDocument,
     HistoryEntry,
+    LiveStatus,
     Org,
     Overview,
     Project,
@@ -42,9 +46,21 @@ import type {
 import { can, orgApi, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, useClickOutside, useStored } from "../lib/hooks";
 import { Dialog, Dots, UserMenu, useToast } from "../ui/kit";
+import { pageName } from "./Content";
 import { FIRST_PROMPT_KEY } from "./Studio";
 
 type Pane = "chat" | "preview" | "side";
+
+// A publish that has gone through. `settling`: its address is not answering with it yet.
+interface PublishedState {
+    number: number;
+    url: string;
+    settling: boolean;
+    slow: boolean;
+    // Whether the dialog about it is showing.
+    open: boolean;
+    live: LiveStatus | null;
+}
 
 // What the person was doing when they were asked to confirm their sign-in.
 type Intent = { action: "publish" } | { action: "rollback"; number: number };
@@ -126,7 +142,26 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         setAddressUnpublish(unpublish);
         setAddressOpen(true);
     };
-    const [published, setPublished] = useState<{ number: number; url: string } | null>(null);
+    const [published, setPublished] = useState<PublishedState | null>(null);
+    // Just published: ask the website itself until it answers with this version, then show its address.
+    const settlingRelease = published?.settling ? published.number : null;
+    useEffect(() => {
+        if (settlingRelease === null) return;
+        const began = Date.now();
+        let over = false;
+        const ask = async () => {
+            const status = await a.live(pid).catch(() => null);
+            if (over) return;
+            if (status?.ready) setPublished((p) => (p ? { ...p, settling: false, live: status } : p));
+            else if (Date.now() - began > 120_000) setPublished((p) => (p && !p.slow ? { ...p, slow: true } : p));
+        };
+        void ask();
+        const again = setInterval(() => void ask(), 3000);
+        return () => {
+            over = true;
+            clearInterval(again);
+        };
+    }, [a, pid, settlingRelease]);
     const [pendingIntent, setPendingIntent] = useState<Intent | null>(null);
 
     // What the assistant has stopped to ask, and how much it asks on this website.
@@ -424,14 +459,25 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         );
 
     // A link to show someone before publishing.
-    const [shared, setShared] = useState<string | null>(null);
+    // `ready`: the link opens. Until it does it is not shown: a link that does not open yet is no use to anyone.
+    const [shared, setShared] = useState<{ url: string; ready: boolean } | null>(null);
+    const sharedUrl = shared && !shared.ready ? shared.url : null;
+    useEffect(() => {
+        if (!sharedUrl) return;
+        const again = setInterval(() => {
+            a.shareReady(pid, sharedUrl)
+                .then((ready) => ready && setShared((s) => (s?.url === sharedUrl ? { url: sharedUrl, ready: true } : s)))
+                .catch(() => undefined);
+        }, 3000);
+        return () => clearInterval(again);
+    }, [a, pid, sharedUrl]);
     const [sharing, setSharing] = useState(false);
     const share = async () => {
         setSharing(true);
         try {
-            const url = await a.share(pid);
+            const link = await a.share(pid);
             setConfirmPublish(false);
-            setShared(url);
+            setShared(link);
         } catch (err) {
             if (err instanceof ReauthRequired) {
                 toast("Please confirm your sign-in, then ask for the link again.", "error");
@@ -450,7 +496,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 setTab("releases");
                 const { url } = await a.hosting(pid).catch(() => ({ url: null }));
                 // With an address to show, say so properly; otherwise a line will do.
-                if (url) setPublished({ number: r.number, url });
+                if (url) setPublished({ number: r.number, url, settling: true, slow: false, open: true, live: null });
                 return url ? "" : `Release ${r.number} is live.`;
             },
             { action: "publish" },
@@ -518,7 +564,10 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     const running = activeRun !== null;
     const live = overview?.liveRelease ?? null;
-    const liveUrl = live ? (overview?.project.productionRef ?? null) : null;
+    // Just published and not answering yet: the address is not offered anywhere until it is.
+    const liveUrl = live && !published?.settling ? (overview?.project.productionRef ?? null) : null;
+    const unreadMessages = overview?.unreadMessages ?? 0;
+    const messagesPage = `/o/${org.slug}/p/${project.slug}/messages`;
     const hasChanges = overview?.hasChanges ?? false;
     const nothingToPublish = overview !== null && !hasChanges;
 
@@ -553,6 +602,20 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         title="All of this website's wording, pictures and files, on a page of their own"
                     >
                         <LayoutList /> <span className="bar-label">Content</span>
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-ghost bar-wide"
+                        onClick={() => navigate(messagesPage)}
+                        title="What visitors have sent through the forms on this website"
+                    >
+                        <Inbox /> <span className="bar-label">Messages</span>
+                        {unreadMessages > 0 && (
+                            <span className="count" title={`${unreadMessages} new`}>
+                                {unreadMessages > 99 ? "99+" : unreadMessages}
+                                <span className="sr-only"> new</span>
+                            </span>
+                        )}
                     </button>
                     <button
                         type="button"
@@ -596,9 +659,14 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         onToggleTheme={onToggleTheme}
                         items={[
                             {
-                                label: "Content: wording, pictures, files and messages",
+                                label: "Content: wording, pictures and files",
                                 icon: <LayoutList />,
                                 onClick: () => navigate(`/o/${org.slug}/p/${project.slug}/content`),
+                            },
+                            {
+                                label: unreadMessages > 0 ? `Messages from visitors (${unreadMessages} new)` : "Messages from visitors",
+                                icon: <Inbox />,
+                                onClick: () => navigate(messagesPage),
                             },
                             { label: "Design: looks and sections", icon: <Palette />, onClick: () => setDesignOpen(true) },
                             { label: "Address and domains", icon: <Globe />, onClick: () => openAddress(false) },
@@ -708,7 +776,15 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                 />
             )}
 
-            {published && <Published project={project} published={published} onClose={() => setPublished(null)} />}
+            {published?.open && (
+                <Published
+                    project={project}
+                    published={published}
+                    messagesPage={messagesPage}
+                    // Closed while still settling: it goes on being asked, so the address appears in the bar when it answers.
+                    onClose={() => setPublished((p) => (p?.settling ? { ...p, open: false } : null))}
+                />
+            )}
 
             {editingRef && (
                 <WordingDialog
@@ -802,19 +878,32 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
                         engines are told not to list it, and it does not change when you make more changes: get a new link to show a newer
                         version.
                     </p>
-                    <p className="mono field-static share-link">{shared}</p>
+                    {shared.ready ? (
+                        <p className="mono field-static share-link">{shared.url}</p>
+                    ) : (
+                        <p className="settling" aria-live="polite">
+                            <Dots /> The link is being made ready. It appears here as soon as it opens, usually within a minute.
+                        </p>
+                    )}
                     <div className="dialog-actions">
                         <button type="button" className="btn" onClick={() => setShared(null)}>
                             Close
                         </button>
-                        <a className="btn" href={shared} target="_blank" rel="noreferrer">
+                        <a
+                            className={`btn ${shared.ready ? "" : "disabled"}`}
+                            href={shared.ready ? shared.url : undefined}
+                            aria-disabled={!shared.ready}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
                             <ExternalLink /> Open it
                         </a>
                         <button
                             type="button"
                             className="btn btn-primary"
+                            disabled={!shared.ready}
                             onClick={() =>
-                                void navigator.clipboard.writeText(shared).then(
+                                void navigator.clipboard.writeText(shared.url).then(
                                     () => toast("The link is copied."),
                                     () => toast("Select the link and copy it.", "error"),
                                 )
@@ -849,17 +938,50 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     );
 }
 
-// Shown once a publish has gone through: where the website now lives.
-function Published({ project, published, onClose }: { project: Project; published: { number: number; url: string }; onClose: () => void }) {
+// Shown once a publish has gone through. The address is given only when it answers with what was
+// just published: until then the host is still putting it in place, and a link would open nothing
+// (or the version before).
+function Published({
+    project,
+    published,
+    messagesPage,
+    onClose,
+}: {
+    project: Project;
+    published: PublishedState;
+    messagesPage: string;
+    onClose: () => void;
+}) {
     const [copied, setCopied] = useState(false);
     const host = new URL(published.url).host;
+    const forms = published.live?.forms ?? [];
+    const unconnected = published.live?.unconnected ?? [];
+    if (published.settling) {
+        return (
+            <Dialog onClose={onClose} wide>
+                <p className="eyebrow">Release {published.number}</p>
+                <h2>{project.name} is being put on the internet.</h2>
+                <p className="settling" aria-live="polite">
+                    <Dots />{" "}
+                    {published.slow
+                        ? "This is taking longer than usual. It is published, and its address will appear here as soon as it answers; you can close this and carry on."
+                        : "Its address appears here as soon as it answers with this version, usually within a minute."}
+                </p>
+                <div className="dialog-actions">
+                    <button type="button" className="btn" onClick={onClose}>
+                        Carry on working
+                    </button>
+                </div>
+            </Dialog>
+        );
+    }
     return (
         <Dialog onClose={onClose} wide>
             <p className="eyebrow">Release {published.number}</p>
             <h2>
                 {project.name} is <em className="live-word">live.</em>
             </h2>
-            <p>Anyone with this address can see it now. A brand-new address can take a minute to start answering.</p>
+            <p>Anyone with this address can see it now.</p>
             <div className="address-line">
                 <a href={published.url} target="_blank" rel="noreferrer" className="mono">
                     {host} <ArrowUpRight />
@@ -877,10 +999,46 @@ function Published({ project, published, onClose }: { project: Project; publishe
                     {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy link"}
                 </button>
             </div>
+            {(forms.length > 0 || unconnected.length > 0) && (
+                <ul className="published-forms">
+                    {forms.map((f) => (
+                        <li key={`${f.page}#${f.form}`} className={f.working ? "ok" : "bad"}>
+                            {f.working ? <CircleCheck /> : <CircleAlert />}
+                            <span>
+                                <strong>The {f.form.replace(/[-_]+/g, " ")} form</strong>{" "}
+                                {f.working
+                                    ? "is working: a test message sent through the live website arrived."
+                                    : `is not working. ${f.problem}`}
+                            </span>
+                        </li>
+                    ))}
+                    {unconnected.map((page) => (
+                        <li key={page} className="bad">
+                            <CircleAlert />
+                            <span>
+                                <strong>A form on the {pageName(page).toLowerCase()}</strong> sends nowhere, so what a visitor types into it
+                                is lost. Ask your assistant to connect it.
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
             <div className="dialog-actions">
                 <button type="button" className="btn" onClick={onClose}>
                     Done
                 </button>
+                {forms.length > 0 && (
+                    <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                            onClose();
+                            navigate(messagesPage);
+                        }}
+                    >
+                        <Inbox /> Messages from visitors
+                    </button>
+                )}
                 <a className="btn btn-seal" href={published.url} target="_blank" rel="noreferrer" onClick={onClose}>
                     Open website <ArrowUpRight />
                 </a>

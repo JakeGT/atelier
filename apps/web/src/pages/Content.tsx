@@ -1,7 +1,6 @@
-import { ArrowLeft, Crosshair, History, Images, Inbox, Search, Type, Undo2, Unlink } from "lucide-react";
+import { ArrowLeft, Crosshair, History, Images, Search, Type, Undo2, Unlink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MediaLibrary, MediaProvider } from "../editor/Media";
-import { Messages } from "../editor/Messages";
 import { countPieces, documentName, fieldsOf, WordingForm } from "../editor/Wording";
 import type { ContentDocument, ContentRevision, Org, Project, Session, SitePage } from "../lib/api";
 import { can, orgApi } from "../lib/api";
@@ -14,7 +13,7 @@ interface Props {
     session: Session;
     theme: Theme;
     onToggleTheme: () => void;
-    startOn?: "wording" | "files" | "messages";
+    startOn?: "wording" | "files";
 }
 
 const unpublished = (d: ContentDocument): boolean => JSON.stringify(d.draft) !== JSON.stringify(d.published);
@@ -65,15 +64,7 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [previewKey, setPreviewKey] = useState(0);
     const [page, setPage] = useState("index.html");
-    const [tab, setTab] = useState<"wording" | "files" | "messages">(startOn);
-    // How many messages from visitors have not been looked at.
-    const [unread, setUnread] = useState(0);
-    useEffect(() => {
-        a.listMessages(pid)
-            .then((box) => setUnread(box.unread))
-            .catch(() => undefined);
-    }, [a, pid]);
-    const seen = useCallback(() => setUnread(0), []);
+    const [tab, setTab] = useState<"wording" | "files">(startOn);
 
     const load = useCallback(async () => {
         try {
@@ -285,23 +276,9 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
                     >
                         <Images /> Pictures and files
                     </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={tab === "messages"}
-                        className={tab === "messages" ? "on" : ""}
-                        onClick={() => setTab("messages")}
-                    >
-                        <Inbox /> Messages from visitors
-                        {unread > 0 && <span className="chip chip-draft">{unread} new</span>}
-                    </button>
                 </div>
 
-                {tab === "messages" ? (
-                    <div className="content-files">
-                        <Messages org={org.slug} projectId={pid} canEdit={canEdit} onSeen={seen} />
-                    </div>
-                ) : tab === "files" ? (
+                {tab === "files" ? (
                     <div className="content-files">
                         <MediaLibrary />
                     </div>
