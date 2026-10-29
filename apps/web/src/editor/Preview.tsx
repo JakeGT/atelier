@@ -41,8 +41,9 @@ interface Trail {
 const HOME = "index.html";
 const REF = /^[a-z0-9][a-z0-9-]{0,63}\/[a-z0-9][a-z0-9-]{0,63}#[A-Za-z][\w-]{0,63}$/;
 // What a page says about itself is untrusted: only a plausible relative path is kept.
+// A browser reads "%2e" as a dot, so "go up a folder" is refused however it is written.
 const safePath = (v: unknown): string | null =>
-    typeof v === "string" && v.length < 300 && !v.includes("..") && /^[\w\-./%~ ]+$/.test(v) ? v : null;
+    typeof v === "string" && v.length < 300 && !/\.\.|%2e/i.test(v) && /^[\w\-./%~ ]+$/.test(v) ? v : null;
 
 export function Preview({
     url,
@@ -61,6 +62,7 @@ export function Preview({
     const [trail, setTrail] = useState<Trail>({ pages: [HOME], at: 0 });
     // Set when Back or Forward was pressed: the next page to report is a move along the trail, not a new visit.
     const moving = useRef<"back" | "forward" | null>(null);
+    const forget = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     // The page a reload should come back to (reloading must not send the person home).
     const [start, setStart] = useState(HOME);
     const current = trail.pages[trail.at] ?? HOME;
@@ -74,10 +76,9 @@ export function Preview({
     handlers.current = { onWording, onOpenWording };
     const tell = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ atelierPreview: 1, ...message }, "*");
     const toggleEditing = () => {
-        setEditing((on) => {
-            tell({ edit: !on });
-            return !on;
-        });
+        const next = !editingRef.current;
+        setEditing(next);
+        tell({ edit: next });
     };
 
     useEffect(() => {
@@ -108,8 +109,10 @@ export function Preview({
             const move = moving.current;
             moving.current = null;
             setTrail((t) => {
-                if (move === "back") return { ...t, at: Math.max(0, t.at - 1) };
-                if (move === "forward") return { ...t, at: Math.min(t.pages.length - 1, t.at + 1) };
+                // A move along the trail only if the page that arrived is the one expected there;
+                // anything else is where the person now is, and is recorded as a new visit.
+                if (move === "back" && t.at > 0 && t.pages[t.at - 1] === path) return { ...t, at: t.at - 1 };
+                if (move === "forward" && t.pages[t.at + 1] === path) return { ...t, at: t.at + 1 };
                 if (t.pages[t.at] === path) return t;
                 return { pages: [...t.pages.slice(0, t.at + 1), path], at: t.at + 1 };
             });
@@ -130,9 +133,11 @@ export function Preview({
     const go = (direction: "back" | "forward") => {
         moving.current = direction;
         tell({ go: direction });
-        // If the page never answers (it has no bridge), forget the request.
-        setTimeout(() => {
-            if (moving.current === direction) moving.current = null;
+        // If the page never answers (it has no bridge), forget the request. Counted from the
+        // latest press, so an earlier press cannot forget a later one.
+        clearTimeout(forget.current);
+        forget.current = setTimeout(() => {
+            moving.current = null;
         }, 1500);
     };
 

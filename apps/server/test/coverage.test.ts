@@ -87,3 +87,21 @@ test("a list written with entries that differ is reported: every entry will be a
     assert.equal(report.ok, false);
     assert.equal(report.pages[0]?.entriesWillAllLookTheSame.length, 1);
 });
+
+test("a mark that names no field connects nothing, so its wording is reported; a title is read as a person reads it", () => {
+    const page = `<html><head><title>Tom &amp; Co — pottery</title></head><body>
+<h1 data-content="Page/Home#Headline">Made by hand</h1>
+<p data-content="page/home#intro">Connected.</p>
+<img data-content-image="photo" src="media/a.jpg" alt="The kiln">
+</body></html>`;
+    assert.deepEqual(looseText(page), [
+        { tag: "h1", text: "Made by hand" },
+        { tag: "img", text: "The kiln" },
+    ]);
+    assert.equal(pageCoverage("index.html", page).title, "Tom & Co — pottery");
+    const report = coverageReport(
+        [{ path: "index.html", html: page }],
+        [{ kind: "page", slug: "home", draft: { intro: "x" }, fields: [{ key: "intro" }] }],
+    );
+    assert.equal(report.ok, false);
+});

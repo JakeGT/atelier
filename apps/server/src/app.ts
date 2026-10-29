@@ -106,6 +106,13 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[]; n
             await next();
             if (c.res.ok) c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
         });
+        // The shell is also what the static files answer "/" and "/index.html" with: it must
+        // not be kept either, or a browser could go on loading bundles a deploy has removed.
+        app.use("*", async (c, next) => {
+            await next();
+            if (c.res.headers.get("content-type")?.startsWith("text/html") && !c.res.headers.has("cache-control"))
+                c.res.headers.set("cache-control", "no-cache");
+        });
         app.use("*", serveStatic({ root: dist }));
         // Client-side routes (/p/my-site, …) all load the shell.
         app.get("*", (c) => {
@@ -115,6 +122,10 @@ export function createApp(deps: Deps): { app: Hono; declared: DeclaredRoute[]; n
     } else {
         app.get("/", (c) => c.json({ name: "atelier", status: "ok" }));
     }
+
+    // A miss that is not a page of the app (any other method, or no built app) answers
+    // like the rest of the API does.
+    app.notFound((c) => c.json({ error: "not found" }, 404));
 
     return { app, declared: api.declared, notifier };
 }

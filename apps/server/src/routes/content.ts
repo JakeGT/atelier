@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { type ContentField, contentFieldSchema, FIELD_TYPES } from "@atelier/shared";
 import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { readTar } from "../runtime/tar.ts";
 import { type AgentTokenClaims, verifyAgentToken } from "../services/agentToken.ts";
 import { cleanQuestions } from "../services/asking.ts";
 import { type PageCoverage, pageCoverage } from "../services/coverage.ts";
 import { sanitizeRich } from "../services/fill.ts";
-import { type Api, PROJECT, param } from "./kit.ts";
+import { noteLargeSave } from "./feedback.ts";
+import { type Api, agentProject, PROJECT, param } from "./kit.ts";
 
 const KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
@@ -17,11 +19,29 @@ const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v) && typ
 export function contentRoutes(api: Api): void {
     const { route, store, audit, app, declared, secretsKey } = api;
 
-    // Rich-text fields are reduced to the allowed formatting before they are stored
-    // (and again when a page is filled): nothing else ever reaches a page.
+    // Fields described as rich text are reduced to the allowed formatting before they are stored.
+    // That is tidiness, not the safeguard: a value saved before its field was described is kept as
+    // sent. Whatever is stored, a page is only ever filled through the same cleaning (fill.ts), and
+    // the editor cleans what it shows.
+    // A list of entries is refused past this many, with the reason: a list that long is far more
+    // likely a mistake (the same entries sent again and again) than a page, and saving the first
+    // 500 without a word would hide it.
+    const MOST_ENTRIES = 500;
     const prepared = async (tenantId: string, projectId: string, kind: string, slug: string, draft: Record<string, unknown>) => {
         const fields = (await store.content.get(tenantId, projectId, kind, slug))?.fields ?? [];
         const byKey = new Map(fields.map((f) => [f.key, f]));
+        for (const [k, v] of Object.entries(draft)) {
+            const field = byKey.get(k);
+            if (field?.type === "items" && Array.isArray(v) && v.length > MOST_ENTRIES)
+                throw new HTTPException(400, {
+                    res: Response.json(
+                        {
+                            error: `“${field.label}” has ${v.length} entries and a list can hold up to ${MOST_ENTRIES}, so nothing was saved. Check that the same entries have not been added more than once; if it really is that long, split it into more than one list.`,
+                        },
+                        { status: 400 },
+                    ),
+                });
+        }
         return Object.fromEntries(
             Object.entries(draft).map(([k, v]) => {
                 const field = byKey.get(k);
@@ -30,18 +50,16 @@ export function contentRoutes(api: Api): void {
                     const rich = new Set((field.itemFields ?? []).filter((f) => f.type === "rich").map((f) => f.key));
                     return [
                         k,
-                        v
-                            .slice(0, 500)
-                            .map((entry) =>
-                                isObject(entry)
-                                    ? Object.fromEntries(
-                                          Object.entries(entry).map(([ik, iv]) => [
-                                              ik,
-                                              rich.has(ik) && typeof iv === "string" ? sanitizeRich(iv) : iv,
-                                          ]),
-                                      )
-                                    : entry,
-                            ),
+                        v.map((entry) =>
+                            isObject(entry)
+                                ? Object.fromEntries(
+                                      Object.entries(entry).map(([ik, iv]) => [
+                                          ik,
+                                          rich.has(ik) && typeof iv === "string" ? sanitizeRich(iv) : iv,
+                                      ]),
+                                  )
+                                : entry,
+                        ),
                     ];
                 }
                 return [k, v];
@@ -115,6 +133,14 @@ export function contentRoutes(api: Api): void {
             draft: await prepared(c.get("org").id, c.get("project").id, kind, slug, body),
             updatedBy: c.get("user").id,
         });
+        void noteLargeSave(store, {
+            bytes: JSON.stringify(body).length,
+            tenantId: c.get("org").id,
+            projectId: c.get("project").id,
+            kind,
+            slug,
+            by: "a person",
+        }).catch((err: unknown) => console.warn("could not note a large save:", err));
         return c.json({ document });
     });
 
@@ -139,7 +165,8 @@ export function contentRoutes(api: Api): void {
     route("post", `${PROJECT}/content/:kind/:slug/revisions/:rev/restore`, "content.write", async (c) => {
         const org = c.get("org");
         const doc = await store.content.get(org.id, c.get("project").id, param(c, "kind"), param(c, "slug"));
-        const rev = Number(param(c, "rev"));
+        // A revision is a plain whole number: Number() alone would also take "0x10" or "1e2".
+        const rev = /^\d{1,9}$/.test(param(c, "rev")) ? Number(param(c, "rev")) : Number.NaN;
         const revision = doc && Number.isInteger(rev) ? await store.content.revision(org.id, doc.id, rev) : null;
         if (!doc || !revision?.draft) return c.json({ error: "not found" }, 404);
         const document = await store.content.upsertDraft({
@@ -147,7 +174,8 @@ export function contentRoutes(api: Api): void {
             projectId: doc.projectId,
             kind: doc.kind,
             slug: doc.slug,
-            draft: revision.draft,
+            // Cleaned as any save is: the fields may have been described since that revision was kept.
+            draft: await prepared(org.id, doc.projectId, doc.kind, doc.slug, revision.draft),
             updatedBy: c.get("user").id,
         });
         await audit(c, "content.restore", `content:${doc.id}`, { rev });
@@ -235,7 +263,7 @@ export function contentRoutes(api: Api): void {
     // ---- agent surface ----------------------------------------------------------------
     // Authenticated by a short-lived token scoped to one tenant + project + session.
     // There is deliberately no publish, delete, or cross-project route here. A token
-    // stops working the moment its project is archived or deleted.
+    // stops working the moment its project is archived or deleted, or its studio is suspended.
 
     const agentRoute = (method: "get" | "put", path: string, handler: (c: Context, claims: AgentTokenClaims) => Promise<Response>) => {
         declared.push({ method: method.toUpperCase(), path, permission: "agent-token" });
@@ -243,8 +271,7 @@ export function contentRoutes(api: Api): void {
             const auth = c.req.header("authorization");
             const claims = auth?.startsWith("Bearer ") ? verifyAgentToken(auth.slice(7), secretsKey) : null;
             if (!claims) return c.json({ error: "unauthorized" }, 401);
-            const project = await store.projects.findById(claims.tenantId, claims.projectId);
-            if (!project || project.archivedAt) return c.json({ error: "unauthorized" }, 401);
+            if (!(await agentProject(store, claims))) return c.json({ error: "unauthorized" }, 401);
             return handler(c, claims);
         });
     };
@@ -311,6 +338,14 @@ export function contentRoutes(api: Api): void {
             draft: await prepared(claims.tenantId, claims.projectId, kind, slug, draft),
             updatedBy: null,
         });
+        void noteLargeSave(store, {
+            bytes: JSON.stringify(body).length,
+            tenantId: claims.tenantId,
+            projectId: claims.projectId,
+            kind,
+            slug,
+            by: "the assistant",
+        }).catch((err: unknown) => console.warn("could not note a large save:", err));
         return c.json({ document: doc });
     });
 }

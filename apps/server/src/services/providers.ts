@@ -169,10 +169,12 @@ export function parseModel(ref: string): { provider: string; model: string } | n
     return { provider: ref.slice(0, i), model: ref.slice(i + 1) };
 }
 
-// A model reference a studio or website may be set to: one of the providers above.
+// A model reference a studio or website may be set to: one of the providers above, and a model
+// name with no empty or upward step in it ("a//b", "/a", "a/..").
 export function validModelRef(ref: string): boolean {
     const m = parseModel(ref);
-    return m !== null && BY_ID.has(m.provider) && ref.length <= 160 && /^[\w.:\-/@]+$/.test(m.model) && !m.model.includes("..");
+    if (m === null || !BY_ID.has(m.provider) || ref.length > 160 || !/^[\w.:\-/@]+$/.test(m.model)) return false;
+    return !m.model.includes("..") && !m.model.includes("//") && !m.model.startsWith("/") && !m.model.endsWith("/");
 }
 
 // The header a provider expects its key in.

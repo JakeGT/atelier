@@ -100,8 +100,6 @@ export interface Project {
     unreadMessages?: number;
 }
 
-// What each role may do, mirroring the server's permission table for the buttons
-// the interface shows. The server is the authority; this only avoids dead ends.
 // A model provider a studio can connect its own API key for.
 export interface ProviderInfo {
     id: string;
@@ -191,8 +189,11 @@ export interface OperatorOverview {
     totals: { studios: number; people: number; websites: number; liveWebsites: number; tokens: number };
 }
 
+// What each role may do, mirroring the server's permission table for the buttons
+// the interface shows. The server is the authority; this only avoids dead ends.
 export const can = {
-    edit: (r: Role) => r !== "viewer",
+    // Named roles only: a role this page has never heard of is offered nothing it may not have.
+    edit: (r: Role) => r === "owner" || r === "admin" || r === "editor",
     publish: (r: Role) => r === "owner" || r === "admin",
     manage: (r: Role) => r === "owner" || r === "admin",
 };
@@ -310,12 +311,16 @@ export interface SitePage {
 // A report about Atelier itself: from a person, or from the assistant about the system it works in.
 export interface FeedbackReport {
     id: string;
-    source: "person" | "assistant";
+    // "app": Atelier noticed it itself.
+    source: "person" | "assistant" | "app";
     kind: string;
     text: string;
     context: Record<string, string>;
     status: "open" | "done";
     createdAt: string;
+    // For what Atelier noticed itself: how many times, and when last.
+    seen: number;
+    lastSeenAt: string | null;
 }
 
 // What the assistant has stopped to ask the person.
@@ -461,6 +466,9 @@ export class ApiError extends Error {
 }
 
 let csrfToken: string | null = null;
+// For what the app reports about itself (lib/watch.ts), which is sent without going through here.
+export const currentCsrf = (): string | null => csrfToken;
+export const currentBuild = (): string => myBuild;
 
 // ---- noticing a deploy ---------------------------------------------------------------
 // A tab left open across a deploy keeps running the old bundle. The server names the
@@ -489,7 +497,12 @@ async function parse<T>(res: Response): Promise<T> {
         if (res.status === 401 && body?.error === "reauth_required") throw new ReauthRequired();
         throw new ApiError(friendly(body?.error, res.status), res.status);
     }
-    return (await res.json()) as T;
+    // An answer that cannot be read (a page from something in between, say) is a failure, in words.
+    try {
+        return (await res.json()) as T;
+    } catch {
+        throw new ApiError(friendly(undefined, 502), res.status);
+    }
 }
 
 function friendly(error: string | undefined, status: number): string {
@@ -502,15 +515,25 @@ function friendly(error: string | undefined, status: number): string {
     return error ? error.charAt(0).toUpperCase() + error.slice(1) : `Request failed (${status})`;
 }
 
+// A request that never got an answer (no connection, the server restarting) fails in the
+// person's words, not the browser's ("Failed to fetch").
+const reach = (url: string, init?: RequestInit): Promise<Response> =>
+    fetch(url, init).catch(() => {
+        throw new ApiError("Atelier couldn't be reached. Check your connection and try again.", 0);
+    });
+
 // Every state-changing request carries the per-session CSRF token.
 const send = (method: "POST" | "PUT" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<Response> =>
-    fetch(url, {
+    reach(url, {
         method,
         headers: { "content-type": "application/json", "x-atelier-csrf": csrfToken ?? "" },
         body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-const get = <T>(url: string) => fetch(url).then((r) => parse<T>(r));
+// Anything put into an address is escaped, so a stray "/" or "?" cannot change where the request goes.
+const enc = encodeURIComponent;
+
+const get = <T>(url: string) => reach(url).then((r) => parse<T>(r));
 const post = <T>(url: string, body?: unknown) => send("POST", url, body).then((r) => parse<T>(r));
 const put = <T>(url: string, body?: unknown) => send("PUT", url, body).then((r) => parse<T>(r));
 const patch = <T>(url: string, body?: unknown) => send("PATCH", url, body).then((r) => parse<T>(r));
@@ -550,7 +573,8 @@ export const api = {
     readNotifications: () => post<{ ok: true }>("/api/v1/notifications/read"),
     emailNotifications: (on: boolean) => put<{ email: boolean }>("/api/v1/notifications/email", { on }),
     session: async (): Promise<Session | null> => {
-        const s = (await fetch("/auth/session").then((r) => noteBuild(r).json())) as Session | null;
+        // Signed out is an answer of `null`; an answer that cannot be read is a failure, not "signed out".
+        const s = await reach("/auth/session").then((r) => parse<Session | null>(r));
         csrfToken = s?.csrfToken ?? null;
         return s;
     },
@@ -562,8 +586,8 @@ export const api = {
     // Operators only.
     // Go into a studio you do not belong to, for a limited time; its owners are shown the reason.
     operatorEnter: (id: string, reason: string) =>
-        post<{ slug: string; until: string | null }>(`/api/v1/admin/studios/${id}/enter`, { reason }),
-    operatorLeave: (id: string) => post<{ ok: true }>(`/api/v1/admin/studios/${id}/leave`),
+        post<{ slug: string; until: string | null }>(`/api/v1/admin/studios/${enc(id)}/enter`, { reason }),
+    operatorLeave: (id: string) => post<{ ok: true }>(`/api/v1/admin/studios/${enc(id)}/leave`),
     operatorOverview: () => get<OperatorOverview>("/api/v1/admin/studios"),
     operatorUpdate: (
         id: string,
@@ -573,7 +597,7 @@ export const api = {
             dailyTokenLimit?: number | null;
             flags?: StudioSummary["flags"];
         },
-    ) => patch<{ studio: StudioSummary }>(`/api/v1/admin/studios/${id}`, changes),
+    ) => patch<{ studio: StudioSummary }>(`/api/v1/admin/studios/${enc(id)}`, changes),
     // A report about Atelier itself, to whoever runs it.
     report: (body: {
         kind: "problem" | "idea";
@@ -587,7 +611,7 @@ export const api = {
     operatorReports: (status?: "open" | "done") =>
         get<{ reports: FeedbackReport[]; open: number }>(`/api/v1/admin/feedback${status ? `?status=${status}` : ""}`),
     setReportStatus: (id: string, status: "open" | "done") =>
-        patch<{ report: FeedbackReport }>(`/api/v1/admin/feedback/${id}`, { status }).then((b) => b.report),
+        patch<{ report: FeedbackReport }>(`/api/v1/admin/feedback/${enc(id)}`, { status }).then((b) => b.report),
     reportsDocumentUrl: "/api/v1/admin/feedback.md",
     operatorActivity: () => get<{ entries: AuditEntry[] }>("/api/v1/admin/audit").then((b) => b.entries),
     // The introduction is finished or skipped: it is not shown again.
@@ -599,14 +623,14 @@ export const api = {
 // Everything inside one organisation. The organisation's slug is part of every
 // URL; the server checks membership on each request.
 export function orgApi(org: string) {
-    const o = `/api/v1/orgs/${org}`;
-    const p = (projectId: string) => `${o}/projects/${projectId}`;
+    const o = `/api/v1/orgs/${enc(org)}`;
+    const p = (projectId: string) => `${o}/projects/${enc(projectId)}`;
     return {
         update: (changes: { name?: string; defaultModel?: string | null; dailyTokenLimit?: number | null }) =>
             patch<{ org: Org }>(o, changes).then((b) => b.org),
         usage: () => get<Usage>(`${o}/usage`),
         // The design kit: looks and sections. `look`: show the sections wearing this look.
-        design: (look?: string) => get<{ looks: DesignLook[]; layouts: DesignLayout[] }>(`${o}/design${look ? `?look=${look}` : ""}`),
+        design: (look?: string) => get<{ looks: DesignLook[]; layouts: DesignLayout[] }>(`${o}/design${look ? `?look=${enc(look)}` : ""}`),
         // This website's own look (null if it was not built with one), and itself in each look.
         projectDesign: (projectId: string) => get<{ look: string | null; looks: DesignLook[] }>(`${p(projectId)}/design`),
         setLook: (projectId: string, look: string) => put<{ ok: true; look: string }>(`${p(projectId)}/look`, { look }),
@@ -614,7 +638,7 @@ export function orgApi(org: string) {
         templates: () => get<{ templates: Template[] }>(`${o}/templates`).then((b) => b.templates),
         saveTemplate: (projectId: string, name: string, description: string) =>
             post<{ template: Template }>(`${p(projectId)}/template`, { name, description }).then((b) => b.template),
-        removeTemplate: (id: string) => del<{ ok: true }>(`${o}/templates/${encodeURIComponent(id)}`),
+        removeTemplate: (id: string) => del<{ ok: true }>(`${o}/templates/${enc(id)}`),
         monthlyUsage: () => get<{ months: MonthUsage[] }>(`${o}/usage/monthly`).then((b) => b.months),
         // A link, good for five minutes, that downloads everything in the studio.
         exportStudio: () => post<{ url: string }>(`${o}/export`).then((b) => b.url),
@@ -623,20 +647,20 @@ export function orgApi(org: string) {
         projectMembers: (projectId: string) => get<{ members: ProjectMember[] }>(`${p(projectId)}/members`).then((b) => b.members),
         // `role` null: back to their role in the studio.
         setProjectRole: (projectId: string, userId: string, role: "admin" | "editor" | "viewer" | null) =>
-            put<{ ok: true }>(`${p(projectId)}/members/${userId}`, { role }),
+            put<{ ok: true }>(`${p(projectId)}/members/${enc(userId)}`, { role }),
         providers: () => get<{ providers: ProviderInfo[] }>(`${o}/providers`).then((b) => b.providers),
-        connectProvider: (id: string, apiKey: string) => put<{ ok: boolean; verified: boolean }>(`${o}/providers/${id}`, { apiKey }),
-        disconnectProvider: (id: string) => del<{ ok: boolean }>(`${o}/providers/${id}`),
+        connectProvider: (id: string, apiKey: string) => put<{ ok: boolean; verified: boolean }>(`${o}/providers/${enc(id)}`, { apiKey }),
+        disconnectProvider: (id: string) => del<{ ok: boolean }>(`${o}/providers/${enc(id)}`),
         models: () => get<ModelList>(`${o}/models`),
         audit: () => get<{ entries: AuditEntry[] }>(`${o}/audit`).then((b) => b.entries),
 
         listMembers: () => get<{ members: Member[] }>(`${o}/members`).then((b) => b.members),
-        setRole: (userId: string, role: Role) => patch<{ ok: boolean }>(`${o}/members/${userId}`, { role }),
-        removeMember: (userId: string) => del<{ ok: boolean }>(`${o}/members/${userId}`),
+        setRole: (userId: string, role: Role) => patch<{ ok: boolean }>(`${o}/members/${enc(userId)}`, { role }),
+        removeMember: (userId: string) => del<{ ok: boolean }>(`${o}/members/${enc(userId)}`),
         listInvitations: () => get<{ invitations: Invitation[] }>(`${o}/invitations`).then((b) => b.invitations),
         invite: (email: string, role: Invitation["role"]) =>
             post<{ invitation: Invitation }>(`${o}/invitations`, { email, role }).then((b) => b.invitation),
-        revokeInvitation: (id: string) => del<{ ok: boolean }>(`${o}/invitations/${id}`),
+        revokeInvitation: (id: string) => del<{ ok: boolean }>(`${o}/invitations/${enc(id)}`),
 
         listProjects: (archived = false) =>
             get<{ projects: Project[] }>(`${o}/projects${archived ? "?archived=1" : ""}`).then((b) => b.projects),
@@ -656,17 +680,17 @@ export function orgApi(org: string) {
         listSessions: (projectId: string) => get<{ sessions: AgentSession[] }>(`${p(projectId)}/sessions`).then((b) => b.sessions),
         createSession: (projectId: string) => post<{ session: AgentSession }>(`${p(projectId)}/sessions`, {}).then((b) => b.session),
         startRun: (projectId: string, sessionId: string, prompt: string) =>
-            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { prompt }).then((b) => b.run),
+            post<{ run: Run }>(`${p(projectId)}/sessions/${enc(sessionId)}/messages`, { prompt }).then((b) => b.run),
         // Pick up the request that was stopped or ran out of time.
         carryOn: (projectId: string, sessionId: string) =>
-            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { resume: true }).then((b) => b.run),
-        stopRun: (projectId: string, runId: string) => post<{ ok: boolean }>(`${p(projectId)}/runs/${runId}/stop`),
-        extendRun: (projectId: string, runId: string) => post<{ run: Run }>(`${p(projectId)}/runs/${runId}/extend`).then((b) => b.run),
+            post<{ run: Run }>(`${p(projectId)}/sessions/${enc(sessionId)}/messages`, { resume: true }).then((b) => b.run),
+        stopRun: (projectId: string, runId: string) => post<{ ok: boolean }>(`${p(projectId)}/runs/${enc(runId)}/stop`),
+        extendRun: (projectId: string, runId: string) => post<{ run: Run }>(`${p(projectId)}/runs/${enc(runId)}/extend`).then((b) => b.run),
         pulse: (projectId: string, typing: boolean) =>
             post<Pulse>(`${p(projectId)}/pulse`, { typing }).then((b) => ({ ...b, run: wholeRun(b.run) })),
         // Answers to what the assistant asked: the same request carries on with them.
         answer: (projectId: string, sessionId: string, id: string, answers: string[]) =>
-            post<{ run: Run }>(`${p(projectId)}/sessions/${sessionId}/messages`, { answers: { id, answers } }).then((b) => b.run),
+            post<{ run: Run }>(`${p(projectId)}/sessions/${enc(sessionId)}/messages`, { answers: { id, answers } }).then((b) => b.run),
         setAsking: (projectId: string, level: number) =>
             put<{ askLevel: number }>(`${p(projectId)}/asking`, { level }).then((b) => b.askLevel),
         thread: (projectId: string) =>
@@ -684,32 +708,32 @@ export function orgApi(org: string) {
         // From here the assistant no longer has in mind what was said before. Messages and website stay.
         newConversation: (projectId: string) =>
             post<{ conversationAt: string }>(`${p(projectId)}/conversation`).then((b) => b.conversationAt),
-        getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${runId}`).then((b) => wholeRun(b.run)),
+        getRun: (projectId: string, runId: string) => get<{ run: Run }>(`${p(projectId)}/runs/${enc(runId)}`).then((b) => wholeRun(b.run)),
 
         listCheckpoints: (projectId: string) =>
             get<{ checkpoints: Checkpoint[] }>(`${p(projectId)}/checkpoints`).then((b) => b.checkpoints),
-        restoreCheckpoint: (projectId: string, sha: string) => post<{ ok: boolean }>(`${p(projectId)}/checkpoints/${sha}/restore`),
+        restoreCheckpoint: (projectId: string, sha: string) => post<{ ok: boolean }>(`${p(projectId)}/checkpoints/${enc(sha)}/restore`),
         previewUrl: (projectId: string) => get<{ url: string }>(`${p(projectId)}/preview-url`).then((b) => b.url),
 
         listContent: (projectId: string) => get<{ documents: ContentDocument[] }>(`${p(projectId)}/content`).then((b) => b.documents),
         // `rev`: the revision being edited. The save is refused if someone else changed it meanwhile.
         saveContent: (projectId: string, kind: string, slug: string, draft: Record<string, unknown>, rev?: number) =>
             put<{ document: ContentDocument }>(
-                `${p(projectId)}/content/${kind}/${slug}${rev === undefined ? "" : `?rev=${rev}`}`,
+                `${p(projectId)}/content/${enc(kind)}/${enc(slug)}${rev === undefined ? "" : `?rev=${rev}`}`,
                 draft,
             ).then((b) => b.document),
 
         hosting: (projectId: string) => get<Hosting>(`${p(projectId)}/hosting`),
         addDomain: (projectId: string, hostname: string) =>
             post<{ hostname: string; target: string }>(`${p(projectId)}/domains`, { hostname }),
-        checkDomain: (projectId: string, hostname: string) => post<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}/check`),
-        removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${hostname}`),
+        checkDomain: (projectId: string, hostname: string) => post<{ ok: boolean }>(`${p(projectId)}/domains/${enc(hostname)}/check`),
+        removeDomain: (projectId: string, hostname: string) => del<{ ok: boolean }>(`${p(projectId)}/domains/${enc(hostname)}`),
 
         // For each page of the website, the pieces of wording it shows ("page/home#headline").
         contentMap: (projectId: string) => get<{ pages: SitePage[] }>(`${p(projectId)}/content/map`).then((b) => b.pages),
         listMessages: (projectId: string) => get<{ messages: FormMessage[]; unread: number }>(`${p(projectId)}/submissions`),
         readMessages: (projectId: string) => post<{ ok: true }>(`${p(projectId)}/submissions/read`),
-        removeMessage: (projectId: string, id: string) => del<{ ok: true }>(`${p(projectId)}/submissions/${id}`),
+        removeMessage: (projectId: string, id: string) => del<{ ok: true }>(`${p(projectId)}/submissions/${enc(id)}`),
         messagesCsvUrl: (projectId: string) => `${p(projectId)}/submissions.csv`,
         // The picture of a website's home page, if one has been taken. The time in the address lets it be kept until the next one.
         coverUrl: (project: Pick<Project, "id" | "coverAt">) =>
@@ -720,7 +744,7 @@ export function orgApi(org: string) {
             form.append("file", file);
             form.append("alt", about.alt);
             form.append("decorative", String(about.decorative));
-            return fetch(`${p(projectId)}/media`, { method: "POST", headers: { "x-atelier-csrf": csrfToken ?? "" }, body: form })
+            return reach(`${p(projectId)}/media`, { method: "POST", headers: { "x-atelier-csrf": csrfToken ?? "" }, body: form })
                 .then((r) => parse<{ asset: MediaAsset }>(r))
                 .then((b) => b.asset);
         },
@@ -728,18 +752,20 @@ export function orgApi(org: string) {
             projectId: string,
             id: string,
             about: { alt: string; decorative: boolean; focal?: { x: number; y: number } | null },
-        ) => patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${id}`, about).then((b) => b.asset),
+        ) => patch<{ asset: MediaAsset }>(`${p(projectId)}/media/${enc(id)}`, about).then((b) => b.asset),
         removeMedia: (projectId: string, id: string, anyway = false) =>
-            del<{ ok: true }>(`${p(projectId)}/media/${id}${anyway ? "?anyway=1" : ""}`),
+            del<{ ok: true }>(`${p(projectId)}/media/${enc(id)}${anyway ? "?anyway=1" : ""}`),
         // The smallest copy of an image there is, for showing it in the library.
         mediaUrl: (projectId: string, asset: Pick<MediaAsset, "name" | "variants"> & { poster?: string | null }) =>
-            `${p(projectId)}/media/file/${asset.poster ?? asset.variants[0]?.name ?? asset.name}`,
+            `${p(projectId)}/media/file/${enc(asset.poster ?? asset.variants?.[0]?.name ?? asset.name)}`,
 
         history: (projectId: string) => get<{ entries: HistoryEntry[] }>(`${p(projectId)}/history`).then((b) => b.entries),
         contentHistory: (projectId: string, kind: string, slug: string) =>
-            get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${kind}/${slug}/revisions`).then((b) => b.revisions),
+            get<{ revisions: ContentRevision[] }>(`${p(projectId)}/content/${enc(kind)}/${enc(slug)}/revisions`).then((b) => b.revisions),
         restoreContent: (projectId: string, kind: string, slug: string, rev: number) =>
-            post<{ document: ContentDocument }>(`${p(projectId)}/content/${kind}/${slug}/revisions/${rev}/restore`).then((b) => b.document),
+            post<{ document: ContentDocument }>(`${p(projectId)}/content/${enc(kind)}/${enc(slug)}/revisions/${rev}/restore`).then(
+                (b) => b.document,
+            ),
 
         listReleases: (projectId: string) => get<{ releases: Release[] }>(`${p(projectId)}/releases`).then((b) => b.releases),
         // "Publish" = freeze the current drafts + code into a release, then make it live.

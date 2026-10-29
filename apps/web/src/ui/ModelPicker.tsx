@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CatalogModel, ModelList, OrgApi } from "../lib/api";
 import { navigate } from "../lib/hooks";
-import { Dots } from "./kit";
+import { Dots, keepTabInside } from "./kit";
 
 interface Props {
     api: OrgApi;
@@ -24,7 +24,13 @@ interface Props {
 const perMillion = (n: number): string => (n === 0 ? "free" : n >= 10 ? `$${Math.round(n)}` : `$${Number(n.toFixed(2))}`);
 const windowSize = (n: number): string => (n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : `${Math.round(n / 1000)}K`);
 // A reference typed by hand: provider/model, for a model the catalog doesn't list yet.
+// (Some providers' own names for models have a "/" in them, so the model part may too.)
 const TYPED = /^[a-z0-9-]+\/[\w.:\-/@]+$/;
+// The most matches listed for a search.
+const MOST = 60;
+// The provider's part of "<provider>/<model>", and the model's.
+const providerOf = (ref: string): string => ref.slice(0, Math.max(0, ref.indexOf("/")));
+const modelOf = (ref: string): string => ref.slice(ref.indexOf("/") + 1);
 
 // The model setting: shows the current choice and opens a searchable picker.
 // With nothing typed the picker shows the recommended models (the newest from
@@ -45,15 +51,15 @@ export function ModelPicker({ api, orgSlug, value, onChange, automatic, automati
     }, [api, refresh]);
 
     const chosen = value ? list?.models.find((m) => m.ref === value) : undefined;
-    const provider = value ? list?.providers.find((p) => p.id === value.slice(0, value.indexOf("/"))) : undefined;
+    const provider = value ? list?.providers.find((p) => p.id === providerOf(value)) : undefined;
     return (
         <>
             <button type="button" className="model-trigger" onClick={() => setOpen(true)} disabled={disabled} aria-haspopup="dialog">
                 <span className="model-trigger-main">
                     {value ? (
                         <>
-                            <strong>{chosen?.name ?? value.slice(value.indexOf("/") + 1)}</strong>
-                            <span className="muted">{provider?.name ?? value.slice(0, value.indexOf("/"))}</span>
+                            <strong>{chosen?.name ?? modelOf(value)}</strong>
+                            <span className="muted">{provider?.name ?? providerOf(value)}</span>
                         </>
                     ) : (
                         <strong className="model-auto">{automatic}</strong>
@@ -99,6 +105,10 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
     const [scope, setScope] = useState<string>("all");
     const [cursor, setCursor] = useState(0);
     const listRef = useRef<HTMLDivElement>(null);
+    const boxRef = useRef<HTMLDivElement>(null);
+    // Nothing at all could be fetched, so which providers there are is not known: a model
+    // typed out is taken as it is, and the server says if it cannot be used.
+    const blind = list?.unavailable === true && list.providers.length === 0;
 
     const providers = useMemo(() => new Map((list?.providers ?? []).map((p) => [p.id, p])), [list]);
     const connected = useMemo(() => (list?.providers ?? []).filter((p) => p.connected), [list]);
@@ -142,13 +152,13 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
         // A name that starts with what was typed beats one that merely contains it.
         const starts = (m: CatalogModel) => Number(m.name.toLowerCase().startsWith(q) || m.id.toLowerCase().startsWith(q));
         matches.sort((a, b) => starts(b) - starts(a) || order(a, b));
-        for (const model of matches.slice(0, 60)) out.push({ kind: "model", model });
+        for (const model of matches.slice(0, MOST)) out.push({ kind: "model", model });
         const typed = query.trim();
-        if (TYPED.test(typed) && providers.has(typed.slice(0, typed.indexOf("/"))) && !matches.some((m) => m.ref === typed)) {
+        if (TYPED.test(typed) && (blind || providers.has(providerOf(typed))) && !matches.some((m) => m.ref === typed)) {
             out.push({ kind: "typed", ref: typed });
         }
         return { rows: out, groups: heads, total: matches.length };
-    }, [list, providers, q, query, scope]);
+    }, [list, providers, q, query, scope, blind]);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: a new search or scope starts again from the top
     useEffect(() => setCursor(0), [q, scope]);
@@ -156,15 +166,25 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
         listRef.current?.querySelector(`[data-i="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
     }, [cursor]);
 
-    const usable = (row: Row): boolean =>
-        row.kind === "auto" || providers.get(row.kind === "model" ? row.model.provider : (row.ref.split("/")[0] ?? ""))?.connected === true;
-    const pick = (row: Row | undefined) => {
-        if (!row || !usable(row)) return;
-        onPick(row.kind === "auto" ? null : row.kind === "typed" ? row.ref : row.model.ref);
+    const usable = (row: Row): boolean => {
+        if (row.kind === "auto") return true;
+        if (row.kind === "typed" && blind) return true;
+        return providers.get(row.kind === "model" ? row.model.provider : providerOf(row.ref))?.connected === true;
     };
     const toKeys = () => {
         onClose();
         navigate(`/o/${orgSlug}/settings/models`);
+    };
+    // Choosing a row, by click or by Enter: a model that can be used is chosen; one whose
+    // provider has no key yet leads to where the key is added, for those who may add it.
+    const pick = (row: Row | undefined) => {
+        if (!row) return;
+        if (!usable(row)) {
+            if (mayManage) toKeys();
+            return;
+        }
+        if (row.kind === "auto") onPick(null);
+        else onPick(row.kind === "typed" ? row.ref : row.model.ref);
     };
 
     // Rendered at the top of the document: an ancestor with a transform (an animated
@@ -184,17 +204,21 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
                     onClose();
                 } else if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    setCursor((c) => Math.min(rows.length - 1, c + 1));
+                    // Never below the first row, even while there are no rows yet.
+                    setCursor((c) => Math.max(0, Math.min(rows.length - 1, c + 1)));
                 } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     setCursor((c) => Math.max(0, c - 1));
-                } else if (e.key === "Enter") {
+                } else if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+                    // From the search box, Enter chooses the marked row. On a button it presses that button.
                     e.preventDefault();
-                    pick(rows[cursor]);
+                    pick(rows[Math.min(cursor, rows.length - 1)]);
+                } else {
+                    keepTabInside(e, boxRef.current);
                 }
             }}
         >
-            <div className="picker" role="dialog" aria-modal="true" aria-label="Choose a model">
+            <div className="picker" role="dialog" aria-modal="true" aria-label="Choose a model" ref={boxRef}>
                 <div className="picker-search">
                     <Search />
                     <input
@@ -281,7 +305,7 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
                                             data-i={i}
                                             className={`model-row ${i === cursor ? "cursor" : ""} ${selected ? "selected" : ""} ${ok ? "" : "locked"}`}
                                             onMouseMove={() => setCursor(i)}
-                                            onClick={() => (ok ? pick(row) : mayManage ? toKeys() : undefined)}
+                                            onClick={() => pick(row)}
                                             title={ok ? undefined : "Connect this provider with an API key to use its models"}
                                         >
                                             {row.kind === "auto" ? (
@@ -311,8 +335,10 @@ function Picker({ list, value, automatic, automaticHint, mayManage, orgSlug, onC
                                 );
                             })}
                             {q && rows.length === 0 && <p className="picker-note">No model matches “{query.trim()}”.</p>}
-                            {q && total > 60 && (
-                                <p className="picker-note">Showing the first 60 of {total}. Keep typing to narrow it down.</p>
+                            {q && total > MOST && (
+                                <p className="picker-note">
+                                    Showing the first {MOST} of {total}. Keep typing to narrow it down.
+                                </p>
                             )}
                         </>
                     )}

@@ -162,6 +162,8 @@ export function workspaceRoutes(api: Api): void {
             const last = (await store.messages.list(org.id, project.id)).filter((m) => m.role === "user").at(-1);
             prompt = last ? `Carry on with this request from where you left off, and finish it:\n\n${last.text}` : "";
         }
+        // A person may write 20,000 characters. The rest is room for what is put around their words
+        // above ("Carry on with this request…", "Instead of answering your questions…").
         if (!prompt || prompt.length > 21_000) return c.json({ error: "prompt required (max 20000 characters)" }, 400);
 
         // The daily ceiling is a safety net against a runaway bill on the owner's
@@ -255,16 +257,24 @@ export function workspaceRoutes(api: Api): void {
         presence.clearRun(projectId, run.id);
         presence.touch(projectId);
         // The assistant changed the website: its card gets a new picture.
-        if (run.checkpoint) api.covers.changed(tenantId, projectId);
+        if (run.checkpoint || run.unsaved) api.covers.changed(tenantId, projectId);
+        // The changes are on the website but not in its history yet: the person is told, with the reply.
+        const UNSAVED =
+            "These changes are on your website, but they could not be saved as a version just now. They will be saved with your next request.";
         if (run.status === "done" && run.result) {
-            await store.messages.add({ ...base, role: "assistant", text: run.result.text, tools: run.result.toolEvents });
+            const text = run.unsaved ? `${run.result.text}\n\n${UNSAVED}` : run.result.text;
+            await store.messages.add({ ...base, role: "assistant", text, tools: run.result.toolEvents });
         } else if (run.status === "stopped" || run.status === "timed_out") {
             // Not an error: what was done is kept as a version, and it can be carried on.
             const minutes = Math.max(
                 1,
                 Math.round((new Date(run.finishedAt ?? run.startedAt).getTime() - new Date(run.startedAt).getTime()) / 60_000),
             );
-            const kept = run.checkpoint ? " What it had done is saved as a version." : " It had not changed anything yet.";
+            const kept = run.unsaved
+                ? " What it had done is on your website, but it could not be saved as a version just now. It will be saved with your next request."
+                : run.checkpoint
+                  ? " What it had done is saved as a version."
+                  : " It had not changed anything yet.";
             const text =
                 run.status === "stopped"
                     ? `You stopped this request.${kept}`
@@ -416,7 +426,7 @@ export function workspaceRoutes(api: Api): void {
                 // After a restart the server has forgotten who is being worked for: pick it up again.
                 if (!presence.run(project.id)) {
                     const who = pending.authorId ? await store.users.findById(pending.authorId) : null;
-                    presence.setRun(project.id, { runId: run.id, userId: who?.id ?? "", name: who?.name ?? "Someone" });
+                    presence.setRun(project.id, { runId: run.id, userId: pending.authorId ?? "", name: who?.name ?? "Someone" });
                 }
             } else if (run) await settle(tenantId, project.id, run);
             else if (run === null) {
@@ -434,10 +444,10 @@ export function workspaceRoutes(api: Api): void {
             if (!activeRun && run !== undefined) messages = await store.messages.list(tenantId, project.id);
         }
         // Names for the people in the conversation, so each request says who asked.
-        const authors: Record<string, string> = {};
-        for (const id of new Set(messages.map((m) => m.authorId).filter((x): x is string => x !== null))) {
-            authors[id] = (await store.users.findById(id))?.name ?? "Someone";
-        }
+        const ids = [...new Set(messages.map((m) => m.authorId).filter((x): x is string => x !== null))];
+        const authors: Record<string, string> = Object.fromEntries(
+            await Promise.all(ids.map(async (id) => [id, (await store.users.findById(id))?.name ?? "Someone"] as const)),
+        );
         // What the assistant is waiting to be told, once it has stopped to ask.
         const question = activeRun || project.archivedAt ? null : await store.questions.open(tenantId, project.id);
         return c.json({ messages, activeRun, authors, question, askLevel: project.askLevel, conversationAt: project.conversationAt });
@@ -512,7 +522,13 @@ export function workspaceRoutes(api: Api): void {
         const trying = claims.sessionId.startsWith("preview+look:") ? claims.sessionId.slice("preview+look:".length) : null;
         const tryLook = findLook(trying);
         const prefix = `/preview/${param(c, "token")}/`;
-        const rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
+        // An address that cannot be read as one names no file.
+        let rel: string;
+        try {
+            rel = decodeURIComponent(c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "") || "index.html";
+        } catch {
+            return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
+        }
         const project = await store.projects.findById(claims.tenantId, claims.projectId);
         if (!project || project.archivedAt) return c.json({ error: "not found" }, 404, PREVIEW_HEADERS);
         if (tryLook && rel === THEME_FILE) {

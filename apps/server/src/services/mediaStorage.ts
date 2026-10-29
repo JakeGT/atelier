@@ -28,9 +28,11 @@ export class MemoryStorage implements MediaStorage {
         this.objects.set(key, body);
     }
     async get(key: string) {
+        check(key);
         return this.objects.get(key) ?? null;
     }
     async delete(key: string) {
+        check(key);
         this.objects.delete(key);
     }
 }
@@ -51,9 +53,13 @@ export class DiskStorage implements MediaStorage {
         await writeFile(p, body);
     }
     async get(key: string) {
+        // Only a file that is not there is "no such file"; a disk that cannot be read is a failure, as it is for R2.
         return readFile(this.path(key)).then(
             (b) => new Uint8Array(b),
-            () => null,
+            (err: NodeJS.ErrnoException) => {
+                if (err.code === "ENOENT") return null;
+                throw err;
+            },
         );
     }
     async delete(key: string) {
@@ -104,6 +110,9 @@ export function signV4(input: {
     return `AWS4-HMAC-SHA256 Credential=${input.accessKeyId}/${scope}, SignedHeaders=${signed.join(";")}, Signature=${signature}`;
 }
 
+// An answer whose body is not wanted is let go of, so its connection can be used again.
+const done = (res: Response): Promise<void> => res.body?.cancel().catch(() => {}) ?? Promise.resolve();
+
 // Cloudflare R2 through its S3 API, signed with AWS Signature Version 4 (region
 // "auto", service "s3"). Three operations are all this needs, so it is written
 // out rather than bringing in an SDK.
@@ -121,7 +130,8 @@ export class R2Storage implements MediaStorage {
 
     private async call(method: "PUT" | "GET" | "DELETE", key: string, body?: Uint8Array, contentType?: string): Promise<Response> {
         check(key);
-        const path = `/${this.opts.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
+        // An endpoint may have a path of its own (a gateway in front of the store); the bucket comes after it.
+        const path = `${this.base.pathname.replace(/\/+$/, "")}/${this.opts.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
         const headers: Record<string, string> = {
             host: this.base.host,
             "x-amz-content-sha256": sha256(body ?? ""),
@@ -147,11 +157,13 @@ export class R2Storage implements MediaStorage {
 
     async put(key: string, body: Uint8Array, contentType: string) {
         const res = await this.call("PUT", key, body, contentType);
+        await done(res);
         if (!res.ok) throw new Error(`file storage refused the upload (${res.status})`);
     }
 
     async get(key: string) {
         const res = await this.call("GET", key);
+        if (!res.ok) await done(res);
         if (res.status === 404) return null;
         if (!res.ok) throw new Error(`file storage could not be read (${res.status})`);
         return new Uint8Array(await res.arrayBuffer());
@@ -159,6 +171,7 @@ export class R2Storage implements MediaStorage {
 
     async delete(key: string) {
         const res = await this.call("DELETE", key);
+        await done(res);
         if (!res.ok && res.status !== 404) throw new Error(`file storage could not delete (${res.status})`);
     }
 }

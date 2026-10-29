@@ -5,20 +5,25 @@
 # platform the real stack lives in the infra repo at apps/atelier/compose.yml
 # (see docs/14).
 #
-#   for t in server runtime provisioner egress; do docker build --target $t -t atelier-$t:local ..; done
+#   for t in server runtime provisioner egress deployer; do docker build --target $t -t atelier-$t:local ..; done
 #   mkdir -p secrets
 #   openssl rand -base64 24 > secrets/postgres_password
 #   printf 'postgres://atelier:%s@db:5432/atelier' "$(cat secrets/postgres_password)" > secrets/atelier_database_url
 #   openssl rand -base64 32 > secrets/atelier_secrets_key
 #   openssl rand -base64 32 > secrets/atelier_provisioner_secret
 #   printf 'the oidc client secret' > secrets/atelier_oidc_client_secret
+#   openssl rand -base64 32 > secrets/atelier_deployer_secret
+#   printf 'the cloudflare account id' > secrets/atelier_cloudflare_account_id
+#   printf 'the cloudflare api token' > secrets/atelier_cloudflare_api_token
 #   chmod 0400 secrets/*
 #   docker compose -f deploy/compose.example.yml up -d
 #
-# This example connects as the database owner (single role). For the owner /
-# runtime-role split used in production (ADR-0008), create the atelier_runtime
-# group + a login in it, point DATABASE_URL_FILE at that login and
-# MIGRATION_DATABASE_URL_FILE at the owner (docs/14 §3).
+# This example connects as the database owner (single role), which the server
+# refuses unless told DATABASE_OWNER_OK=true, as it is below: fine for trying
+# Atelier out, not for real studios. For those, use the owner / runtime-role
+# split (ADR-0008): create the atelier_runtime group and a login in it, point
+# DATABASE_URL_FILE at that login and MIGRATION_DATABASE_URL_FILE at the owner
+# (docs/14 §3), and take DATABASE_OWNER_OK out.
 
 name: atelier
 
@@ -113,6 +118,7 @@ services:
             DATABASE_URL_FILE: /run/secrets/atelier_database_url
             ATELIER_SECRETS_KEY_FILE: /run/secrets/atelier_secrets_key
             RUNTIME_MODE: container
+            DATABASE_OWNER_OK: "true"
             PROVISIONER_SECRET_FILE: /run/secrets/atelier_provisioner_secret
             RUNTIME_API_URL: http://atelier-server:8080
             AUTH_MODE: oidc
@@ -122,7 +128,7 @@ services:
             OIDC_PROVIDER_NAME: example
             OIDC_ADMIN_GROUP: platform-admin
             SIGNUP_MODE: invite
-        secrets: [atelier_database_url, atelier_secrets_key, atelier_provisioner_secret, atelier_oidc_client_secret]
+        secrets: [atelier_database_url, atelier_secrets_key, atelier_provisioner_secret, atelier_oidc_client_secret, atelier_deployer_secret]
         networks:
             data: {}
             control: {}

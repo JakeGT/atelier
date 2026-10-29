@@ -14,6 +14,7 @@
 }
 html {
     -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 body {
     margin: 0;
@@ -21,15 +22,22 @@ body {
     color: var(--ink);
     background: var(--paper);
     line-height: 1.6;
-    font-size: 17px;
+    font-size: 1.0625rem;
 }
 img,
 svg {
     max-width: 100%;
     display: block;
 }
+img {
+    height: auto;
+}
 a {
     color: inherit;
+}
+a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
 }
 .wrap {
     width: min(1080px, 100% - 48px);
@@ -39,7 +47,8 @@ header.site {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 24px;
+    flex-wrap: wrap;
+    gap: 12px 24px;
     padding: 28px 0;
 }
 header.site .name {
@@ -57,7 +66,8 @@ header.site nav a {
     text-decoration: none;
     opacity: 0.75;
 }
-header.site nav a:hover {
+header.site nav a:hover,
+header.site nav a:focus-visible {
     opacity: 1;
 }
 h1,
@@ -85,7 +95,7 @@ p {
     font-size: 0.78rem;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    opacity: 0.65;
+    opacity: 0.75;
 }
 .button {
     display: inline-block;
@@ -108,7 +118,7 @@ footer.site {
 .grid {
     display: grid;
     gap: 28px;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 }
 body {
     text-align: center;

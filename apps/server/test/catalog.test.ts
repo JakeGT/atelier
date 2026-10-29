@@ -101,6 +101,7 @@ test("model references name a supported provider and a plausible model id", () =
     assert.equal(validModelRef("made-up/model"), false);
     assert.equal(validModelRef("anthropic/has space"), false);
     assert.equal(validModelRef("anthropic/../../etc/passwd"), false);
+    for (const odd of ["anthropic//", "openrouter/a//b", "openrouter/a/"]) assert.equal(validModelRef(odd), false, odd);
 });
 
 test("each provider's key goes in the header that provider expects", () => {
@@ -128,6 +129,35 @@ test("sealed keys open only at their own address and under the same server key",
     // Tampered with, or not a sealed value at all.
     assert.equal(box.open(`${sealed.slice(0, -2)}xx`, here), null);
     assert.equal(box.open("plaintext", here), null);
+    assert.equal(box.open(`${sealed}.more`, here), null);
+    assert.throws(() => new SecretBox(""));
     // Sealing twice gives different ciphertexts (a fresh nonce each time).
     assert.notEqual(box.seal("same", here), box.seal("same", here));
+});
+
+test("a model whose details are not what they should be costs only itself, not the catalog", () => {
+    const odd = {
+        anthropic: {
+            models: {
+                good: model("claude-big-5", "claude-big", "2026-09-01", 50),
+                noId: { ...model("x", "x", "2026-09-01", 5), id: 7 },
+                nothing: null,
+                oddFields: {
+                    ...model("claude-odd-1", "claude-odd", "2026-09-01", 5),
+                    release_date: 20260901,
+                    name: {},
+                    cost: { output: "5" },
+                },
+                oddDate: model("claude-date-1", "claude-date", "Sept 2026", 5),
+            },
+        },
+        openrouter: { models: "none today" },
+    } as unknown as Parameters<typeof buildCatalog>[0];
+    const models = buildCatalog(odd, PROVIDERS, NOW);
+    assert.deepEqual(models.map((m) => m.id).sort(), ["claude-big-5", "claude-date-1", "claude-odd-1"]);
+    const oddOne = models.find((m) => m.id === "claude-odd-1");
+    assert.deepEqual([oddOne?.name, oddOne?.releaseDate, oddOne?.costOut], ["claude-odd-1", null, null]);
+    // A date that is not year-month-day is not compared as if it were.
+    assert.equal(models.find((m) => m.id === "claude-date-1")?.releaseDate, null);
+    assert.deepEqual(buildCatalog(null as unknown as Parameters<typeof buildCatalog>[0], PROVIDERS, NOW), []);
 });

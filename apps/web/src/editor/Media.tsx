@@ -1,4 +1,4 @@
-import { FileText, Film, ImagePlus, Music, PencilLine, Trash2, Upload } from "lucide-react";
+import { FileText, Film, ImagePlus, Music, PencilLine, RotateCw, Trash2, Upload } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { MediaLibrary as Library, MediaAsset, orgApi } from "../lib/api";
 import { ApiError } from "../lib/api";
@@ -22,25 +22,58 @@ export function MediaProvider({ children, a, projectId, canEdit }: Scope & { chi
 export const useMedia = () => useContext(MediaScope);
 
 const megabytes = (bytes: number): string =>
-    bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    bytes <= 0 ? "0 KB" : bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const ACCEPT =
     "image/jpeg,image/png,image/webp,image/avif,image/gif,image/svg+xml,application/pdf,video/mp4,video/webm,audio/mpeg,audio/mp4";
 const kindWord = { image: "Picture", video: "Video", audio: "Sound", document: "Document" } as const;
 
+// A website's library is asked for once at a time when a page opens: a form with many picture
+// fields shares one request instead of making one each.
+const opening = new Map<string, Promise<Library>>();
+function listShared(scope: Scope): Promise<Library> {
+    let asked = opening.get(scope.projectId);
+    if (!asked) {
+        asked = scope.a.listMedia(scope.projectId).finally(() => opening.delete(scope.projectId));
+        opening.set(scope.projectId, asked);
+    }
+    return asked;
+}
+
 function useLibrary(scope: Scope | null) {
     const [library, setLibrary] = useState<Library | null>(null);
-    const load = useCallback(async () => {
-        if (!scope) return;
-        setLibrary(
-            await scope.a
-                .listMedia(scope.projectId)
-                .catch(() => ({ enabled: false, assets: [], used: 0, limits: { fileBytes: 0, libraryBytes: 0, files: 0 } })),
-        );
-    }, [scope]);
+    // The library could not be fetched. This is not the same as uploading being switched off,
+    // and is said differently; a library already showing stays.
+    const [failed, setFailed] = useState(false);
+    // `shared`: on first showing, when several fields ask at once. After a change it is always asked afresh.
+    const load = useCallback(
+        async (shared = false) => {
+            if (!scope) return;
+            try {
+                setLibrary(await (shared ? listShared(scope) : scope.a.listMedia(scope.projectId)));
+                setFailed(false);
+            } catch {
+                setFailed(true);
+            }
+        },
+        [scope],
+    );
     useEffect(() => {
-        void load();
+        void load(true);
     }, [load]);
-    return { library, load };
+    return { library, load, failed };
+}
+
+// Each file waiting to be added has a number of its own, so what is asked about one starts afresh
+// for the next (even one with the same name), and is not lost when more files are added meanwhile.
+const fileNumbers = new WeakMap<File, number>();
+let lastFileNumber = 0;
+function fileNumber(file: File): number {
+    let n = fileNumbers.get(file);
+    if (n === undefined) {
+        n = ++lastFileNumber;
+        fileNumbers.set(file, n);
+    }
+    return n;
 }
 
 export function Thumb({ asset }: { asset: MediaAsset }) {
@@ -157,7 +190,7 @@ function Describe({
 }
 
 // Adds files one at a time: pictures are described first; other files go straight in.
-function useUploads(scope: Scope | null, onAdded: (asset: MediaAsset) => void) {
+function useUploads(scope: Scope | null, onAdded: (asset: MediaAsset) => void, accept: string = ACCEPT) {
     const toast = useToast();
     const [queue, setQueue] = useState<File[]>([]);
     const [busy, setBusy] = useState(false);
@@ -175,7 +208,7 @@ function useUploads(scope: Scope | null, onAdded: (asset: MediaAsset) => void) {
                 toast(`“${file.name}” was not added: ${(err as Error).message}`, "error");
             } finally {
                 setBusy(false);
-                setQueue((q) => q.slice(1));
+                setQueue((q) => q.filter((f) => f !== file));
             }
         },
         [scope, onAdded, toast],
@@ -195,7 +228,7 @@ function useUploads(scope: Scope | null, onAdded: (asset: MediaAsset) => void) {
             <input
                 ref={input}
                 type="file"
-                accept={ACCEPT}
+                accept={accept}
                 multiple
                 hidden
                 onChange={(e) => {
@@ -205,14 +238,19 @@ function useUploads(scope: Scope | null, onAdded: (asset: MediaAsset) => void) {
             />
             {current?.type.startsWith("image/") && (
                 <Describe
-                    key={`${current.name}:${current.size}:${queue.length}`}
+                    key={fileNumber(current)}
                     title={queue.length > 1 ? `Add “${current.name}” (${queue.length} left)` : `Add “${current.name}”`}
                     preview={<LocalPreview file={current} />}
                     initial={{ alt: "", decorative: false }}
                     action="Add to the library"
                     busy={busy}
                     onDone={(about) => void send(current, about)}
-                    onClose={() => setQueue((q) => q.slice(1))}
+                    // Not while it is being sent: it is too late to leave it out.
+                    onClose={() => {
+                        if (busy) return;
+                        setQueue((q) => q.filter((f) => f !== current));
+                        toast(`“${current.name}” was not added.`);
+                    }}
                 />
             )}
         </>
@@ -254,18 +292,28 @@ const NotSetUp = () => (
     </div>
 );
 
+const NotLoaded = ({ onRetry }: { onRetry: () => void }) => (
+    <div className="media-empty">
+        <h3 className="display">The pictures and files could not be loaded.</h3>
+        <p className="muted">Nothing has been changed or lost. Check your connection, then try again.</p>
+        <button type="button" className="btn" onClick={onRetry}>
+            <RotateCw /> Try again
+        </button>
+    </div>
+);
+
 // The library itself: everything uploaded for this website.
 export function MediaLibrary() {
     const scope = useMedia();
     const toast = useToast();
-    const { library, load } = useLibrary(scope);
+    const { library, load, failed } = useLibrary(scope);
     const uploads = useUploads(scope, () => void load());
     const [describing, setDescribing] = useState<MediaAsset | null>(null);
     const [removing, setRemoving] = useState<{ asset: MediaAsset; usedIn: string | null } | null>(null);
     const [busy, setBusy] = useState(false);
     const [over, setOver] = useState(false);
     if (!scope) return null;
-    if (!library) return <Dots />;
+    if (!library) return failed ? <NotLoaded onRetry={() => void load()} /> : <Dots />;
     if (!library.enabled) return <NotSetUp />;
     const { a, projectId, canEdit } = scope;
 
@@ -423,18 +471,29 @@ export function MediaPicker({
 }) {
     const word = kind === "video" ? "video" : "picture";
     const scope = useMedia();
-    const { library, load } = useLibrary(scope);
-    const uploads = useUploads(scope, (asset) => {
-        void load();
-        if (asset.kind === kind) onPick(asset.path);
-    });
+    const { library, load, failed } = useLibrary(scope);
+    // Only files of the kind being chosen are offered by the file chooser here.
+    const uploads = useUploads(
+        scope,
+        (asset) => {
+            void load();
+            if (asset.kind === kind) onPick(asset.path);
+        },
+        ACCEPT.split(",")
+            .filter((type) => type.startsWith(`${kind}/`))
+            .join(","),
+    );
     const pictures = (library?.assets ?? []).filter((x) => x.kind === kind);
     return (
         <Dialog onClose={onClose} wide>
             <h2 className="display">Choose a {word}</h2>
             {uploads.control}
             {!library ? (
-                <Dots />
+                failed ? (
+                    <NotLoaded onRetry={() => void load()} />
+                ) : (
+                    <Dots />
+                )
             ) : !library.enabled ? (
                 <NotSetUp />
             ) : (
@@ -486,7 +545,7 @@ export function PictureField({
 }) {
     const word = kind === "video" ? "video" : "picture";
     const scope = useMedia();
-    const { library } = useLibrary(scope);
+    const { library, failed } = useLibrary(scope);
     const [choosing, setChoosing] = useState(false);
     const asset = library?.assets.find((x) => x.path === value);
     return (
@@ -499,7 +558,11 @@ export function PictureField({
                         {!value
                             ? `No ${word} chosen`
                             : value.startsWith("media/")
-                              ? `This ${word} is no longer in the library`
+                              ? library
+                                  ? `This ${word} is no longer in the library`
+                                  : failed
+                                    ? `The ${word} could not be loaded`
+                                    : "Loading…"
                               : /^https?:\/\//.test(value)
                                 ? `A ${word} from another website`
                                 : `One of the website's own files`}

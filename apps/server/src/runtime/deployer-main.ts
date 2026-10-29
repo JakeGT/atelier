@@ -7,9 +7,29 @@ import { CloudflarePages, DEFAULT_LIMITS } from "./pages.ts";
 
 function required(name: string): string {
     const file = process.env[`${name}_FILE`];
-    const value = file ? readFileSync(file, "utf8").trim() : process.env[name];
+    let value = process.env[name]?.trim();
+    if (file) {
+        try {
+            value = readFileSync(file, "utf8").trim();
+        } catch (err) {
+            console.error(`${name}_FILE could not be read (${(err as Error).message})`);
+            process.exit(1);
+        }
+    }
     if (!value) {
         console.error(`${name} (or ${name}_FILE) is required`);
+        process.exit(1);
+    }
+    return value;
+}
+
+// A number from the environment. One that is not a number, or not above zero, would
+// quietly switch a limit off: refuse to start instead.
+function positive(name: string, fallback: number): number {
+    const given = process.env[name]?.trim();
+    const value = given ? Number(given) : fallback;
+    if (!Number.isInteger(value) || value <= 0) {
+        console.error(`${name} must be a whole number above zero`);
         process.exit(1);
     }
     return value;
@@ -32,14 +52,14 @@ const pages = new CloudflarePages({
 });
 const limits = {
     ...DEFAULT_LIMITS,
-    maxFiles: Number(process.env.SITE_MAX_FILES ?? DEFAULT_LIMITS.maxFiles),
-    maxTotalBytes: Number(process.env.SITE_MAX_MB ?? DEFAULT_LIMITS.maxTotalBytes / 1024 / 1024) * 1024 * 1024,
+    maxFiles: positive("SITE_MAX_FILES", DEFAULT_LIMITS.maxFiles),
+    maxTotalBytes: positive("SITE_MAX_MB", DEFAULT_LIMITS.maxTotalBytes / 1024 / 1024) * 1024 * 1024,
 };
 
 // As PID 1 in a container, Node ignores SIGTERM unless told otherwise.
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
 
-const port = Number(process.env.PORT ?? 8092);
+const port = positive("PORT", 8092);
 serve({ fetch: deployerApp({ pages, secret, prefix, limits }).fetch, hostname: "0.0.0.0", port }, () =>
     console.log(`deployer listening on :${port} (Pages projects "${prefix}*")`),
 );

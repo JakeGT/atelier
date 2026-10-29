@@ -21,7 +21,7 @@ export interface VerifiedClaims {
     groups: string[];
     // When the person last authenticated at the provider (epoch ms), as the
     // provider reports it. Recorded in the audit log; not what step-up is measured
-    // from (see routes/auth.ts).
+    // from (see routes/auth.ts). NaN when the provider did not say: nothing is made up.
     authTime: number;
 }
 
@@ -99,17 +99,23 @@ export class OidcService {
         const claims = tokens.claims();
         if (!claims) throw new Error("The identity provider did not return an id token.");
 
-        const userinfo = await oauth.fetchUserInfo(this.client, tokens.access_token, claims.sub).catch(() => null);
+        // The id token is enough to sign in with; userinfo only fills in what it left out. Still, say
+        // when it could not be had: a missing e-mail or name further on is then no mystery.
+        const userinfo = await oauth.fetchUserInfo(this.client, tokens.access_token, claims.sub).catch((err: Error) => {
+            console.warn(`OIDC userinfo could not be fetched: ${err?.message ?? err}`);
+            return null;
+        });
         const c = claims as unknown as Record<string, unknown>;
         const u = (userinfo ?? {}) as Record<string, unknown>;
 
         const email = (c.email as string | undefined) ?? (u.email as string | undefined) ?? "";
-        const verified = c.email_verified === true || u.email_verified === true;
+        // "Verified" has to be about the address that is used: userinfo's word counts only for the same one.
+        const verified = c.email_verified === true || (u.email_verified === true && (u.email as string | undefined) === email);
         const name =
             (c.name as string | undefined) ?? (c.preferred_username as string | undefined) ?? (u.name as string | undefined) ?? email;
         const groups = Array.isArray(c.groups) ? c.groups.map(String) : [];
 
-        const authTime = typeof claims.auth_time === "number" ? claims.auth_time * 1000 : Date.now();
+        const authTime = typeof claims.auth_time === "number" ? claims.auth_time * 1000 : Number.NaN;
 
         return { issuer: claims.iss, subject: claims.sub, email, verified, name, groups, authTime };
     }
@@ -118,6 +124,9 @@ export class OidcService {
         const endSession = this.client.serverMetadata().end_session_endpoint;
         if (!endSession) return undefined;
         const url = new URL(endSession);
+        // Without an id token to go by, the provider needs to be told which client is asking before it
+        // will send the person back (OpenID Connect RP-Initiated Logout §2).
+        url.searchParams.set("client_id", this.opts.clientId);
         url.searchParams.set("post_logout_redirect_uri", this.opts.publicOrigin);
         if (idTokenHint) url.searchParams.set("id_token_hint", idTokenHint);
         return url.toString();

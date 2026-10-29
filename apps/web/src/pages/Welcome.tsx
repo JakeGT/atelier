@@ -30,7 +30,37 @@ export function Welcome({ session, orgs, onOrgsChanged, onDone, theme, onToggleT
     const [studioName, setStudioName] = useState(studio?.name ?? "");
     const [busy, setBusy] = useState(false);
 
-    if (!studio) return null;
+    // Their studios could not be fetched: say so and offer another go, rather than an empty page.
+    async function retry() {
+        if (busy) return;
+        setBusy(true);
+        const list = await onOrgsChanged();
+        const found = list.find((o) => o.personalOf === session.id) ?? list[0];
+        if (found) setStudioName(found.name);
+        setBusy(false);
+    }
+
+    if (!studio) {
+        return (
+            <div className="welcome">
+                <header className="login-nav">
+                    <Wordmark />
+                    <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+                </header>
+                <main className="welcome-main">
+                    <div className="welcome-card" role="alert">
+                        <p className="eyebrow">Welcome to Atelier</p>
+                        <p className="welcome-lede">Your studio could not be loaded. Nothing was changed.</p>
+                        <div className="welcome-actions">
+                            <button type="button" className="btn btn-seal btn-lg" onClick={() => void retry()} disabled={busy}>
+                                {busy ? <Dots /> : "Try again"}
+                            </button>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        );
+    }
     const a = orgApi(studio.slug);
 
     // Marks the introduction done and goes on. A failure here must not trap someone in the introduction.

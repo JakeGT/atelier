@@ -460,6 +460,119 @@ test("invitations: visible to their organisation and their addressee only; accep
     await assert.rejects(asUser("", c.tenantId, "admin"), /row-level security/);
 });
 
+test("an invited person can accept an invitation and nothing else: not write one, change one, or remove one", { skip }, async () => {
+    const a = await seedTenant("tenant-inv-a");
+    const b = await seedTenant("tenant-inv-b");
+    const email = `guest-${suffix}@example.com`;
+    const soon = new Date(Date.now() + 86_400_000);
+    const user = await store.users.upsertIdentity({ issuer: "https://idp/", subject: `guest-${suffix}`, email, name: "G", admin: false });
+    await store.invitations.create({ tenantId: a.tenantId, email, role: "viewer", invitedBy: user.id, expiresAt: soon });
+    const asInvitee = <T>(fn: (tx: postgres.TransactionSql) => Promise<T>) =>
+        store.withSettings({ "app.current_user": user.id, "app.current_email": email }, fn);
+
+    // Inviting oneself into a studio one was never invited to.
+    await assert.rejects(
+        asInvitee(
+            (tx) => tx`
+                INSERT INTO invitations (id, tenant_id, email, role, expires_at)
+                VALUES (${randomUUID()}, ${b.tenantId}, ${email}, 'admin', ${soon})`,
+        ),
+        /row-level security/,
+    );
+    // Turning the invitation one has into a better one, or one to somewhere else.
+    await assert.rejects(
+        asInvitee((tx) => tx`UPDATE invitations SET role = 'admin' WHERE email = ${email}`),
+        /only its studio/,
+    );
+    await assert.rejects(
+        asInvitee((tx) => tx`UPDATE invitations SET tenant_id = ${b.tenantId} WHERE email = ${email}`),
+        /only its studio/,
+    );
+    await assert.rejects(
+        asInvitee((tx) => tx`UPDATE invitations SET expires_at = now() + interval '10 years' WHERE email = ${email}`),
+        /only its studio/,
+    );
+    assert.equal((await asInvitee((tx) => tx`DELETE FROM invitations WHERE email = ${email}`)).count, 0);
+    assert.equal((await store.invitations.list(a.tenantId)).length, 1);
+
+    // Accepting still works, once; an accepted invitation cannot be made fresh again by the person.
+    assert.deepEqual(await store.invitations.acceptAll(user.id, email), [a.tenantId]);
+    assert.equal(await store.memberships.roleOf(a.tenantId, user.id), "viewer");
+    await assert.rejects(
+        asInvitee((tx) => tx`UPDATE invitations SET accepted_at = NULL WHERE email = ${email}`),
+        /only its studio/,
+    );
+
+    // A person sees their own memberships, and cannot change or remove them on their own.
+    const asUser = <T>(fn: (tx: postgres.TransactionSql) => Promise<T>) => store.withUser(user.id, fn);
+    assert.equal((await asUser((tx) => tx`SELECT 1 FROM memberships`)).length, 1);
+    assert.equal((await asUser((tx) => tx`UPDATE memberships SET role = 'owner'`)).count, 0);
+    assert.equal((await asUser((tx) => tx`DELETE FROM memberships`)).count, 0);
+    assert.equal(await store.memberships.roleOf(a.tenantId, user.id), "viewer");
+
+    // The studio itself still can: invite again, change the role, remove the person.
+    await store.invitations.create({ tenantId: a.tenantId, email, role: "editor", invitedBy: user.id, expiresAt: soon });
+    assert.deepEqual(
+        (await store.invitations.list(a.tenantId)).map((i) => i.role),
+        ["editor"],
+    );
+    await store.memberships.setRole(a.tenantId, user.id, "editor");
+    assert.equal(await store.memberships.roleOf(a.tenantId, user.id), "editor");
+    await store.memberships.remove(a.tenantId, user.id);
+    assert.equal(await store.memberships.roleOf(a.tenantId, user.id), null);
+});
+
+test("the list of studios is read by anyone, and each entry is written only as that studio", { skip }, async () => {
+    const a = await seedTenant("tenant-cat-a");
+    const b = await seedTenant("tenant-cat-b");
+    const asA = <T>(fn: (tx: postgres.TransactionSql) => Promise<T>) => store.withTenant(a.tenantId, fn);
+    assert.equal((await raw`SELECT 1 FROM control.tenants WHERE id IN (${a.tenantId}, ${b.tenantId})`).length, 2);
+    assert.equal((await asA((tx) => tx`UPDATE control.tenants SET status = 'suspended' WHERE id = ${b.tenantId}`)).count, 0);
+    assert.equal((await asA((tx) => tx`DELETE FROM control.tenants WHERE id = ${b.tenantId}`)).count, 0);
+    await assert.rejects(
+        asA((tx) => tx`INSERT INTO control.tenants (id, slug, name) VALUES (${randomUUID()}, ${`forged-${suffix}`}, 'Forged')`),
+        /row-level security/,
+    );
+    assert.equal((await raw`UPDATE control.tenants SET name = 'Renamed' WHERE id = ${b.tenantId}`).count, 0);
+    // The server's own writes go through, also when it runs as the owner of the tables.
+    await store.organizations.update(b.tenantId, { status: "suspended" });
+    const [row] = await raw<{ status: string }[]>`SELECT status FROM control.tenants WHERE id = ${b.tenantId}`;
+    assert.equal(row?.status, "suspended");
+    const made = await owner.organizations.create({ id: randomUUID(), slug: `owner-made-${suffix}`, name: "Owner made" });
+    assert.equal(
+        (await owner.organizations.listAll()).some((s) => s.id === made.id),
+        true,
+    );
+    await owner.organizations.delete(made.id);
+    assert.equal((await raw`SELECT 1 FROM control.tenants WHERE id = ${made.id}`).length, 0);
+});
+
+test("the serving role has what the store needs and no more: every table is granted, people are never deleted", { skip }, async () => {
+    // A table added by a migration and forgotten in db/grants.sql would only fail when first used.
+    const ungranted = await owner.sql<{ name: string }[]>`
+        SELECT n.nspname || '.' || c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind = 'r' AND n.nspname IN ('public', 'control') AND c.relname <> 'schema_migrations'
+          AND NOT has_table_privilege(${appRole}, c.oid, 'SELECT')`;
+    assert.deepEqual(
+        ungranted.map((t) => t.name),
+        [],
+    );
+    await assert.rejects(raw`DELETE FROM users WHERE false`, /permission denied/);
+});
+
+test("a custom domain is kept in lower case by the database too", { skip }, async () => {
+    const a = await seedTenant("tenant-host");
+    await assert.rejects(
+        store.withTenant(
+            a.tenantId,
+            (tx) => tx`
+                INSERT INTO project_domains (id, tenant_id, project_id, hostname)
+                VALUES (${randomUUID()}, ${a.tenantId}, ${a.project.id}, ${`Shop-${suffix}.Example.com`})`,
+        ),
+        /project_domains_hostname_lower/,
+    );
+});
+
 test("members are listed per organisation; roles change; removal is immediate", { skip }, async () => {
     const a = await seedTenant("tenant-n");
     const b = await seedTenant("tenant-o");

@@ -31,6 +31,9 @@ export interface SessionLimits {
 
 const DEFAULT_LIMITS: SessionLimits = { idleMinutes: 480, maxHours: 72 };
 const FLOW_TTL_MS = 10 * 60_000;
+// More sign-ins under way at once than this means someone is flooding the sign-in
+// page: the oldest are dropped so the list cannot fill the server's memory.
+const MAX_FLOWS = 50_000;
 
 const hashId = (id: string): string => createHash("sha256").update(id).digest("hex");
 const token = (): string => randomBytes(32).toString("base64url");
@@ -40,6 +43,8 @@ const token = (): string => randomBytes(32).toString("base64url");
 // not yield usable cookies. The user record is re-read on every request, so an
 // admin flag or e-mail change takes effect immediately. In-flight OIDC flows
 // stay in memory: they last ten minutes and a restart only costs a re-click.
+// That holds because one server process serves everyone (docs/08-ai-runtime.md);
+// with more than one, a sign-in could come back to a process that never saw it start.
 export class SessionStore {
     private readonly flows = new Map<string, OidcFlow & { createdAt: number }>();
     private readonly limits: SessionLimits;
@@ -49,6 +54,10 @@ export class SessionStore {
     constructor(backend: LoginSessionStore, users: UserStore, limits: SessionLimits = DEFAULT_LIMITS) {
         this.backend = backend;
         this.users = users;
+        // A limit that is not a number would compare false below and never expire anything.
+        for (const n of [limits.idleMinutes, limits.maxHours]) {
+            if (!Number.isFinite(n) || n < 0) throw new Error("session limits must be numbers, zero or more");
+        }
         this.limits = limits;
     }
 
@@ -65,7 +74,8 @@ export class SessionStore {
         const s = await this.backend.get(idHash);
         if (!s) return undefined;
         const now = Date.now();
-        if (now - s.lastSeenAt > this.limits.idleMinutes * 60_000 || now - s.createdAt > this.limits.maxHours * 3_600_000) {
+        const idleMs = this.limits.idleMinutes * 60_000;
+        if (now - s.lastSeenAt > idleMs || now - s.createdAt > this.limits.maxHours * 3_600_000) {
             await this.backend.delete(idHash);
             return undefined;
         }
@@ -74,8 +84,9 @@ export class SessionStore {
             await this.backend.delete(idHash);
             return undefined;
         }
-        // Avoid a write per request: only record activity once a minute.
-        if (now - s.lastSeenAt > 60_000) await this.backend.touch(idHash, now);
+        // Avoid a write per request: only record activity once a minute (or more often
+        // under a very short idle limit, so someone at work is never taken for idle).
+        if (now - s.lastSeenAt > Math.min(60_000, idleMs / 2)) await this.backend.touch(idHash, now);
         return {
             user: { id: user.id, email: user.email, name: user.name, admin: user.admin, onboarded: user.onboardedAt !== null },
             csrf: s.csrf,
@@ -105,16 +116,21 @@ export class SessionStore {
 
     createFlow(flow: OidcFlow): string {
         const now = Date.now();
-        for (const [k, f] of this.flows) if (now - f.createdAt > FLOW_TTL_MS) this.flows.delete(k);
+        // The map keeps them in the order they were started, so the oldest come first.
+        for (const [k, f] of this.flows) {
+            if (now - f.createdAt <= FLOW_TTL_MS && this.flows.size < MAX_FLOWS) break;
+            this.flows.delete(k);
+        }
         const id = token();
         this.flows.set(id, { ...flow, createdAt: now });
         return id;
     }
 
     takeFlow(id: string): OidcFlow | undefined {
-        const flow = this.flows.get(id);
+        const stored = this.flows.get(id);
         this.flows.delete(id);
-        if (!flow || Date.now() - flow.createdAt > FLOW_TTL_MS) return undefined;
+        if (!stored || Date.now() - stored.createdAt > FLOW_TTL_MS) return undefined;
+        const { createdAt: _createdAt, ...flow } = stored;
         return flow;
     }
 }

@@ -31,7 +31,15 @@ try {
     throw err;
 }
 
+// The activity record is append-only for the serving role, so its age limit is applied as the owner.
+const pruneAudit = async (owner: PostgresStore): Promise<void> => {
+    const old = await owner.sql`DELETE FROM audit_log WHERE occurred_at < now() - make_interval(days => ${config.retention.auditDays})`;
+    if (old.count) console.log(`Removed ${old.count} activity entries older than ${config.retention.auditDays} days.`);
+};
+
 let store: Store;
+// Set when there is a database: opens a connection as the owner, applies the activity record's age limit, and closes it.
+let pruneAuditDaily: (() => Promise<void>) | null = null;
 if (config.databaseUrl) {
     // Migrate as the table owner (MIGRATION_DATABASE_URL), then serve as the
     // runtime role (DATABASE_URL), which owns nothing and cannot bypass RLS.
@@ -40,25 +48,46 @@ if (config.databaseUrl) {
     try {
         const applied = await migrate(owner.sql);
         if (applied.length) console.log(`Applied database migrations: ${applied.join(", ")}.`);
-        // The activity record is append-only for the serving role, so its age limit is applied here, as the owner.
-        const old = await owner.sql`DELETE FROM audit_log WHERE occurred_at < now() - make_interval(days => ${config.retention.auditDays})`;
-        if (old.count) console.log(`Removed ${old.count} activity entries older than ${config.retention.auditDays} days.`);
+        await pruneAudit(owner);
     } catch (err) {
         console.error(`Couldn't prepare the database: ${(err as Error).message}`);
         await owner.close().catch(() => {});
         process.exit(1);
     }
     let pg = owner;
-    if (migrationUrl !== config.databaseUrl) {
-        await owner.close();
-        pg = new PostgresStore(config.databaseUrl);
-    }
-    if (await connectedAsOwner(pg.sql)) {
-        console.warn(
-            "The server is connected as the table owner: FORCE ROW LEVEL SECURITY is the only tenant boundary and the audit log is not append-only. Set DATABASE_URL to the atelier_runtime login and MIGRATION_DATABASE_URL to the owner (docs/14).",
-        );
+    try {
+        if (migrationUrl !== config.databaseUrl) {
+            await owner.close();
+            pg = new PostgresStore(config.databaseUrl);
+        }
+        if (await connectedAsOwner(pg.sql)) {
+            // Where real studios live, that is not served from: one studio's rows would be kept
+            // from another's by a single setting, and the record of what was done could be rewritten.
+            if (config.runtimeMode === "container" && !config.databaseOwnerOk) {
+                console.error(
+                    "The server is connected to the database as the owner of its tables, and will not serve like that. Set DATABASE_URL to the atelier_runtime login and MIGRATION_DATABASE_URL to the owner (docs/14), or, only to try Atelier out, set DATABASE_OWNER_OK=true.",
+                );
+                await pg.close().catch(() => {});
+                process.exit(1);
+            }
+            console.warn(
+                "The server is connected as the table owner: FORCE ROW LEVEL SECURITY is the only tenant boundary and the audit log is not append-only. Set DATABASE_URL to the atelier_runtime login and MIGRATION_DATABASE_URL to the owner (docs/14).",
+            );
+        }
+    } catch (err) {
+        console.error(`Couldn't connect to the database to serve from it: ${(err as Error).message}`);
+        await pg.close().catch(() => {});
+        process.exit(1);
     }
     store = pg;
+    pruneAuditDaily = async () => {
+        const again = new PostgresStore(migrationUrl);
+        try {
+            await pruneAudit(again);
+        } finally {
+            await again.close().catch(() => {});
+        }
+    };
 } else {
     store = new MemoryStore();
     console.warn("Using the in-memory store: nothing is kept when the server stops. Set DATABASE_URL to keep data.");
@@ -131,8 +160,12 @@ console.log(
 const { app, notifier } = createApp({ config, store, oidc, sessions, runtime, secretsKey, hosting, storage, mailer });
 
 // Retention: once shortly after start-up, then daily.
-const retain = () =>
-    runRetention(store, storage, config.retention).then(
+const retain = () => {
+    // Sign-ins that ran out are otherwise only removed when their cookie is next shown.
+    store.loginSessions
+        .purgeExpired(Date.now() - config.sessionIdleMinutes * 60_000, Date.now() - config.sessionMaxHours * 3_600_000)
+        .catch((err: Error) => console.warn(`Removing expired sign-ins failed: ${err.message}`));
+    return runRetention(store, storage, config.retention).then(
         (r) => {
             if (r.messages || r.revisions || r.files)
                 console.log(
@@ -141,6 +174,7 @@ const retain = () =>
         },
         (err: Error) => console.warn(`Retention failed: ${err.message}`),
     );
+};
 setTimeout(retain, 60_000).unref();
 // Once a week, the reports still open, to whoever runs this Atelier (checked daily; sent once per week).
 const digest = () =>
@@ -151,6 +185,14 @@ const digest = () =>
 setTimeout(digest, 5 * 60_000).unref();
 setInterval(digest, 24 * 3_600_000).unref();
 setInterval(retain, 24 * 3_600_000).unref();
+// The activity record's age limit was applied at start-up; a server that stays up applies it daily too.
+if (pruneAuditDaily) {
+    const prune = pruneAuditDaily;
+    setInterval(
+        () => prune().catch((err: Error) => console.warn(`Activity record retention failed: ${err.message}`)),
+        24 * 3_600_000,
+    ).unref();
+}
 
 // Stop workspaces nobody is using: their files stay, and the next request starts
 // them again in about a second. Keeps a single host from filling up with idle
@@ -175,11 +217,29 @@ const server = serve({ fetch: app.fetch, hostname: config.host, port: config.por
     console.log(`Atelier listening on http://${host}:${info.port} (public address ${config.publicOrigin})`);
 });
 
+let stopping = false;
+let closing = false;
+// Closes the database and leaves; a failure to close is said, and shows in the exit code.
+const leave = () => {
+    if (closing) return;
+    closing = true;
+    store.close().then(
+        () => process.exit(0),
+        (err: Error) => {
+            console.error(`Couldn't close the database cleanly: ${err.message}`);
+            process.exit(1);
+        },
+    );
+};
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
-        server.close(() => {
-            store.close().finally(() => process.exit(0));
-        });
-        setTimeout(() => process.exit(0), 3000).unref();
+        // Asked a second time: leave now.
+        if (stopping) process.exit(1);
+        stopping = true;
+        server.close(leave);
+        // Requests still open after three seconds (a live stream never ends by itself) are cut off.
+        setTimeout(leave, 3000).unref();
+        // And if the database will not let go either, leave all the same.
+        setTimeout(() => process.exit(1), 6000).unref();
     });
 }

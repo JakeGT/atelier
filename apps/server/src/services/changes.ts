@@ -38,6 +38,10 @@ export const CHANGES: { date: string; text: string }[] = [
         date: "2026-10-12",
         text: "`content_check` also lists pages with a form that sends nowhere (neither `data-form` nor an `action`). After publishing, Atelier checks each `data-form` form on the live website and tells the person whether it works.",
     },
+    {
+        date: "2026-10-12",
+        text: "A list of entries longer than 500 used to be cut to its first 500 without a word. It is now refused, with the reason, and nothing is saved: check the entries have not been added twice, or split the list.",
+    },
 ];
 
 // What to tell an assistant that has been told the first `seen` of them. "" when there is nothing new.

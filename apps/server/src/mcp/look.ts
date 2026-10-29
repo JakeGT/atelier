@@ -114,14 +114,18 @@ export class Browser {
         const endpoint = await new Promise<string>((resolve, reject) => {
             let seen = "";
             const timer = setTimeout(() => reject(new Error("the browser did not start in time")), 20_000);
-            child.stderr?.on("data", (chunk: Buffer) => {
+            const heard = (chunk: Buffer) => {
                 seen += chunk.toString();
                 const m = /DevTools listening on (ws:\/\/\S+)/.exec(seen);
                 if (m?.[1]) {
                     clearTimeout(timer);
+                    // What it says after this is not kept, but is still read: a browser nobody listens to would wait to be heard.
+                    child.stderr?.off("data", heard);
+                    child.stderr?.resume();
                     resolve(m[1]);
                 }
-            });
+            };
+            child.stderr?.on("data", heard);
             child.once("exit", (code) => {
                 clearTimeout(timer);
                 reject(new Error(`the browser stopped as it started (${code}): ${seen.slice(-300)}`));
@@ -137,7 +141,7 @@ export class Browser {
             socket.addEventListener("error", () => reject(new Error("could not connect to the browser")), { once: true });
         });
         socket.addEventListener("message", (event) => {
-            const message = JSON.parse(String(event.data)) as {
+            let message: {
                 id?: number;
                 result?: Record<string, unknown>;
                 error?: { message: string };
@@ -145,6 +149,12 @@ export class Browser {
                 params?: Record<string, unknown>;
                 sessionId?: string;
             };
+            // Something that is not a message is passed over; throwing here would end the whole process.
+            try {
+                message = JSON.parse(String(event.data));
+            } catch {
+                return;
+            }
             if (message.id !== undefined) {
                 const waiting = this.pending.get(message.id);
                 this.pending.delete(message.id);
@@ -153,10 +163,19 @@ export class Browser {
             } else if (message.method) for (const l of this.listeners) l(message.method, message.params ?? {}, message.sessionId);
         });
         socket.addEventListener("close", () => {
-            for (const p of this.pending.values()) p.reject(new Error("the browser closed"));
-            this.pending.clear();
+            // One closed on purpose has been dealt with already, and what is waiting now may be its successor's.
+            if (this.socket !== socket) return;
+            // It went by itself: the next look starts a new one.
+            this.stuck = true;
+            this.fail();
         });
         this.socket = socket;
+    }
+
+    // Everything still waiting for the browser is told it has gone.
+    private fail(): void {
+        for (const p of this.pending.values()) p.reject(new Error("the browser closed"));
+        this.pending.clear();
     }
 
     private send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<Record<string, unknown>> {
@@ -180,7 +199,13 @@ export class Browser {
                     reject(e);
                 },
             });
-            socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+            try {
+                socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+            } catch {
+                clearTimeout(timer);
+                this.pending.delete(id);
+                reject(new Error("the browser is not running"));
+            }
         });
     }
 
@@ -200,8 +225,10 @@ export class Browser {
 
     async close(): Promise<void> {
         if (this.idle) clearTimeout(this.idle);
-        this.socket?.close();
+        const socket = this.socket;
         this.socket = null;
+        socket?.close();
+        this.fail();
         this.kill();
         this.starting = null;
         this.stuck = false;
@@ -261,6 +288,8 @@ export class Browser {
             const failed = new Set<string>();
             const requests = new Map<string, string>();
             this.listeners.add(on);
+            // Stops waiting for the page to arrive, however this look ends.
+            let arrived = () => {};
             try {
                 await this.send("Page.enable", {}, sessionId);
                 await this.send("Runtime.enable", {}, sessionId);
@@ -279,16 +308,15 @@ export class Browser {
                 );
                 const loaded = new Promise<void>((resolve) => {
                     const done = (method: string, _p: Record<string, unknown>, sid?: string) => {
-                        if (sid === sessionId && method === "Page.loadEventFired") {
-                            this.listeners.delete(done);
-                            resolve();
-                        }
+                        if (sid === sessionId && method === "Page.loadEventFired") arrived();
                     };
-                    this.listeners.add(done);
-                    setTimeout(() => {
+                    const timer = setTimeout(() => arrived(), 15_000);
+                    arrived = () => {
+                        clearTimeout(timer);
                         this.listeners.delete(done);
                         resolve();
-                    }, 15_000);
+                    };
+                    this.listeners.add(done);
                 });
                 const nav = (await this.send("Page.navigate", { url }, sessionId)) as { errorText?: string };
                 if (nav.errorText) throw new Error(`the page could not be opened (${nav.errorText})`);
@@ -301,6 +329,10 @@ export class Browser {
                         returnByValue: true,
                         expression: `(() => {
                             const d = document.documentElement, w = ${screen.width};
+                            // A page whose script took its body away has nothing to measure.
+                            if (!document.body) return { unseen: [], outline: [], overlaps: [], cut: [], edge: [], title: document.title, height: d.scrollHeight, scrollWidth: d.scrollWidth, viewport: w, wide: [], broken: [], tiny: 0, empty: true };
+                            // Where the stretch looked at begins: the outline is of what is on it and below, so a long page's lower parts are not left out.
+                            const height = Math.max(d.scrollHeight, document.body.scrollHeight), top = Math.min(${closeUp ? 0 : Math.max(0, Math.floor(from) || 0)}, Math.max(0, height - 200));
                             const name = (el) => el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (typeof el.className === "string" && el.className.trim() ? "." + el.className.trim().split(/\\s+/).slice(0, 2).join(".") : "");
                             const wide = [...document.body.querySelectorAll("*")].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.right > w + 2; }).slice(0, 5).map((el) => name(el) + " reaches " + Math.round(el.getBoundingClientRect().right) + "px");
                             const broken = [...document.images].filter((i) => i.complete && i.naturalWidth === 0 && i.getAttribute("src")).slice(0, 8).map((i) => i.getAttribute("src"));
@@ -309,14 +341,13 @@ export class Browser {
                             const say = (el) => (el.tagName === "IMG" ? "picture '" + (el.alt || el.getAttribute("src") || "").slice(0, 40) + "'" : el.tagName.toLowerCase() + " '" + el.textContent.replace(/\\s+/g, " ").trim().slice(0, 50) + "'");
                             const box = (el) => { const r = el.getBoundingClientRect(); return { el, x: Math.round(r.left), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) }; };
                             const key = [...document.body.querySelectorAll("h1,h2,h3,h4,p,li,img,button,a,nav,header,footer,form,input,figure,blockquote,table")].filter(visible).map(box);
-                            const outline = key.filter((b) => !["A"].includes(b.el.tagName) || !b.el.closest("p,li,h1,h2,h3,h4")).slice(0, 400).map((b) => ({ y: b.y, bottom: b.y + b.h, line: say(b.el) + " at left " + b.x + "px, top " + b.y + "px, " + b.w + "x" + b.h + "px" + (/^(H\\d|P|LI|A|BUTTON)$/.test(b.el.tagName) ? ", text " + Math.round(parseFloat(getComputedStyle(b.el).fontSize)) + "px" : "") }));
+                            const outline = key.filter((b) => !["A"].includes(b.el.tagName) || !b.el.closest("p,li,h1,h2,h3,h4")).filter((b) => b.y + b.h > top).slice(0, 400).map((b) => ({ y: b.y, bottom: b.y + b.h, line: say(b.el) + " at left " + b.x + "px, top " + b.y + "px, " + b.w + "x" + b.h + "px" + (/^(H\\d|P|LI|A|BUTTON)$/.test(b.el.tagName) ? ", text " + Math.round(parseFloat(getComputedStyle(b.el).fontSize)) + "px" : "") }));
                             const texts = key.filter((b) => /^(H\\d|P|LI|BUTTON|BLOCKQUOTE)$/.test(b.el.tagName) && b.el.textContent.trim());
                             const overlaps = [];
                             for (let i = 0; i < texts.length && overlaps.length < 6; i++) for (let j = i + 1; j < texts.length && overlaps.length < 6; j++) {
                                 const a = texts[i], b = texts[j];
-                                if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
                                 const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-                                if (ox > 8 && oy > 8) overlaps.push(say(a.el) + " and " + say(b.el) + " overlap by " + ox + "x" + oy + "px");
+                                if (ox > 8 && oy > 8 && !a.el.contains(b.el) && !b.el.contains(a.el)) overlaps.push(say(a.el) + " and " + say(b.el) + " overlap by " + ox + "x" + oy + "px");
                             }
                             const cut = key.filter((b) => /^(H\\d|P|LI|BUTTON|A)$/.test(b.el.tagName) && b.el.scrollWidth > b.el.clientWidth + 4 && getComputedStyle(b.el).overflowX !== "visible").slice(0, 5).map((b) => say(b.el) + " is cut off: it needs " + b.el.scrollWidth + "px and has " + b.el.clientWidth + "px");
                             const edge = key.filter((b) => /^(H\\d|P|LI|BUTTON)$/.test(b.el.tagName) && b.el.textContent.trim() && (b.x < 4 || b.x + b.w > w - 4) && b.w < w + 2 && !b.el.closest("[data-k-track]")).slice(0, 5).map((b) => say(b.el) + " touches the edge of the screen");
@@ -329,11 +360,12 @@ export class Browser {
                                 if (s.display === "none" || s.visibility === "hidden") return false;
                                 return painted(el) && (r.width < 1 || r.height < 1);
                             }).slice(0, 6).map((el) => { const s = getComputedStyle(el); return name(el) + " has a colour but takes up no space" + (s.display === "inline" ? ": it is an inline element (" + el.tagName.toLowerCase() + "), so its width and height are ignored; give it display:block" : " (" + Math.round(el.getBoundingClientRect().width) + "x" + Math.round(el.getBoundingClientRect().height) + "px)"); });
-                            return { unseen, outline, overlaps, cut, edge, title: document.title, height: Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0), scrollWidth: d.scrollWidth, viewport: w, wide, broken, tiny, empty: !document.body || (document.body.innerText.trim().length === 0 && !document.body.querySelector("img,canvas,svg,video,picture")) };
+                            return { unseen, outline, overlaps, cut, edge, title: document.title, height, scrollWidth: d.scrollWidth, viewport: w, wide, broken, tiny, empty: document.body.innerText.trim().length === 0 && !document.body.querySelector("img,canvas,svg,video,picture") };
                         })()`,
                     },
                     sessionId,
                 )) as {
+                    exceptionDetails?: { text?: string; exception?: { description?: string } };
                     result?: {
                         value?: {
                             unseen: string[];
@@ -353,7 +385,10 @@ export class Browser {
                     };
                 };
                 const m = measured.result?.value;
-                if (!m) throw new Error("the page could not be measured");
+                if (!m) {
+                    const why = (measured.exceptionDetails?.exception?.description ?? measured.exceptionDetails?.text ?? "").split("\n")[0];
+                    throw new Error(`the page could not be measured${why ? ` (${why.slice(0, 200)})` : ""}`);
+                }
                 if (m.empty) problems.push("The page shows nothing at all.");
                 if (m.scrollWidth > m.viewport + 2)
                     problems.push(
@@ -395,14 +430,15 @@ export class Browser {
                         .slice(0, 12)
                         .map((n) => n.line),
                 });
-                const shot = async (clip: { x: number; y: number; width: number; height: number; scale: number }) =>
-                    (
-                        (await this.send(
-                            "Page.captureScreenshot",
-                            { format: "jpeg", quality: 72, captureBeyondViewport: true, clip },
-                            sessionId,
-                        )) as { data: string }
-                    ).data;
+                const shot = async (clip: { x: number; y: number; width: number; height: number; scale: number }) => {
+                    const { data } = (await this.send(
+                        "Page.captureScreenshot",
+                        { format: "jpeg", quality: 72, captureBeyondViewport: true, clip },
+                        sessionId,
+                    )) as { data?: string };
+                    if (!data) throw new Error("the browser gave no picture of the page");
+                    return data;
+                };
                 const about = { title: m.title, size, width: screen.width, pageHeight: m.height, problems };
                 if (closeUp) {
                     const found = (
@@ -437,6 +473,7 @@ export class Browser {
                 }
                 return { ...about, from: start, to: y, pictures, ...within(start, y) };
             } finally {
+                arrived();
                 this.listeners.delete(on);
             }
         } finally {

@@ -65,6 +65,8 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
     const [previewKey, setPreviewKey] = useState(0);
     const [page, setPage] = useState("index.html");
     const [tab, setTab] = useState<"wording" | "files">(startOn);
+    // The wording could not be fetched: that is said, rather than shown as a website with none.
+    const [loadFailed, setLoadFailed] = useState(false);
 
     const load = useCallback(async () => {
         try {
@@ -72,9 +74,11 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
             const sorted = [...docs].sort((x, y) => order(x).localeCompare(order(y)));
             setDocuments(sorted);
             setPages(map);
+            setLoadFailed(false);
             setSelected((s) => (s && sorted.some((d) => d.id === s) ? s : (sorted[0]?.id ?? null)));
         } catch (err) {
             setDocuments((d) => d ?? []);
+            setLoadFailed(true);
             toast((err as Error).message, "error");
         }
     }, [a, pid, toast]);
@@ -87,10 +91,15 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
     // Stay in step with other people (and the assistant) changing this website.
     const stamp = useRef<number | null>(null);
     useEffect(() => {
+        let gone = false;
+        // One question at a time: a slow answer must not be overtaken by the next one.
+        let asking = false;
         const beat = async () => {
-            if (document.hidden) return;
+            if (document.hidden || asking) return;
+            asking = true;
             const pulse = await a.pulse(pid, false).catch(() => null);
-            if (!pulse) return;
+            asking = false;
+            if (!pulse || gone) return;
             if (stamp.current !== null && pulse.stamp !== stamp.current) {
                 void load();
                 setPreviewKey((k) => k + 1);
@@ -99,7 +108,10 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
         };
         void beat();
         const timer = setInterval(beat, 3000);
-        return () => clearInterval(timer);
+        return () => {
+            gone = true;
+            clearInterval(timer);
+        };
     }, [a, pid, load]);
 
     // Which pages show a piece of wording.
@@ -130,8 +142,15 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
         }
     };
 
-    const state = useRef({ documents, canEdit });
-    state.current = { documents, canEdit };
+    const save = async (doc: ContentDocument, draft: Record<string, unknown>) => {
+        await a.saveContent(pid, doc.kind, doc.slug, draft, doc.rev);
+        toast("Saved. It shows in the preview, and goes public when you publish.");
+        await load();
+        setPreviewKey((k) => k + 1);
+    };
+
+    const state = useRef({ documents, canEdit, save });
+    state.current = { documents, canEdit, save };
     // biome-ignore lint/correctness/useExhaustiveDependencies: the handlers read the latest state through refs
     useEffect(() => {
         const onMessage = (e: MessageEvent) => {
@@ -156,27 +175,29 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
             if (!doc) return;
             setSelected(doc.id);
             setField(m[3] ?? null);
-            // Text typed straight into the page is saved like any other edit.
+            // Text typed straight into the page is saved like any other edit, and only where
+            // that piece is plain text: it never replaces a list or a picture.
+            const key = m[3] ?? "";
+            const now = doc.draft?.[key];
             if (
                 change &&
                 typeof change.value === "string" &&
                 change.value.length <= 5000 &&
                 state.current.canEdit &&
-                doc.draft?.[m[3] ?? ""] !== change.value
+                (now === undefined || now === null || typeof now === "string") &&
+                now !== change.value
             ) {
-                void save(doc, { ...(doc.draft ?? {}), [m[3] ?? ""]: change.value });
+                // A save that is refused (someone else changed it meanwhile) is said, and what is saved is shown again.
+                state.current.save(doc, { ...(doc.draft ?? {}), [key]: change.value }).catch((err: Error) => {
+                    toast(`${err.message} What you typed into the page was not saved.`, "error");
+                    void load();
+                    setPreviewKey((k) => k + 1);
+                });
             }
         };
         window.addEventListener("message", onMessage);
         return () => window.removeEventListener("message", onMessage);
     }, []);
-
-    const save = async (doc: ContentDocument, draft: Record<string, unknown>) => {
-        await a.saveContent(pid, doc.kind, doc.slug, draft, doc.rev);
-        toast("Saved. It shows in the preview, and goes public when you publish.");
-        await load();
-        setPreviewKey((k) => k + 1);
-    };
 
     const q = query.trim().toLowerCase();
     const shown = (documents ?? []).filter((d) => !q || `${documentName(d)} ${JSON.stringify(d.draft ?? {})}`.toLowerCase().includes(q));
@@ -285,6 +306,14 @@ export function Content({ project, org, session, theme, onToggleTheme, startOn =
                 ) : documents === null ? (
                     <div className="panel-loading">
                         <Dots />
+                    </div>
+                ) : documents.length === 0 && loadFailed ? (
+                    <div className="content-empty" role="alert">
+                        <h2 className="display">The wording could not be loaded.</h2>
+                        <p className="muted">Nothing was changed. It is still there.</p>
+                        <button type="button" className="btn btn-primary" onClick={() => void load()}>
+                            Try again
+                        </button>
                     </div>
                 ) : documents.length === 0 ? (
                     <div className="content-empty">
@@ -542,7 +571,10 @@ function Past({
     // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the document or its revision changes
     useEffect(() => {
         if (!open) return;
-        a.contentHistory(pid, doc.kind, doc.slug).then(setRevisions, () => setRevisions([]));
+        a.contentHistory(pid, doc.kind, doc.slug).then(setRevisions, (err: Error) => {
+            setRevisions([]);
+            toast(err.message, "error");
+        });
     }, [open, doc.id, doc.rev]);
 
     const restore = async (rev: number) => {

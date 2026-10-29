@@ -1,11 +1,19 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 
-const bool = (s: string | undefined, d: boolean): boolean => (s === undefined ? d : s === "true" || s === "1");
+// A switch in the environment. Unset (or empty) is the default; anything that is not
+// plainly yes or no is refused, so "TRUE" or a typo can never quietly mean "off".
+function bool(name: string, s: string | undefined, d: boolean): boolean {
+    const v = s?.trim().toLowerCase() ?? "";
+    if (v === "") return d;
+    if (["true", "1", "yes", "on"].includes(v)) return true;
+    if (["false", "0", "no", "off"].includes(v)) return false;
+    throw new ConfigError(`${name} must be true or false`);
+}
 
 const envSchema = z.object({
     HOST: z.string().default("0.0.0.0"),
-    PORT: z.coerce.number().default(8080),
+    PORT: z.coerce.number().int().min(1).max(65535).default(8080),
     PUBLIC_ORIGIN: z.string().optional(),
     DATABASE_URL: z.string().optional(),
     DATABASE_URL_FILE: z.string().optional(),
@@ -28,11 +36,11 @@ const envSchema = z.object({
     SIGNUP_MODE: z.enum(["invite", "open"]).default("open"),
     INVITE_HINT: z.string().optional(),
     COOKIE_SECURE: z.string().optional(),
-    SESSION_IDLE_MINUTES: z.coerce.number().default(480),
-    SESSION_MAX_HOURS: z.coerce.number().default(72),
+    SESSION_IDLE_MINUTES: z.coerce.number().positive().default(480),
+    SESSION_MAX_HOURS: z.coerce.number().positive().default(72),
     MIGRATION_DATABASE_URL: z.string().optional(),
     MIGRATION_DATABASE_URL_FILE: z.string().optional(),
-    STEP_UP_MINUTES: z.coerce.number().default(15),
+    STEP_UP_MINUTES: z.coerce.number().positive().default(15),
     // Safety ceilings applied to organisations that have not been given their own.
     DEFAULT_MAX_PROJECTS: z.coerce.number().int().positive().default(25),
     // Studios run on their own provider keys (BYOK), so there is no daily token ceiling
@@ -46,7 +54,10 @@ const envSchema = z.object({
     // Where agent workspaces run: "container" (production: per-project runtime
     // containers via the provisioner) or "local" (dev/tests: in-process).
     RUNTIME_MODE: z.enum(["local", "container"]).default("local"),
-    PROVISIONER_URL: z.string().default("http://atelier-provisioner:8091"),
+    // With RUNTIME_MODE=container the server refuses to serve as the owner of the database's
+    // tables. This lets it, for trying Atelier out with one database login; never for real studios.
+    DATABASE_OWNER_OK: z.string().optional(),
+    PROVISIONER_URL: z.string().url().default("http://atelier-provisioner:8091"),
     PROVISIONER_SECRET: z.string().optional(),
     PROVISIONER_SECRET_FILE: z.string().optional(),
     // Hosting (P3): the deployer service that puts published websites on Cloudflare
@@ -87,7 +98,7 @@ const envSchema = z.object({
     RETAIN_FORMS_DAYS: z.coerce.number().int().positive().default(365),
     RETAIN_AUDIT_DAYS: z.coerce.number().int().positive().default(730),
     // The control-plane address runtime containers use for the agent content API.
-    RUNTIME_API_URL: z.string().default("http://atelier-server:8080"),
+    RUNTIME_API_URL: z.string().url().default("http://atelier-server:8080"),
     WORKSPACE_ROOT: z.string().default("/tmp/atelier-workspaces"),
     MCP_SERVER_ENTRY: z.string().default("/app/apps/server/src/mcp/content.ts"),
     WEB_DIST_DIR: z.string().optional(),
@@ -96,11 +107,15 @@ const envSchema = z.object({
 export class ConfigError extends Error {}
 
 function readSecret(file: string): string {
+    let value: string;
     try {
-        return readFileSync(file, "utf8").trim();
+        value = readFileSync(file, "utf8").trim();
     } catch (err) {
         throw new ConfigError(`cannot read secret file ${file}: ${(err as Error).message}`);
     }
+    // An empty file is a secret that was never written, not a secret that is empty.
+    if (!value) throw new ConfigError(`secret file ${file} is empty`);
+    return value;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
@@ -111,13 +126,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     }
     const e = parsed.data;
 
-    const databaseUrl = e.DATABASE_URL ?? (e.DATABASE_URL_FILE ? readSecret(e.DATABASE_URL_FILE) : undefined);
-    const secretsKey = e.ATELIER_SECRETS_KEY ?? (e.ATELIER_SECRETS_KEY_FILE ? readSecret(e.ATELIER_SECRETS_KEY_FILE) : undefined);
-    const migrationDatabaseUrl =
-        e.MIGRATION_DATABASE_URL ?? (e.MIGRATION_DATABASE_URL_FILE ? readSecret(e.MIGRATION_DATABASE_URL_FILE) : undefined);
-    const provisionerSecret = e.PROVISIONER_SECRET ?? (e.PROVISIONER_SECRET_FILE ? readSecret(e.PROVISIONER_SECRET_FILE) : undefined);
-    const deployerSecret = e.DEPLOYER_SECRET ?? (e.DEPLOYER_SECRET_FILE ? readSecret(e.DEPLOYER_SECRET_FILE) : undefined);
-    const fromFile = (value: string | undefined, file: string | undefined) => value ?? (file ? readSecret(file) : undefined);
+    // A value given directly, or the file that holds it. A variable set to nothing counts
+    // as not set, so it neither hides the file nor passes as an empty secret.
+    const fromFile = (value: string | undefined, file: string | undefined) => value || (file ? readSecret(file) : undefined);
+    const databaseUrl = fromFile(e.DATABASE_URL, e.DATABASE_URL_FILE);
+    const secretsKey = fromFile(e.ATELIER_SECRETS_KEY, e.ATELIER_SECRETS_KEY_FILE);
+    const migrationDatabaseUrl = fromFile(e.MIGRATION_DATABASE_URL, e.MIGRATION_DATABASE_URL_FILE);
+    const provisionerSecret = fromFile(e.PROVISIONER_SECRET, e.PROVISIONER_SECRET_FILE);
+    const deployerSecret = fromFile(e.DEPLOYER_SECRET, e.DEPLOYER_SECRET_FILE);
+    // Sign-in comes back to this address and requests are checked against it, so it must be one.
+    const publicOrigin = e.PUBLIC_ORIGIN || `http://localhost:${e.PORT}`;
+    if (!URL.canParse(publicOrigin) || !["http:", "https:"].includes(new URL(publicOrigin).protocol))
+        throw new ConfigError("PUBLIC_ORIGIN must be the address people open Atelier at, such as https://atelier.example.com");
+    const cookieSecure = bool("COOKIE_SECURE", e.COOKIE_SECURE, true);
     const r2 = {
         accountId: fromFile(e.R2_ACCOUNT_ID, e.R2_ACCOUNT_ID_FILE),
         bucket: e.R2_BUCKET,
@@ -139,26 +160,45 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         if (!secretsKey) throw new ConfigError("RUNTIME_MODE=container requires ATELIER_SECRETS_KEY(_FILE)");
         if (!provisionerSecret) throw new ConfigError("RUNTIME_MODE=container requires PROVISIONER_SECRET(_FILE)");
     }
+    // What studios store (their provider keys) is sealed with this key, and a website's forms
+    // are signed with it: a key made up at each start would leave all of that unreadable.
+    if (databaseUrl && !secretsKey) throw new ConfigError("DATABASE_URL requires ATELIER_SECRETS_KEY(_FILE)");
     if (e.AUTH_MODE === "dev") {
-        const host = new URL(e.PUBLIC_ORIGIN ?? `http://localhost:${e.PORT}`);
+        const host = new URL(publicOrigin);
         const local = host.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(host.hostname);
-        if (!local || bool(e.COOKIE_SECURE, true)) {
+        if (!local || cookieSecure) {
             throw new ConfigError("AUTH_MODE=dev is only allowed on http://localhost with COOKIE_SECURE=false");
         }
     }
-    let providerUpstreams: Record<string, string> = {};
+    const providerUpstreams: Record<string, string> = {};
     if (e.PROVIDER_UPSTREAMS) {
+        let parsed: unknown;
         try {
-            const parsed = JSON.parse(e.PROVIDER_UPSTREAMS) as Record<string, unknown>;
-            providerUpstreams = Object.fromEntries(
-                Object.entries(parsed).filter((kv): kv is [string, string] => typeof kv[1] === "string"),
-            );
-            for (const url of Object.values(providerUpstreams)) new URL(url);
+            parsed = JSON.parse(e.PROVIDER_UPSTREAMS);
         } catch {
+            parsed = null;
+        }
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
             throw new ConfigError("PROVIDER_UPSTREAMS must be a JSON object of provider id to URL");
+        // Every entry must be usable: one left out quietly would send that provider's traffic
+        // to its usual address instead of the gateway that was asked for.
+        for (const [provider, url] of Object.entries(parsed)) {
+            if (typeof url !== "string" || !URL.canParse(url) || !["http:", "https:"].includes(new URL(url).protocol))
+                throw new ConfigError(`PROVIDER_UPSTREAMS: "${provider}" must be an http(s) URL`);
+            providerUpstreams[provider] = url;
         }
     }
-    const oidcClientSecret = e.OIDC_CLIENT_SECRET ?? (e.OIDC_CLIENT_SECRET_FILE ? readSecret(e.OIDC_CLIENT_SECRET_FILE) : undefined);
+    const oidcClientSecret = fromFile(e.OIDC_CLIENT_SECRET, e.OIDC_CLIENT_SECRET_FILE);
+    // Some of the provider's settings but not all is a mistake, not "no provider yet".
+    const oidcMissing = Object.entries({
+        OIDC_ISSUER: e.OIDC_ISSUER,
+        OIDC_CLIENT_ID: e.OIDC_CLIENT_ID,
+        "OIDC_CLIENT_SECRET(_FILE)": oidcClientSecret,
+    })
+        .filter(([, value]) => !value)
+        .map(([name]) => name);
+    if (e.AUTH_MODE === "oidc" && oidcMissing.length > 0 && oidcMissing.length < 3)
+        throw new ConfigError(`sign-in is partly configured: ${oidcMissing.join(" and ")} is missing`);
 
     const oidc =
         e.OIDC_ISSUER && e.OIDC_CLIENT_ID && oidcClientSecret
@@ -168,7 +208,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
                   clientSecret: oidcClientSecret,
                   providerName: e.OIDC_PROVIDER_NAME,
                   adminGroup: e.OIDC_ADMIN_GROUP,
-                  trustEmail: bool(e.OIDC_TRUST_EMAIL, false),
+                  trustEmail: bool("OIDC_TRUST_EMAIL", e.OIDC_TRUST_EMAIL, false),
                   scopes: e.OIDC_SCOPES,
               }
             : undefined;
@@ -176,7 +216,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     return {
         host: e.HOST,
         port: e.PORT,
-        publicOrigin: e.PUBLIC_ORIGIN ?? `http://localhost:${e.PORT}`,
+        publicOrigin,
         databaseUrl,
         migrationDatabaseUrl,
         secretsKey,
@@ -187,6 +227,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         providerUpstreams,
         workspaceIdleMinutes: e.WORKSPACE_IDLE_MINUTES,
         runtimeMode: e.RUNTIME_MODE,
+        databaseOwnerOk: bool("DATABASE_OWNER_OK", e.DATABASE_OWNER_OK, false),
         provisionerUrl: e.PROVISIONER_URL,
         provisionerSecret,
         deployerUrl: e.DEPLOYER_URL ?? null,
@@ -213,7 +254,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         oidc,
         signupMode: e.SIGNUP_MODE,
         inviteHint: e.INVITE_HINT,
-        cookieSecure: bool(e.COOKIE_SECURE, true),
+        cookieSecure,
         sessionIdleMinutes: e.SESSION_IDLE_MINUTES,
         sessionMaxHours: e.SESSION_MAX_HOURS,
         workspaceRoot: e.WORKSPACE_ROOT,

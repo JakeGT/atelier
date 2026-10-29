@@ -30,6 +30,8 @@ export function adminRoutes(api: Api): void {
         const org = /^[0-9a-f-]{36}$/.test(id) ? await store.organizations.findById(id) : null;
         if (!org) return c.json({ error: "not found" }, 404);
         const body = await c.req.json().catch(() => null);
+        // Something that is not a change is refused, so nothing is recorded as one.
+        if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ error: "say what to change" }, 400);
         const patch: Parameters<typeof store.organizations.update>[1] = {};
 
         if (body?.status === "active" || body?.status === "suspended") patch.status = body.status;
@@ -44,29 +46,37 @@ export function adminRoutes(api: Api): void {
         }
         if (body?.flags !== undefined) {
             const f = body.flags;
-            if (typeof f !== "object" || f === null) return c.json({ error: "invalid flags" }, 400);
+            if (typeof f !== "object" || f === null || Array.isArray(f)) return c.json({ error: "invalid flags" }, 400);
+            for (const key of ["assistant", "publishing"] as const) {
+                if (f[key] !== undefined && typeof f[key] !== "boolean") return c.json({ error: `${key} must be true or false` }, 400);
+            }
             patch.flags = {
                 ...org.flags,
                 ...(typeof f.assistant === "boolean" ? { assistant: f.assistant } : {}),
                 ...(typeof f.publishing === "boolean" ? { publishing: f.publishing } : {}),
             };
         }
+        if (Object.keys(patch).length === 0) return c.json({ error: "say what to change" }, 400);
         const updated = await store.organizations.update(org.id, patch);
 
         // Suspending stops the studio's assistants at once. Published websites stay
         // up: taking a website offline is a separate, deliberate act (unpublish).
         if (patch.status === "suspended" && org.status !== "suspended") {
-            for (const p of await store.projects.list(org.id)) await runtime.stop(p.id).catch(() => {});
+            // One that will not stop does not keep the others running; it is logged, since nothing else would say so.
+            await Promise.all(
+                (await store.projects.list(org.id)).map((p) =>
+                    runtime.stop(p.id).catch((err: Error) => console.error(`suspending ${org.id}: could not stop ${p.id}: ${err.message}`)),
+                ),
+            );
         }
+        // Suspending or restoring is recorded as that only when it changed something.
+        let action = "admin.update";
+        if (patch.status === "suspended" && org.status !== "suspended") action = "admin.suspend";
+        else if (patch.status === "active" && org.status !== "active") action = "admin.restore";
         await store.audit.record({
             tenantId: org.id,
             actorId: c.get("user").id,
-            action:
-                patch.status === "suspended"
-                    ? "admin.suspend"
-                    : patch.status === "active" && org.status !== "active"
-                      ? "admin.restore"
-                      : "admin.update",
+            action,
             target: `org:${org.id}`,
             detail: { ...patch },
         });

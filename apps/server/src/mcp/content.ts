@@ -55,7 +55,7 @@ server.tool(
     "media_list",
     'List the files the person has uploaded for this website (photographs, logos, PDFs, short clips), with a description of each and its path. Use a file by writing its path exactly, relative to the website\'s top folder: <img src="media/…" alt="…">. You cannot open these files; go by their descriptions and sizes. They are not the only pictures you may use: you can draw your own (SVG, CSS) and use pictures from elsewhere by their real address.',
     {},
-    async () => json(((await api("/api/agent/media")) as { files: unknown }).files),
+    async () => json(await libraryFiles()),
 );
 
 const base = {
@@ -99,10 +99,14 @@ server.tool(
         if (remove?.length) query.set("remove", remove.join(","));
         const how = query.size ? `?${query}` : "";
         let result = (await api(`${path}${how}`, { method: "PUT", body: JSON.stringify(draft) })) as { document: unknown };
+        // Two steps: if the second fails, say that the first was done, so what is saved is not guessed at.
         if (fields?.length || (replace && fields))
-            result = (await api(`${path}/fields${replace ? "?replace=1" : ""}`, { method: "PUT", body: JSON.stringify({ fields }) })) as {
-                document: unknown;
-            };
+            result = (await api(`${path}/fields${replace ? "?replace=1" : ""}`, {
+                method: "PUT",
+                body: JSON.stringify({ fields }),
+            }).catch((err: Error) => {
+                throw new Error(`The values in draft were saved, but the fields were not (${err.message}). Send the fields again.`);
+            })) as { document: unknown };
         return json(result.document);
     },
 );
@@ -150,6 +154,8 @@ const browser = (() => {
     return path ? new Browser(path, process.env.EGRESS_PROXY) : null;
 })();
 let site: Awaited<ReturnType<typeof serveSite>> | null = null;
+// What could not be fetched for the page last looked at, so the assistant is told its pictures lack it.
+const notFetched = new Set<string>();
 const vision = process.env.ATELIER_VISION === "1";
 
 interface LibraryFile {
@@ -190,6 +196,7 @@ server.tool(
             return json({ error: "page must be the path of an .html file in the website, e.g. index.html" });
         try {
             site ??= await serveSite(workspace, {
+                failed: (what) => notFetched.add(what),
                 documents: savedDocuments,
                 media: async () =>
                     (await libraryFiles()).map((f) => ({
@@ -213,7 +220,13 @@ server.tool(
                         : null;
                 },
             });
-            const seen = await browser.look(`${site.url}${page.replace(/^\/+/, "")}`, size, from, closeUp?.trim() || undefined);
+            notFetched.clear();
+            // Each part of the path is written as an address, so a file name with a space, # or ? in it is still found.
+            const address = page.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/");
+            const seen = await browser.look(`${site.url}${address}`, size, from, closeUp?.trim() || undefined);
+            const lacking = notFetched.size
+                ? `\nThe saved ${[...notFetched].join(" and the ")} could not be fetched just now, so the page is shown here as its HTML is written, without them. That is not a fault of the page: look again in a moment.`
+                : "";
             const more = !seen.enlarged && seen.to < seen.pageHeight ? ` There is more below: call again with from=${seen.to}.` : "";
             const shows = seen.enlarged
                 ? `this picture is of ${closeUp} alone, from ${seen.from}px to ${seen.to}px down the page, ${seen.enlarged === 1 ? "at its real size" : `${seen.enlarged} times its real size`}`
@@ -225,7 +238,7 @@ server.tool(
                 seen.problems.length
                     ? `Problems found:\n- ${seen.problems.join("\n- ")}`
                     : "No problems were detected automatically; judge the pictures yourself."
-            }${notices}`;
+            }${notices}${lacking}`;
             // A model that cannot read pictures is given the layout in words and numbers instead.
             if (!vision) {
                 const outline = seen.outline.join("\n- ") || "(nothing visible)";

@@ -25,7 +25,14 @@ const AUTH_ERRORS: Record<string, { title: string; body: string }> = {
 
 // Only same-site paths are followed after signing in (the server checks this too).
 export function safeNext(raw: string | null): string {
-    return raw?.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\") ? raw : "/studio";
+    if (!raw?.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/studio";
+    // A browser drops tabs and line breaks from an address, so "/<tab>/elsewhere" would
+    // become "//elsewhere". Ask it where the path really leads instead of guessing.
+    try {
+        return new URL(raw, window.location.origin).origin === window.location.origin ? raw : "/studio";
+    } catch {
+        return "/studio";
+    }
 }
 
 export function Login({ config, theme, onToggleTheme }: { config: PublicConfig | null; theme: Theme; onToggleTheme: () => void }) {

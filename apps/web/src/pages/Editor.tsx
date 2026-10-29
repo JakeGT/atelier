@@ -69,6 +69,15 @@ const INTENT_TTL_MS = 10 * 60_000;
 
 const newId = () => crypto.randomUUID();
 
+// The name part of an address, for showing. An address that cannot be read is shown as it is, not allowed to break the page.
+function hostOf(url: string): string {
+    try {
+        return new URL(url).host;
+    } catch {
+        return url;
+    }
+}
+
 interface EditorProps {
     project: Project;
     org: Org;
@@ -174,13 +183,22 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
 
     // When the person last started a new conversation with the assistant, if they have.
     const [conversationAt, setConversationAt] = useState<string | null>(null);
+    const pendingNow = useRef(pending);
+    pendingNow.current = pending;
+    // When a request was last started or changed from here. An answer that was asked
+    // for before then may not know about it yet, so it does not decide what is running.
+    const runTouched = useRef(0);
     const loadThread = useCallback(async () => {
         try {
+            // Only what was waiting when the conversation was asked for is replaced by it: a
+            // message sent while the answer was on its way is not in it yet, and stays.
+            const had = new Set(pendingNow.current.map((m) => m.id));
+            const asked = Date.now();
             const thread = await a.thread(pid);
             setMessages(thread.messages);
             setAuthors(thread.authors ?? {});
-            setPending([]);
-            setActiveRun(thread.activeRun);
+            setPending((now) => now.filter((m) => !had.has(m.id)));
+            if (asked >= runTouched.current) setActiveRun(thread.activeRun);
             setQuestion(thread.question ?? null);
             if (typeof thread.askLevel === "number") setAskLevel(thread.askLevel);
             setConversationAt(thread.conversationAt ?? null);
@@ -259,7 +277,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             note("user", prompt);
             setQuestion(null);
             try {
-                setActiveRun(await a.startRun(pid, agent.id, prompt));
+                const run = await a.startRun(pid, agent.id, prompt);
+                runTouched.current = Date.now();
+                setActiveRun(run);
             } catch (err) {
                 note("error", (err as Error).message);
             }
@@ -274,7 +294,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
             note("user", set.questions.map((q, i) => `${q.question}\n→ ${answers[i]?.trim() || "You decide."}`).join("\n\n"));
             setQuestion(null);
             try {
-                setActiveRun(await a.answer(pid, agent.id, set.id, answers));
+                const run = await a.answer(pid, agent.id, set.id, answers);
+                runTouched.current = Date.now();
+                setActiveRun(run);
             } catch (err) {
                 note("error", (err as Error).message);
                 void loadThread();
@@ -310,30 +332,47 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     useEffect(() => {
         let stopped = false;
         let misses = 0;
+        // One beat at a time: a slow answer must not arrive after the one that followed it.
+        let asking = false;
         const beat = async () => {
             // A hidden tab stops saying "I am here", and catches up when it is looked at again.
-            if (document.hidden) return;
+            if (document.hidden || asking) return;
+            asking = true;
+            const asked = Date.now();
             try {
                 const pulse = await a.pulse(pid, typing.current);
                 if (stopped) return;
+                // Back after a run of misses: what is shown may have been reloaded while nothing answered.
+                if (misses >= 5) setStale((n) => n + 1);
                 misses = 0;
                 setPeople(pulse.people);
                 setRunBy(pulse.runBy);
-                setActiveRun(pulse.run);
+                // (Not when a request was started here after this was asked: the answer may not know of it.)
+                const current = asked >= runTouched.current;
+                if (current) setActiveRun(pulse.run);
                 // Someone else moved the slider. (Not just after moving it here: the answer may be on its way.)
                 if (typeof pulse.askLevel === "number" && Date.now() - askedAt.current > 4000) setAskLevel(pulse.askLevel);
                 const was = seen.current;
                 // Pages written while it works show in the preview straight away.
                 const written = pulse.run ? pulse.run.steps.filter(changedFiles).length : 0;
-                if (pulse.run && written > was.written) reloadPreview();
-                const finished = was.runId !== null && pulse.run === null;
+                // Counted per request: a new one starts from nothing written.
+                const before = pulse.run?.id === was.runId ? was.written : 0;
+                if (pulse.run && written > before) reloadPreview();
+                // The request we knew of is over, whether or not another has already begun.
+                const finished = current && was.runId !== null && pulse.run?.id !== was.runId;
                 const changed = was.stamp !== null && pulse.stamp !== was.stamp;
-                seen.current = { stamp: pulse.stamp, runId: pulse.run?.id ?? null, written };
+                seen.current = {
+                    stamp: pulse.stamp,
+                    runId: current ? (pulse.run?.id ?? null) : was.runId,
+                    written: current ? written : was.written,
+                };
                 // A request finished, or someone changed something: show it.
                 if (finished || changed) setStale((n) => n + 1);
             } catch {
                 // The network is flaky or the server is restarting: after a few misses, reload what we show.
                 if (++misses === 5) setStale((n) => n + 1);
+            } finally {
+                asking = false;
             }
         };
         void beat();
@@ -362,6 +401,7 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         if (!activeRun) return;
         a.extendRun(pid, activeRun.id).then(
             (run) => {
+                runTouched.current = Date.now();
                 setActiveRun(run);
                 toast("It has 10 more minutes.");
             },
@@ -371,7 +411,9 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
     const carryOn = async () => {
         if (!agent || activeRun) return;
         try {
-            setActiveRun(await a.carryOn(pid, agent.id));
+            const run = await a.carryOn(pid, agent.id);
+            runTouched.current = Date.now();
+            setActiveRun(run);
             void loadThread();
         } catch (err) {
             note("error", (err as Error).message);
@@ -534,7 +576,10 @@ export function Editor({ project, org, session, onProjectChanged, theme, onToggl
         const [docRef = "", field = ""] = ref.split("#");
         const [kind = "", slug = ""] = docRef.split("/");
         const doc = documents.find((d) => d.kind === kind && d.slug === slug);
-        if (doc?.draft?.[field] === value) return;
+        const now = doc?.draft?.[field];
+        if (now === value) return;
+        // Typing in the page changes plain text only: it never replaces a list or a picture.
+        if (now !== undefined && now !== null && typeof now !== "string") return;
         try {
             await a.saveContent(pid, kind, slug, { ...(doc?.draft ?? {}), [field]: value }, doc?.rev);
             toast("Saved. It goes public when you publish.");
@@ -953,7 +998,7 @@ function Published({
     onClose: () => void;
 }) {
     const [copied, setCopied] = useState(false);
-    const host = new URL(published.url).host;
+    const host = hostOf(published.url);
     const forms = published.live?.forms ?? [];
     const unconnected = published.live?.unconnected ?? [];
     if (published.settling) {
@@ -1093,7 +1138,7 @@ function LiveMenu({
                 <div className="menu menu-left" role="menu">
                     <div className="menu-head">
                         <strong>Release {number} is live</strong>
-                        <span className="mono muted">{url ? new URL(url).host : "Not served anywhere: hosting is not set up"}</span>
+                        <span className="mono muted">{url ? hostOf(url) : "Not served anywhere: hosting is not set up"}</span>
                     </div>
                     {url && (
                         <>

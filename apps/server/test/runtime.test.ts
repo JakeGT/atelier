@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { ContainerRuntime, runtimeSecret } from "../src/services/runtime.ts";
+import { RunTracker, wholeRun } from "../src/services/runs.ts";
+import { ContainerRuntime, LocalRuntime, runtimeSecret, startAgentRun } from "../src/services/runtime.ts";
+import type { Workspace } from "../src/services/workspace.ts";
 
 const KEY = "k".repeat(40);
 
@@ -128,4 +130,118 @@ test("a workspace still on an earlier runtime: its runs are made whole, and it i
     calls.length = 0;
     await runtime.startRun(projectId, { prompt: "x", model: null, instructions: "", apiUrl: "", agentToken: "" });
     assert.ok(!calls.some((c) => c.startsWith("PUT provisioner")));
+});
+
+// A workspace daemon that answers each path as told: a Response, or an error to throw.
+function oneWorkspace(answer: (method: string, path: string) => Response | Error) {
+    const calls: string[] = [];
+    const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    const fetchFake = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        const where = url.host === "provisioner" ? "provisioner" : "workspace";
+        calls.push(`${method} ${where}${url.pathname}`);
+        if (where === "provisioner") return json(method === "GET" ? { workspaces: [{ projectId, running: true }] } : { workspaceId: "x" });
+        const said = answer(method, url.pathname);
+        if (said instanceof Error) throw said;
+        return said;
+    }) as typeof fetch;
+    const projectId = randomUUID();
+    const runtime = new ContainerRuntime({
+        provisionerUrl: "http://provisioner",
+        provisionerSecret: "prov-secret",
+        secretsKey: KEY,
+        fetch: fetchFake,
+    });
+    return { runtime, calls, projectId, json };
+}
+
+const timedOut = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
+const nothingListening = () => Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+
+test("a workspace that does not answer whether it is busy is neither stopped for being idle nor replaced", async () => {
+    const w = oneWorkspace((_method, path) => (path === "/status" ? timedOut() : new Response("{}", { status: 200 })));
+    await w.runtime.reapIdle(0);
+    assert.deepEqual(await w.runtime.reapIdle(0), []);
+    assert.ok(!w.calls.some((c) => c.startsWith("DELETE provisioner")), "it was not stopped");
+
+    // Nor is it moved to the current runtime before a picture is taken: that would end what it is doing.
+    w.calls.length = 0;
+    await w.runtime.cover(w.projectId, { apiUrl: "", agentToken: "" }).catch(() => null);
+    assert.ok(!w.calls.some((c) => c.startsWith("PUT provisioner")), "it was not replaced");
+});
+
+test("a workspace with nothing listening is idle: it is stopped, and has no request to stop or extend", async () => {
+    const w = oneWorkspace(() => nothingListening());
+    await w.runtime.reapIdle(0);
+    assert.deepEqual(await w.runtime.reapIdle(0), [w.projectId]);
+    assert.equal(await w.runtime.stopRun(w.projectId, randomUUID()), false);
+    assert.equal(await w.runtime.extendRun(w.projectId, randomUUID()), null);
+});
+
+test("a request the workspace does not know is null; any other refusal is an error", async () => {
+    let status = 404;
+    const w = oneWorkspace(() => new Response(JSON.stringify({ error: status === 404 ? "not found" : "broken" }), { status }));
+    assert.equal(await w.runtime.getRun(w.projectId, randomUUID()), null);
+    status = 500;
+    await assert.rejects(w.runtime.getRun(w.projectId, randomUUID()), /broken/);
+});
+
+test("only a website's own files and versions are asked of a workspace", async () => {
+    const w = oneWorkspace(() => new Response("body", { status: 200 }));
+    assert.equal(await w.runtime.readFile(w.projectId, "../status"), null);
+    assert.equal(await w.runtime.readFile(w.projectId, "css/../../head"), null);
+    await assert.rejects(w.runtime.exportTree(w.projectId, "../head"), /invalid commit sha/);
+    assert.deepEqual(w.calls, []);
+    assert.ok(await w.runtime.readFile(w.projectId, "css/site.css"));
+    assert.deepEqual(w.calls, ["GET workspace/files/css/site.css"]);
+});
+
+test("the local runtime refuses anything that is not a project id before keeping anything for it", async () => {
+    const runtime = new LocalRuntime("/nonexistent", { run: async () => ({}) } as never);
+    await assert.rejects(runtime.getRun("../elsewhere", randomUUID()), /invalid project id/);
+});
+
+test("a job that throws at once fails its run and leaves the workspace free", async () => {
+    const tracker = new RunTracker();
+    const run = tracker.start(() => {
+        throw "not even an Error";
+    });
+    assert.notEqual(run, "busy");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(tracker.busy, false);
+    const after = run === "busy" ? null : tracker.get(run.id);
+    assert.equal(after?.status, "failed");
+    assert.equal(after?.error, "not even an Error");
+});
+
+test("a run reported with a start time that cannot be read is still made whole", () => {
+    const run = wholeRun({ id: "r", status: "running", startedAt: "not a date" });
+    assert.ok(!Number.isNaN(new Date(run.deadlineAt).getTime()));
+});
+
+test("a request whose version cannot be saved keeps its reply, and says the changes are not saved yet", async () => {
+    const tracker = new RunTracker();
+    let tries = 0;
+    const ws = {
+        dir: "/nowhere",
+        init: async () => {},
+        checkpoint: async () => {
+            tries += 1;
+            throw new Error("fatal: unable to write new index file");
+        },
+    } as unknown as Workspace;
+    const agent = { run: async () => ({ text: "The header is green now.", toolEvents: [] }) } as unknown as Parameters<
+        typeof startAgentRun
+    >[2];
+    const run = startAgentRun(tracker, ws, agent, { prompt: "Make the header green" } as Parameters<typeof startAgentRun>[3]);
+    assert.notEqual(run, "busy");
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const after = run === "busy" ? null : tracker.get(run.id);
+    assert.equal(tries, 2);
+    assert.deepEqual(
+        [after?.status, after?.result?.text, after?.checkpoint, after?.unsaved],
+        ["done", "The header is green now.", null, true],
+    );
 });

@@ -12,6 +12,9 @@ export interface RunState {
     error: string | null;
     // The version the run was saved as (null when it changed no files).
     checkpoint: string | null;
+    // Set when the files were changed but could not be saved as a version: the reply
+    // stands, and whatever is saved next takes these changes with it.
+    unsaved?: boolean;
     // While it runs: what it has done so far, when it last did something, when it
     // will be stopped for taking too long, and whether that can still be put back.
     steps: AgentToolEvent[];
@@ -25,6 +28,8 @@ export interface RunState {
 // and reports runs without the fields added since; nothing downstream should have
 // to know that.
 export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status" | "startedAt">): RunState {
+    // A start time that cannot be read must not make the run itself unreadable.
+    const started = new Date(raw.startedAt).getTime();
     return {
         finishedAt: null,
         result: null,
@@ -32,7 +37,7 @@ export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status"
         checkpoint: null,
         lastActivityAt: raw.startedAt,
         // The earlier runtime stopped a run after fifteen minutes and could not be given more.
-        deadlineAt: new Date(new Date(raw.startedAt).getTime() + 15 * 60_000).toISOString(),
+        deadlineAt: new Date((Number.isNaN(started) ? Date.now() : started) + 15 * 60_000).toISOString(),
         canExtend: false,
         ...raw,
         steps: Array.isArray(raw.steps) ? raw.steps : [],
@@ -42,6 +47,7 @@ export function wholeRun(raw: Partial<RunState> & Pick<RunState, "id" | "status"
 export interface JobOutcome {
     result: AgentResult;
     checkpoint: string | null;
+    unsaved?: boolean;
     status?: "done" | "stopped" | "timed_out";
 }
 
@@ -96,10 +102,18 @@ export class RunTracker {
             if (run.steps.length < MAX_STEPS) run.steps.push(s);
             run.lastActivityAt = new Date().toISOString();
         };
-        void job({ control, step })
+        // Called inside an async function, so a job that throws before its first await
+        // fails the run like any other, and cannot leave the workspace marked busy for good.
+        void (async () => job({ control, step }))()
             .then(
-                ({ result, checkpoint, status }) => Object.assign(run, { status: status ?? "done", result, checkpoint }),
-                (err: unknown) => Object.assign(run, { status: "failed", error: (err as Error).message }),
+                ({ result, checkpoint, status, unsaved }) =>
+                    Object.assign(run, { status: status ?? "done", result, checkpoint, ...(unsaved ? { unsaved } : {}) }),
+                (err: unknown) => {
+                    // Whatever was thrown, the run says why it failed, and so does the log.
+                    const error = err instanceof Error ? err.message : String(err);
+                    console.error(`run ${run.id} failed: ${error}`);
+                    Object.assign(run, { status: "failed", error });
+                },
             )
             .finally(() => {
                 run.finishedAt = new Date().toISOString();

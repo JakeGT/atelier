@@ -9,7 +9,7 @@ import type { Project, Release } from "@atelier/shared";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { deployerApp } from "../src/runtime/deployer.ts";
 import { assetHash, CloudflarePages, headersFile, SiteError, siteFromArchive } from "../src/runtime/pages.ts";
-import { DeployerHosting, normalizeHostname, siteName } from "../src/services/hosting.ts";
+import { DeployerHosting, type HostingError, normalizeHostname, siteName } from "../src/services/hosting.ts";
 import type { RunState } from "../src/services/runs.ts";
 import { json, makeApp, signIn, type TestApp } from "./helpers.ts";
 
@@ -239,8 +239,27 @@ test("names: a website's hosting project is recognisable and confined; hostnames
     assert.equal(name, "atl-okoro-ceramics-0123abcd45");
     assert.ok(siteName("atl-", { id: "0123abcd-4567-89ab-cdef-000000000000", slug: "x".repeat(200) }).length <= 58);
     assert.equal(normalizeHostname(" https://WWW.Example.com/path?x "), "www.example.com");
-    for (const bad of ["localhost", "exa mple.com", "-bad.com", "site.pages.dev", "10.0.0.1", "", "a..b.com"])
+    for (const bad of ["localhost", "exa mple.com", "-bad.com", "site.pages.dev", "pages.dev", "10.0.0.1", "", "a..b.com"])
         assert.equal(normalizeHostname(bad), null, bad);
+});
+
+test("the deployer's client: names are encoded into the address, and an answer that is not the deployer's is an error", async () => {
+    const asked: string[] = [];
+    let answer = () => new Response("<html>bad gateway</html>", { status: 200 });
+    const hosting = new DeployerHosting({
+        url: "http://deployer",
+        secret: DEPLOYER_SECRET,
+        fetch: (async (url: string | URL | Request) => {
+            asked.push(String(url));
+            return answer();
+        }) as typeof fetch,
+    });
+    await assert.rejects(hosting.deleteSite("atl-x"), (err: HostingError) => err.kind === "hosting" && err.status === 502);
+    answer = () => Response.json({ ok: true });
+    await hosting.removeDomain("atl-x/../y", "a.com/b?c");
+    assert.equal(asked.at(-1), "http://deployer/sites/atl-x%2F..%2Fy/domains/a.com%2Fb%3Fc");
+    // A list that is not there is no domains, not a crash for whoever reads it.
+    assert.deepEqual(await hosting.listDomains("atl-x"), []);
 });
 
 // ---- the deployer ---------------------------------------------------------------------------

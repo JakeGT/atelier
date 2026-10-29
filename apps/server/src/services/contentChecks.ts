@@ -11,9 +11,12 @@ const plain = (html: string): string =>
 
 function empty(field: { type: string }, value: unknown): boolean {
     if (value === undefined || value === null) return true;
-    if (Array.isArray(value)) return value.length === 0;
+    // A list of nothing but blank lines says nothing either.
+    if (Array.isArray(value)) return value.every((v) => typeof v === "string" && v.trim() === "");
     if (typeof value !== "string") return false;
-    return (field.type === "rich" ? plain(value) : value.trim()) === "";
+    // Formatted text that is only a picture has no words, but it is not empty.
+    if (field.type === "rich") return plain(value) === "" && !/<img\b/i.test(value);
+    return value.trim() === "";
 }
 
 const pageName = (d: Pick<ContentDocument, "slug">): string =>
@@ -33,9 +36,10 @@ export function contentProblems(documents: Pick<ContentDocument, "kind" | "slug"
                 problems.push(`“${field.label}” ${where} has ${value.length} entries; the most it can have is ${field.max}`);
             if (field.type !== "items" || !Array.isArray(value)) continue;
             value.forEach((entry, i) => {
-                if (!entry || typeof entry !== "object") return;
+                // An entry that is not a set of parts has none of them: what it must have is missing.
+                const parts = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
                 for (const part of field.itemFields ?? []) {
-                    const v = (entry as Record<string, unknown>)[part.key];
+                    const v = parts[part.key];
                     if (part.required && empty(part, v))
                         problems.push(`“${part.label}” is empty in entry ${i + 1} of “${field.label}” ${where}`);
                     if (part.max && typeof v === "string" && (part.type === "text" || part.type === "long") && v.length > part.max)

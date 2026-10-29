@@ -32,6 +32,7 @@ export interface UserStore {
 export class SlugTakenError extends Error {
     constructor() {
         super("that address is already taken");
+        this.name = "SlugTakenError";
     }
 }
 
@@ -94,6 +95,7 @@ export interface ProjectPatch {
 }
 
 export interface ProjectStore {
+    // A slug is unique within its studio; a clash throws SlugTakenError.
     create(input: { id: string; tenantId: string; slug: string; name: string; template?: string | null }): Promise<Project>;
     // The template's files are in place: stop asking for them.
     clearTemplate(tenantId: string, id: string): Promise<void>;
@@ -130,7 +132,8 @@ export interface UsageTotals {
     units: number;
 }
 
-// Append-only metering. `sourceId` makes a record idempotent per (kind, source).
+// Append-only metering. `sourceId` makes a record idempotent within a studio: a second
+// record with the same (tenantId, kind, sourceId) is ignored.
 export interface UsageStore {
     record(input: { tenantId: string; projectId: string | null; kind: UsageKind; units: number; sourceId: string }): Promise<void>;
     totals(tenantId: string, since: Date): Promise<UsageTotals[]>;
@@ -256,7 +259,9 @@ export interface AgentSessionStore {
 }
 
 export interface MessageStore {
-    // Idempotent per (runId, user-or-reply): a second reply for the same run is ignored.
+    // Idempotent per (runId, user-or-reply): a run has one message from the person and one
+    // reply, and a second of either is ignored. Run ids are unique across the platform, so
+    // nothing else is part of the key. A message with no runId is always added.
     add(input: {
         tenantId: string;
         projectId: string;
@@ -290,7 +295,8 @@ export interface ReleaseStore {
     manifest(tenantId: string, releaseId: string): Promise<ReleaseDocument[]>;
     // Atomically: supersede the current live release, mark this one live, and set
     // every document's `published` from this release's manifest (null for
-    // documents the release does not ship).
+    // documents the release does not ship). One website's goLive and takeDown never
+    // overlap: each waits for the one before it, and the last to run decides.
     goLive(tenantId: string, projectId: string, releaseId: string): Promise<Release>;
     markFailed(tenantId: string, releaseId: string): Promise<Release>;
     // Nothing is live any more: the live release becomes superseded and no document
@@ -325,6 +331,7 @@ export interface ProjectDomain {
 export class DomainTakenError extends Error {
     constructor() {
         super("that domain is already connected to a website");
+        this.name = "DomainTakenError";
     }
 }
 
@@ -379,7 +386,8 @@ export interface NotificationStore {
     admins(): Promise<string[]>;
 }
 
-// Custom domains. A hostname is unique across the platform.
+// Custom domains. A hostname is unique across the platform. Hostnames are compared as
+// given: callers pass them already normalised (lower case, no trailing dot).
 export interface DomainStore {
     list(tenantId: string, projectId: string): Promise<ProjectDomain[]>;
     add(input: { id: string; tenantId: string; projectId: string; hostname: string; createdBy: string }): Promise<void>;
@@ -406,7 +414,8 @@ export interface OperatorVisitStore {
 // A report about Atelier itself, for whoever runs it.
 export interface FeedbackReport {
     id: string;
-    source: "person" | "assistant";
+    // "app": Atelier noticed it itself (a screen that stopped working, a page that froze).
+    source: "person" | "assistant" | "app";
     kind: string;
     text: string;
     context: Record<string, string>;
@@ -416,9 +425,18 @@ export interface FeedbackReport {
     status: "open" | "done";
     createdAt: string;
     closedAt: string | null;
+    // For what Atelier noticed itself: how many times, and when last.
+    seen: number;
+    lastSeenAt: string | null;
 }
 export interface FeedbackStore {
-    add(report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt">): Promise<FeedbackReport>;
+    add(report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt" | "seen" | "lastSeenAt">): Promise<FeedbackReport>;
+    // Something Atelier noticed itself. While a report with this signature is open, that one
+    // counts once more (and takes these details, the latest); otherwise a new one is made.
+    noticed(
+        report: Omit<FeedbackReport, "status" | "createdAt" | "closedAt" | "seen" | "lastSeenAt">,
+        signature: string,
+    ): Promise<FeedbackReport>;
     list(filter?: { status?: "open" | "done"; limit?: number }): Promise<FeedbackReport[]>;
     setStatus(id: string, status: "open" | "done"): Promise<FeedbackReport | null>;
 }
@@ -449,6 +467,9 @@ export interface LoginSessionStore {
     touch(idHash: string, lastSeenAt: number): Promise<void>;
     delete(idHash: string): Promise<void>;
     deleteForUser(userId: string): Promise<void>;
+    // Removes sign-ins that have run out: last seen before `idleBefore`, or begun before
+    // `createdBefore` (both in milliseconds). Returns how many.
+    purgeExpired(idleBefore: number, createdBefore: number): Promise<number>;
 }
 
 export interface Store {

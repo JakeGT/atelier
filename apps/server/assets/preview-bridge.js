@@ -55,20 +55,29 @@
         }
     };
     var mark = (el) => {
-        var was = el.style.cssText;
+        // Marked again before the last mark has gone: what is put back is how it was before either.
+        if (el.__atelierMark === undefined) el.__atelierStyle = el.style.cssText;
+        var position = getComputedStyle(el).position;
         el.style.setProperty("outline", "3px solid rgb(220,67,38)", "important");
         el.style.setProperty("outline-offset", "4px", "important");
         el.style.setProperty("box-shadow", "0 0 0 9999px rgba(20,18,14,.28)", "important");
-        el.style.setProperty("position", getComputedStyle(el).position === "static" ? "relative" : getComputedStyle(el).position, "important");
+        el.style.setProperty("position", position === "static" ? "relative" : position, "important");
         el.style.setProperty("z-index", "2147483000", "important");
         el.style.setProperty("transition", "box-shadow .4s", "important");
         clearTimeout(el.__atelierMark);
         el.__atelierMark = setTimeout(() => {
-            el.style.cssText = was;
+            el.style.cssText = el.__atelierStyle;
+            el.__atelierMark = undefined;
         }, 2200);
     };
     var bound = (target) => (target && target.closest ? target.closest(BOUND) : null);
-    addEventListener("pageshow", () => {
+    addEventListener("pageshow", (e) => {
+        // A page brought back by Back or Forward is as it was left, perhaps still set for editing
+        // though editing has since been turned off. It starts again; the editor says if it is on.
+        if (e.persisted && editing) {
+            editing = false;
+            apply();
+        }
         say({ path: path() });
     });
     addEventListener("message", (e) => {
@@ -120,7 +129,8 @@
                 e.preventDefault();
                 el.blur();
             } else if (e.key === "Escape") {
-                el.innerText = el.__atelierWas || "";
+                // Only what was made editable here is put back: anything else has no "before" to return to.
+                if (el.__atelierWas !== undefined) el.innerText = el.__atelierWas;
                 el.blur();
             }
         },

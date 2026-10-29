@@ -6,7 +6,9 @@ import type { ReactNode } from "react";
 
 function inline(text: string, keyBase: string): ReactNode[] {
     const out: ReactNode[] = [];
-    const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+    // Only `code` and **bold** are marked up. Bold runs to the next "**", so a single asterisk inside it
+    // ("**a *b* c**") does not stop it being bold. Anything else (*one asterisk*, a lone backtick) is shown as written.
+    const re = /(`[^`]+`|\*\*.+?\*\*)/g;
     let last = 0;
     let i = 0;
     for (const m of text.matchAll(re)) {
@@ -30,7 +32,8 @@ export function Prose({ text }: { text: string }) {
     const blocks: ReactNode[] = [];
     const lines = text.replace(/\r/g, "").split("\n");
     let para: string[] = [];
-    let list: { ordered: boolean; items: string[] } | null = null;
+    // `start`: the number a numbered list begins at, so one carried on after a paragraph keeps counting.
+    let list: { ordered: boolean; start: number; items: string[] } | null = null;
     let code: string[] | null = null;
     let k = 0;
 
@@ -42,7 +45,15 @@ export function Prose({ text }: { text: string }) {
         if (!list) return;
         // biome-ignore lint/suspicious/noArrayIndexKey: a parsed, static list; items never reorder
         const items = list.items.map((item, i) => <li key={`${k}-${i}`}>{inline(item, `l${k}-${i}`)}</li>);
-        blocks.push(list.ordered ? <ol key={k++}>{items}</ol> : <ul key={k++}>{items}</ul>);
+        blocks.push(
+            list.ordered ? (
+                <ol key={k++} start={list.start}>
+                    {items}
+                </ol>
+            ) : (
+                <ul key={k++}>{items}</ul>
+            ),
+        );
         list = null;
     };
 
@@ -63,31 +74,31 @@ export function Prose({ text }: { text: string }) {
             continue;
         }
         const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
-        const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+        const numbered = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
         const heading = line.match(/^#{1,4}\s+(.*)$/);
         if (bullet || numbered) {
             flushPara();
             const ordered = Boolean(numbered);
             if (list && list.ordered !== ordered) flushList();
-            list ??= { ordered, items: [] };
-            list.items.push((bullet ?? numbered)?.[1] ?? "");
+            list ??= { ordered, start: Number(numbered?.[1] ?? 1), items: [] };
+            list.items.push(bullet?.[1] ?? numbered?.[2] ?? "");
         } else if (heading) {
             flushPara();
             flushList();
             blocks.push(
                 <p key={k++}>
-                    <strong>{heading[1]}</strong>
+                    <strong>{inline(heading[1] ?? "", `h${k}`)}</strong>
                 </p>,
             );
         } else if (!line.trim()) {
+            // A blank line ends a paragraph but not a list: entries are often written with space between them.
             flushPara();
-            flushList();
         } else {
             flushList();
             para.push(line.trim());
         }
     }
-    if (code) blocks.push(<pre key={k++}>{(code as string[]).join("\n")}</pre>);
+    if (code) blocks.push(<pre key={k++}>{code.join("\n")}</pre>);
     flushPara();
     flushList();
 

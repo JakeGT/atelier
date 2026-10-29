@@ -1,6 +1,6 @@
 import { ArrowLeft, Check, Download, LogIn, PauseCircle, PlayCircle, Undo2 } from "lucide-react";
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuditEntry, FeedbackReport, OperatorOverview, Session, StudioSummary } from "../lib/api";
 import { api, ReauthRequired, reauthenticate } from "../lib/api";
 import { navigate, type Theme, timeAgo } from "../lib/hooks";
@@ -63,6 +63,18 @@ export function Operator({ session, tab, theme, onToggleTheme }: Props) {
     );
 }
 
+// A list that did not arrive: say so and offer another go, rather than dots that never end.
+function LoadFailed({ what, onRetry }: { what: string; onRetry: () => void }) {
+    return (
+        <div className="panel" role="alert">
+            <p className="muted">{what} could not be loaded. Nothing was changed.</p>
+            <button type="button" className="btn btn-sm" onClick={onRetry}>
+                Try again
+            </button>
+        </div>
+    );
+}
+
 const REPORT_KINDS: Record<string, string> = {
     problem: "Something is wrong",
     idea: "An idea",
@@ -70,7 +82,12 @@ const REPORT_KINDS: Record<string, string> = {
     rules: "The rules were unclear",
     missing: "Something it needed was missing",
     other: "Something else",
+    crash: "A screen stopped working",
+    error: "An error nothing caught",
+    freeze: "The page froze",
+    "large-save": "An unusually large save",
 };
+const REPORT_FROM: Record<string, string> = { person: "From a person", assistant: "From the assistant", app: "Noticed by Atelier" };
 
 // What people, and the assistant, have said about Atelier itself. Read, act on, mark as dealt with.
 function Reports() {
@@ -78,17 +95,25 @@ function Reports() {
     const [showing, setShowing] = useState<"open" | "done">("open");
     const [reports, setReports] = useState<FeedbackReport[] | null>(null);
     const [open, setOpen] = useState(0);
-    const load = useCallback(
-        () =>
-            api.operatorReports(showing).then(
-                (b) => {
-                    setReports(b.reports);
-                    setOpen(b.open);
-                },
-                (err: Error) => toast(err.message, "error"),
-            ),
-        [showing, toast],
-    );
+    const [failed, setFailed] = useState(false);
+    // Only the answer for the list now on show is kept: switching lists while one is on its way must not show the other's.
+    const asked = useRef(0);
+    const load = useCallback(() => {
+        const mine = ++asked.current;
+        setFailed(false);
+        return api.operatorReports(showing).then(
+            (b) => {
+                if (mine !== asked.current) return;
+                setReports(b.reports);
+                setOpen(b.open);
+            },
+            (err: Error) => {
+                if (mine !== asked.current) return;
+                setFailed(true);
+                toast(err.message, "error");
+            },
+        );
+    }, [showing, toast]);
     useEffect(() => {
         setReports(null);
         void load();
@@ -104,8 +129,9 @@ function Reports() {
     return (
         <section className="reports">
             <p className="muted settings-about">
-                What people have reported from the account menu, and what the assistant has said got in its way while working. Reports from
-                the assistant are about Atelier's tools and rules, not about anyone's website.
+                What people have reported from the account menu, what the assistant has said got in its way while working, and what Atelier
+                has noticed itself: a screen that stopped working, a page that froze, an unusually large save. Reports from the assistant
+                are about Atelier's tools and rules, not about anyone's website. The same thing noticed again is counted on the one report.
             </p>
             <div className="reports-bar">
                 <div className="tabs" role="tablist">
@@ -134,7 +160,9 @@ function Reports() {
                     </a>
                 )}
             </div>
-            {reports === null ? (
+            {reports === null && failed ? (
+                <LoadFailed what="The reports" onRetry={() => void load()} />
+            ) : reports === null ? (
                 <Dots />
             ) : reports.length === 0 ? (
                 <p className="muted">
@@ -145,10 +173,18 @@ function Reports() {
                     {reports.map((r) => (
                         <li key={r.id} className="report-item">
                             <div className="report-head">
-                                <span className={`chip ${r.source === "assistant" ? "" : "chip-draft"}`}>
-                                    {r.source === "assistant" ? "From the assistant" : "From a person"}
+                                <span className={`chip ${r.source === "person" ? "chip-draft" : ""}`}>
+                                    {REPORT_FROM[r.source] ?? r.source}
                                 </span>
                                 <strong>{REPORT_KINDS[r.kind] ?? r.kind}</strong>
+                                {r.seen > 1 && (
+                                    <span
+                                        className="chip"
+                                        title={r.lastSeenAt ? `Last ${new Date(r.lastSeenAt).toLocaleString()}` : undefined}
+                                    >
+                                        {r.seen} times, last {timeAgo(r.lastSeenAt ?? r.createdAt)}
+                                    </span>
+                                )}
                                 <span className="muted" title={new Date(r.createdAt).toLocaleString()}>
                                     {timeAgo(r.createdAt)}
                                 </span>
@@ -163,10 +199,18 @@ function Reports() {
                                     r.context.model,
                                     r.context.screen,
                                     r.context.browser,
+                                    r.context.size,
+                                    r.context.build,
                                 ]
                                     .filter(Boolean)
                                     .join(" · ")}
                             </p>
+                            {r.context.detail && (
+                                <details className="report-detail">
+                                    <summary>More about what happened</summary>
+                                    <pre>{r.context.detail}</pre>
+                                </details>
+                            )}
                             <button
                                 type="button"
                                 className="btn btn-sm"
@@ -196,11 +240,20 @@ function Studios() {
     const [managing, setManaging] = useState<StudioSummary | null>(null);
     const [query, setQuery] = useState("");
 
-    const load = useCallback(() => api.operatorOverview().then(setData, (err: Error) => toast(err.message, "error")), [toast]);
+    const [failed, setFailed] = useState(false);
+
+    const load = useCallback(() => {
+        setFailed(false);
+        return api.operatorOverview().then(setData, (err: Error) => {
+            setFailed(true);
+            toast(err.message, "error");
+        });
+    }, [toast]);
     useEffect(() => {
         void load();
     }, [load]);
 
+    if (!data && failed) return <LoadFailed what="The studios" onRetry={() => void load()} />;
     if (!data) {
         return (
             <div className="panel panel-loading">
@@ -291,6 +344,8 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
     const [websites, setWebsites] = useState(studio.maxProjects === null ? "" : String(studio.maxProjects));
     const [millions, setMillions] = useState(studio.dailyTokenLimit === null ? "" : String(studio.dailyTokenLimit / 1_000_000));
     const [busy, setBusy] = useState(false);
+    // Suspending locks every member out at once, so it is asked about before it happens.
+    const [askSuspend, setAskSuspend] = useState(false);
     const suspended = studio.status === "suspended";
 
     async function apply(changes: Parameters<typeof api.operatorUpdate>[1], done: string) {
@@ -420,14 +475,22 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
                         >
                             <PlayCircle /> Restore this studio
                         </button>
+                    ) : askSuspend ? (
+                        <span role="alert">
+                            <button
+                                type="button"
+                                className="btn btn-danger"
+                                disabled={busy}
+                                onClick={() => void apply({ status: "suspended" }, `${studio.name} is suspended.`)}
+                            >
+                                <PauseCircle /> Yes, suspend {studio.name}
+                            </button>
+                            <button type="button" className="btn" disabled={busy} onClick={() => setAskSuspend(false)}>
+                                Don't suspend
+                            </button>
+                        </span>
                     ) : (
-                        <button
-                            type="button"
-                            className="btn btn-danger"
-                            disabled={busy}
-                            onClick={() => void apply({ status: "suspended" }, `${studio.name} is suspended.`)}
-                            title="Its members are told it is suspended and can do nothing in it until you restore it. Published websites stay up."
-                        >
+                        <button type="button" className="btn btn-danger" disabled={busy} onClick={() => setAskSuspend(true)}>
                             <PauseCircle /> Suspend this studio
                         </button>
                     )}
@@ -443,7 +506,9 @@ function Manage({ studio, onClose, onSaved }: { studio: StudioSummary; onClose: 
                 <p className="field-help settings-note">
                     {suspended
                         ? "This studio is suspended: its members are told so and can do nothing in it. Its published websites are still up."
-                        : "Suspending stops everything in this studio at once and tells its members why. Published websites stay up; nothing is deleted."}
+                        : askSuspend
+                          ? `Suspend ${studio.name}? Its members are told it is suspended and can do nothing in it until you restore it. Published websites stay up; nothing is deleted.`
+                          : "Suspending stops everything in this studio at once and tells its members why. Published websites stay up; nothing is deleted."}
                 </p>
             </form>
         </Dialog>
@@ -470,9 +535,18 @@ const ACTION: Record<string, string> = {
 function Activity() {
     const toast = useToast();
     const [entries, setEntries] = useState<AuditEntry[] | null>(null);
-    useEffect(() => {
-        api.operatorActivity().then(setEntries, (err: Error) => toast(err.message, "error"));
+    const [failed, setFailed] = useState(false);
+    const load = useCallback(() => {
+        setFailed(false);
+        return api.operatorActivity().then(setEntries, (err: Error) => {
+            setFailed(true);
+            toast(err.message, "error");
+        });
     }, [toast]);
+    useEffect(() => {
+        void load();
+    }, [load]);
+    if (!entries && failed) return <LoadFailed what="The activity" onRetry={() => void load()} />;
     if (!entries) {
         return (
             <div className="panel panel-loading">

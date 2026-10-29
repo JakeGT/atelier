@@ -399,3 +399,30 @@ test("deleting a website deletes it in one step; without a recent sign-in nothin
     assert.equal((await t.app.request(`${fresh.api}/projects/${project.id}`, { method: "DELETE", headers: fresh.write })).status, 200);
     assert.equal(await t.store.projects.findById(stale.org.id, project.id), null);
 });
+
+test("a personal studio survives two sign-ins at once, and a sign-in that failed half-way", async () => {
+    const store = new MemoryStore();
+    const person = (subject: string) =>
+        store.users.upsertIdentity({ issuer: "i", subject, email: `${subject}@example.com`, name: subject, admin: false });
+    // Twice at the same moment: one studio, and both sign-ins are given it.
+    const twice = await person("twice");
+    const [a, b] = await Promise.all([ensurePersonalStudio(store, twice), ensurePersonalStudio(store, twice)]);
+    assert.equal(a.id, b.id);
+    const studios = await store.organizations.listForUser(twice.id);
+    assert.deepEqual([studios.length, studios[0]?.personalOf, studios[0]?.role], [1, twice.id, "owner"]);
+
+    // Making them its owner fails once. The next sign-in still gives them a personal studio.
+    const unlucky = await person("unlucky");
+    const add = store.memberships.add;
+    store.memberships.add = async () => {
+        store.memberships.add = add;
+        throw new Error("the database went away");
+    };
+    await assert.rejects(ensurePersonalStudio(store, unlucky));
+    const made = await ensurePersonalStudio(store, unlucky);
+    assert.equal(made.personalOf, unlucky.id);
+    assert.deepEqual(
+        (await store.organizations.listForUser(unlucky.id)).map((o) => o.id),
+        [made.id],
+    );
+});

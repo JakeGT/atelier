@@ -47,7 +47,11 @@ export type Lookup = (ref: ContentRef) => unknown;
 // kind/slug -> the document's fields.
 export function lookupFrom(documents: { kind: string; slug: string; content: Record<string, unknown> | null }[]): Lookup {
     const byDoc = new Map(documents.map((d) => [`${d.kind}/${d.slug}`, d.content ?? {}]));
-    return (ref) => byDoc.get(`${ref.kind}/${ref.slug}`)?.[ref.field];
+    return (ref) => {
+        const fields = byDoc.get(`${ref.kind}/${ref.slug}`);
+        // Only what was stored: a field called "constructor" is not one every object has.
+        return fields && Object.hasOwn(fields, ref.field) ? fields[ref.field] : undefined;
+    };
 }
 
 // What the library knows about an image, so a page can offer the browser the size it needs.
@@ -74,6 +78,11 @@ export interface FillOptions {
     lang?: string;
 }
 const MEDIA_PATH = /^media\/([a-z0-9][a-z0-9-]{0,60}\.[a-z0-9]{2,5})$/;
+
+// Elements whose text a browser reads as code or as raw markup, and which are written into the
+// page exactly as given, not escaped. A value placed in one could close it and add markup or
+// script of its own, so these are never filled, and never the pattern a list's entries copy.
+const RAW = new Set(["script", "style", "template", "xmp", "iframe", "noembed", "noframes", "plaintext", "noscript"]);
 
 const attr = (el: Element, name: string): string | undefined => el.attrs.find((a) => a.name === name)?.value;
 const isElement = (n: Node): n is Element => "tagName" in n;
@@ -123,6 +132,11 @@ const RICH_DROP = new Set([
     "base",
 ]);
 const SAFE_HREF = /^(https?:\/\/|mailto:|tel:|\/|#|[\w.~-]+(\.html?)?([?#/]|$))/i;
+// Where a link may lead, tidied; null for anything else (nothing, or an address that would run code).
+const safeHref = (value: unknown): string | null => {
+    const to = typeof value === "string" ? value.trim() : "";
+    return to && SAFE_HREF.test(to) && !/^javascript:/i.test(to) ? to : null;
+};
 
 function cleanRich(nodes: DefaultTreeAdapterTypes.ChildNode[], depth = 0): DefaultTreeAdapterTypes.ChildNode[] {
     const out: DefaultTreeAdapterTypes.ChildNode[] = [];
@@ -139,8 +153,8 @@ function cleanRich(nodes: DefaultTreeAdapterTypes.ChildNode[], depth = 0): Defau
         }
         const keep = RICH_ATTRS_ON[n.tagName] ?? [];
         const attrs = n.attrs.filter((a) => (RICH_ATTRS.has(a.name) || keep.includes(a.name)) && a.value.length <= 500);
-        const href = n.tagName === "a" ? attr(n, "href")?.trim() : undefined;
-        if (href && SAFE_HREF.test(href) && !/^\s*javascript:/i.test(href)) attrs.push({ name: "href", value: href });
+        const href = n.tagName === "a" ? safeHref(attr(n, "href")) : null;
+        if (href) attrs.push({ name: "href", value: href });
         // A picture: a file of the website's or one at a web address, never anything that is not a plain address.
         const src = n.tagName === "img" ? attr(n, "src")?.trim() : undefined;
         if (n.tagName === "img" && !isPicturePath(src)) continue;
@@ -285,7 +299,7 @@ function fillElement(el: Element, lookup: Lookup, options: FillOptions): void {
         // One item per entry, each a copy of the list's first item. An entry that is a
         // line of text becomes the item's text; an entry with several parts fills the
         // elements inside the item that name them (data-item, data-item-rich, …).
-        const template = el.childNodes.find(isElement);
+        const template = el.childNodes.find((c): c is Element => isElement(c) && !RAW.has(c.tagName));
         if (!template) return;
         const items: Element[] = [];
         for (const entry of value.slice(0, 500)) {
@@ -299,8 +313,8 @@ function fillElement(el: Element, lookup: Lookup, options: FillOptions): void {
                 items.push(item);
             } else if (entry && typeof entry === "object") {
                 const item = clone(template);
-                fillItem(item, entry as Record<string, unknown>, options);
-                items.push(item);
+                // Left out when the item itself is a link with nowhere to go or a picture not chosen.
+                if (fillItem(item, entry as Record<string, unknown>, options)) items.push(item);
             }
         }
         setChildren(el, items);
@@ -337,15 +351,15 @@ function setPercent(el: Element, value: unknown): void {
 // does not have must not show the first entry's: its text is emptied, and a link
 // with nowhere to go or a picture that was not chosen is left out.
 function fillItem(node: Element, entry: Record<string, unknown>, options: FillOptions, depth = 0): boolean {
-    if (depth > 24 || node.tagName === "script" || node.tagName === "style" || node.tagName === "template") return true;
+    if (depth > 24 || RAW.has(node.tagName)) return true;
     const named = (name: string): { value: unknown } | null => {
         const key = attr(node, name);
         return key && ITEM_KEY.test(key) ? { value: Object.hasOwn(entry, key) ? entry[key] : undefined } : null;
     };
     const href = named("data-item-href");
     if (href && node.tagName === "a") {
-        const to = typeof href.value === "string" ? href.value.trim() : "";
-        if (!to || !SAFE_HREF.test(to) || /^\s*javascript:/i.test(to)) return false;
+        const to = safeHref(href.value);
+        if (!to) return false;
         setAttr(node, "href", to);
     }
     const percent = named("data-item-percent");
@@ -378,8 +392,8 @@ function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
     // A copy: an element may be taken out of the page as it is walked.
     for (const child of [...node.childNodes]) {
         if (!isElement(child)) continue;
-        // Never reach into scripts, styles or templates.
-        if (child.tagName === "script" || child.tagName === "style" || child.tagName === "template") continue;
+        // Never reach into scripts, styles, templates, or anything else whose text is not escaped.
+        if (RAW.has(child.tagName)) continue;
         // A part of the page a yes/no field switches off is left out of it altogether.
         const condition = parseRef(attr(child, "data-content-if") ?? "");
         if (condition && lookup(condition) === false) {
@@ -388,9 +402,8 @@ function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
         }
         // Where a link leads.
         const link = parseRef(attr(child, "data-content-href") ?? "");
-        const to = link ? lookup(link) : undefined;
-        if (child.tagName === "a" && typeof to === "string" && to.trim() && SAFE_HREF.test(to.trim()) && !/^\s*javascript:/i.test(to))
-            setAttr(child, "href", to.trim());
+        const to = link && child.tagName === "a" ? safeHref(lookup(link)) : null;
+        if (to) setAttr(child, "href", to);
         // A named form is told where to send, and given a field only a robot fills in.
         const formName = child.tagName === "form" ? attr(child, "data-form") : undefined;
         const action = formName ? options.forms?.(formName) : undefined;
@@ -421,7 +434,8 @@ function walk(node: ParentNode, lookup: Lookup, options: FillOptions): void {
 }
 
 // Whether a page has anything to fill. A page that has not is served exactly as written.
-export const isBound = (html: string): boolean => html.includes("data-content") || html.includes("data-form=");
+// (Attribute names are read whatever their case, so they are looked for the same way.)
+export const isBound = (html: string): boolean => /data-content|data-form=/i.test(html);
 
 // The page with its bound elements showing the stored values.
 export function fillHtml(html: string, lookup: Lookup, options: FillOptions = {}): string {
@@ -439,7 +453,7 @@ export function boundRefs(html: string): { ref: string; type: BoundType }[] {
     const out: { ref: string; type: BoundType }[] = [];
     const visit = (node: ParentNode) => {
         for (const child of node.childNodes) {
-            if (!isElement(child)) continue;
+            if (!isElement(child) || RAW.has(child.tagName)) continue;
             for (const [name, type] of [
                 ["data-content", "text"],
                 ["data-content-rich", "rich"],

@@ -71,10 +71,28 @@ export function usePath(): string {
 
 export type Theme = "paper" | "night";
 
+// The same key is read by public/theme.js, before the first paint.
 const THEME_KEY = "atelier.theme";
 
+// What the browser remembers for this person. A browser may refuse (private windows, storage
+// switched off): then nothing is remembered, and nothing fails.
+export function remembered(key: string): string | null {
+    try {
+        return localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+export function remember(key: string, value: string): void {
+    try {
+        localStorage.setItem(key, value);
+    } catch {
+        // storage full or unavailable: it still works for this visit
+    }
+}
+
 function initialTheme(): Theme {
-    const stored = localStorage.getItem(THEME_KEY);
+    const stored = remembered(THEME_KEY);
     if (stored === "paper" || stored === "night") return stored;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "paper";
 }
@@ -87,7 +105,7 @@ export function useTheme(): [Theme, () => void] {
     const toggle = useCallback(() => {
         setTheme((t) => {
             const next = t === "paper" ? "night" : "paper";
-            localStorage.setItem(THEME_KEY, next);
+            remember(THEME_KEY, next);
             return next;
         });
     }, []);
@@ -100,7 +118,10 @@ export function useStored<T>(key: string, initial: T): [T, (next: T | ((prev: T)
     const [value, setValue] = useState<T>(() => {
         try {
             const raw = localStorage.getItem(key);
-            return raw === null ? initial : (JSON.parse(raw) as T);
+            if (raw === null) return initial;
+            // What was kept may be from an older Atelier, or changed by hand: only the same kind of thing is taken.
+            const kept = JSON.parse(raw) as unknown;
+            return kept !== null && typeof kept === typeof initial ? (kept as T) : initial;
         } catch {
             return initial;
         }
@@ -125,13 +146,17 @@ export function useStored<T>(key: string, initial: T): [T, (next: T | ((prev: T)
 
 export function useClickOutside(onOutside: () => void) {
     const ref = useRef<HTMLDivElement>(null);
+    // Kept in a ref, so a caller that passes a new function on every render does not have
+    // the listener taken off and put back each time.
+    const latest = useRef(onOutside);
+    latest.current = onOutside;
     useEffect(() => {
         const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) onOutside();
+            if (ref.current && !ref.current.contains(e.target as Node)) latest.current();
         };
         document.addEventListener("mousedown", handler);
         return () => document.removeEventListener("mousedown", handler);
-    }, [onOutside]);
+    }, []);
     return ref;
 }
 
@@ -143,7 +168,10 @@ export function useElapsed(since: string | null): string {
         return () => clearInterval(t);
     }, [since]);
     if (!since) return "";
-    const s = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
+    const from = new Date(since).getTime();
+    // A time that cannot be read is not shown, rather than shown as "NaN:NaN".
+    if (Number.isNaN(from)) return "";
+    const s = Math.max(0, Math.floor((now - from) / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
@@ -151,6 +179,8 @@ const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
 export function timeAgo(iso: string): string {
     const diff = (new Date(iso).getTime() - Date.now()) / 1000;
+    // A time that cannot be read is not shown, rather than shown as "Invalid Date".
+    if (Number.isNaN(diff)) return "";
     const abs = Math.abs(diff);
     if (abs < 45) return "just now";
     if (abs < 3600) return RELATIVE.format(Math.round(diff / 60), "minute");

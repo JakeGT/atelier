@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -60,6 +60,35 @@ test("the website's pages are listed, home first; paths cannot leave the workspa
     assert.equal(inside(dir, "/etc/passwd"), join(dir, "etc/passwd"));
 });
 
+test("a link in the website that leads out of it is not served; a source that fails is reported", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "atelier-look-outside-"));
+    writeFileSync(join(outside, "private.html"), "<p>not the website's</p>");
+    const linked = mkdtempSync(join(tmpdir(), "atelier-look-linked-"));
+    writeFileSync(join(linked, "index.html"), "<!doctype html><title>Home</title><p>home</p>");
+    writeFileSync(join(linked, "real.html"), "<p>inside</p>");
+    symlinkSync(join(outside, "private.html"), join(linked, "leak.html"));
+    symlinkSync(outside, join(linked, "away"));
+    symlinkSync(join(linked, "real.html"), join(linked, "alias.html"));
+    const failed: string[] = [];
+    const site = await serveSite(linked, {
+        documents: async () => {
+            throw new Error("unreachable");
+        },
+        media: async () => [],
+        mediaFile: async () => null,
+        failed: (what) => failed.push(what),
+    });
+    try {
+        assert.equal((await fetch(`${site.url}leak.html`)).status, 404);
+        assert.equal((await fetch(`${site.url}away/private.html`)).status, 404);
+        // A link that stays inside the website is an ordinary file.
+        assert.match(await (await fetch(`${site.url}alias.html`)).text(), /inside/);
+        assert.deepEqual(failed, ["wording"]);
+    } finally {
+        site.close();
+    }
+});
+
 // Only where a browser has been named: one that merely happens to be installed (a CI
 // runner's) may not start under the test's conditions. The end-to-end suite runs the
 // real one inside a real workspace container.
@@ -117,6 +146,14 @@ test("looking at a page: pictures at the visitor's width, saved wording filled i
         assert.deepEqual([post?.width, post?.pictures.length], [1280, 1]);
         assert.deepEqual(post?.problems, ["No margin: p 'short' touches the edge of the screen."]);
         await assert.rejects(browser?.look("http://127.0.0.1:1/nothing", "phone") ?? Promise.resolve(), /could not be opened/);
+
+        // A long page with a great many things on it: what is far down is still described in words.
+        writeFileSync(
+            join(dir, "long.html"),
+            `<!doctype html><title>Long</title><body style="margin:0 20px">${Array.from({ length: 700 }, (_, i) => `<p style="margin:0;height:20px">line ${i}</p>`).join("")}</body>`,
+        );
+        const far = await browser?.look(`${site.url}long.html`, "desktop", 12000);
+        assert.match(far?.outline[0] ?? "", /^p 'line 600' at left 20px, top 12000px/);
     } finally {
         site.close();
     }

@@ -40,8 +40,15 @@ const authorized = (header: string | undefined): boolean => {
     return given.length === want.length && timingSafeEqual(given, want);
 };
 
+// What went wrong, in a length fit to pass on.
+const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).slice(0, 300);
+
 const app = new Hono();
 
+// Whatever a request trips over, the control plane gets an answer it can read.
+app.onError((err, c) => c.json({ error: reason(err) }, 500));
+
+// Before the check below on purpose: answering "I am up" needs no secret.
 app.get("/healthz", (c) => c.json({ ok: true }));
 
 app.use("*", async (c, next) => {
@@ -67,7 +74,9 @@ app.post("/runs", async (c) => {
         typeof body.prompt !== "string" ||
         !body.prompt ||
         typeof body.apiUrl !== "string" ||
-        typeof body.agentToken !== "string"
+        !body.apiUrl ||
+        typeof body.agentToken !== "string" ||
+        !body.agentToken
     ) {
         return c.json({ error: "prompt, apiUrl and agentToken are required" }, 400);
     }
@@ -118,7 +127,7 @@ app.post("/restore", async (c) => {
         if (result === "busy") return c.json({ error: "busy" }, 409);
         return c.json({ sha: result });
     } catch (err) {
-        return c.json({ error: (err as Error).message }, 400);
+        return c.json({ error: reason(err) }, 400);
     }
 });
 
@@ -135,7 +144,7 @@ app.post("/seed", async (c) => {
         if (result === "busy") return c.json({ error: "busy" }, 409);
         return c.json({ sha: result });
     } catch (err) {
-        return c.json({ error: (err as Error).message }, 400);
+        return c.json({ error: reason(err) }, 400);
     }
 });
 
@@ -152,7 +161,7 @@ app.post("/write", async (c) => {
         if (result === "busy") return c.json({ error: "busy" }, 409);
         return c.json({ sha: result });
     } catch (err) {
-        return c.json({ error: (err as Error).message }, 400);
+        return c.json({ error: reason(err) }, 400);
     }
 });
 
@@ -166,7 +175,7 @@ app.post("/cover", async (c) => {
         if (!picture) return c.body(null, 204);
         return new Response(new Uint8Array(picture), { headers: { "content-type": "image/webp" } });
     } catch (err) {
-        return c.json({ error: (err as Error).message }, 500);
+        return c.json({ error: reason(err) }, 500);
     }
 });
 
@@ -176,14 +185,22 @@ app.get("/head", async (c) => c.json({ sha: await workspace.head() }));
 app.get("/export/:sha", async (c) => {
     try {
         const archive = await workspace.archive(c.req.param("sha"));
-        return new Response(new Uint8Array(archive), { headers: { "content-type": "application/x-tar" } });
+        // The bytes as they are, not a second copy of a whole website.
+        const bytes = new Uint8Array(archive.buffer as ArrayBuffer, archive.byteOffset, archive.byteLength);
+        return new Response(bytes, { headers: { "content-type": "application/x-tar" } });
     } catch (err) {
-        return c.json({ error: (err as Error).message.slice(0, 300) }, 400);
+        return c.json({ error: reason(err) }, 400);
     }
 });
 
 app.get("/files/*", async (c) => {
-    const rel = decodeURIComponent(c.req.path.replace(/^\/files\/?/, ""));
+    let rel: string;
+    try {
+        rel = decodeURIComponent(c.req.path.replace(/^\/files\/?/, ""));
+    } catch {
+        // A stray "%" that is not an escape: no file has that address.
+        return c.json({ error: "not found" }, 404);
+    }
     const file = await workspace.readFile(rel);
     if (!file) return c.json({ error: "not found" }, 404);
     return new Response(file.body, { headers: { "content-type": file.contentType } });

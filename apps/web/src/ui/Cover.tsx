@@ -36,7 +36,8 @@ function Drawn({ seed, label }: { seed: string; label: string }) {
     const [bg, accent, ink] = PALETTES[h % PALETTES.length] ?? PALETTES[0];
     const layout = (h >>> 4) % 4;
     const shift = ((h >>> 8) % 40) - 20;
-    const initial = label.trim().charAt(0).toUpperCase() || "A";
+    // The first whole character: a name may begin with one that takes two places (an emoji, say).
+    const initial = Array.from(label.trim())[0]?.toUpperCase() ?? "A";
 
     return (
         <svg className="cover" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">

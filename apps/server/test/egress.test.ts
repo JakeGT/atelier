@@ -143,3 +143,108 @@ test("open mode lets the public web through without remark, and still never a pr
         out.closeAllConnections?.();
     }
 });
+
+test("an IPv6 address that wraps a private IPv4 one, however it is written, is not public", () => {
+    for (const ip of [
+        "::",
+        "0:0:0:0:0:0:0:1",
+        "0000:0000:0000:0000:0000:0000:0000:0001",
+        "::ffff:7f00:1",
+        "0:0:0:0:0:ffff:c0a8:101",
+        "::ffff:169.254.169.254",
+        "::7f00:1",
+        "::127.0.0.1",
+        "64:ff9b::a00:1",
+        "64:ff9b::127.0.0.1",
+        "64:ff9b:1::a00:1",
+        "2002:7f00:1::1",
+        "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+        "2001:db8::1",
+        "fc00::1",
+        "fec0::1",
+        "febf::1",
+        "ff02::1",
+        "fe80::1%eth0",
+        "100::1",
+        "4000::1",
+        "198.18.0.1",
+        "198.19.255.254",
+        "192.0.0.8",
+        "255.255.255.255",
+    ]) {
+        assert.equal(isPublicAddress(ip), false, ip);
+    }
+    for (const ip of [
+        "::ffff:93.184.216.34",
+        "::ffff:5db8:d822",
+        "64:ff9b::5db8:d822",
+        "2001:4860:4860::8888",
+        "2a00:1450:4001::200e",
+        "198.20.0.1",
+    ]) {
+        assert.equal(isPublicAddress(ip), true, ip);
+    }
+});
+
+test("a rule written with a trailing dot still matches", () => {
+    assert.equal(hostAllowed("registry.npmjs.org", ["npmjs.org."]), true);
+    assert.equal(hostAllowed("evilnpmjs.org", ["npmjs.org."]), false);
+});
+
+test("a name with a private address among its public ones is refused, and so is one with none", async () => {
+    const lines: string[] = [];
+    const proxy = createEgressProxy({
+        allow: [],
+        mode: "open",
+        log: (l) => lines.push(l),
+        resolve: async (host) => {
+            if (host === "mixed.example") return ["93.184.216.34", "10.0.0.7"];
+            if (host === "mapped.example") return ["::ffff:a00:7"];
+            if (host === "empty.example") return [];
+            throw new Error("no such host");
+        },
+    });
+    const port = await listen(proxy);
+    try {
+        assert.match(await connectVia(port, "mixed.example:443"), /403 Forbidden/);
+        assert.match(await connectVia(port, "mapped.example:443"), /403 Forbidden/);
+        assert.match(await connectVia(port, "empty.example:443"), /502 Bad Gateway/);
+        assert.match(await connectVia(port, "nowhere.example:443"), /502 Bad Gateway/);
+        assert.equal(lines.filter((l) => /private address/.test(l)).length, 2);
+    } finally {
+        proxy.close();
+    }
+});
+
+test("an address in brackets is refused as an address, and a target that is not host:port is not judged at all", async () => {
+    const asked: string[] = [];
+    const proxy = createEgressProxy({
+        allow: [],
+        mode: "open",
+        log: () => {},
+        resolve: async (host) => {
+            asked.push(host);
+            return "93.184.216.34";
+        },
+    });
+    const port = await listen(proxy);
+    try {
+        assert.match(await connectVia(port, "[::1]:443"), /403/);
+        assert.match(await connectVia(port, "[::ffff:127.0.0.1]:443"), /403/);
+        assert.match(await connectVia(port, "no-port.example"), /400/);
+        assert.match(await connectVia(port, "a.example:443:80"), /400/);
+        assert.match(await connectVia(port, "a.example:https"), /400/);
+        const status = await new Promise<number>((resolve, reject) => {
+            const req = request({ host: "127.0.0.1", port, path: "http://[::1]/x", method: "GET" }, (res) => {
+                res.resume();
+                resolve(res.statusCode ?? 0);
+            });
+            req.on("error", reject);
+            req.end();
+        });
+        assert.equal(status, 403);
+        assert.deepEqual(asked, []);
+    } finally {
+        proxy.close();
+    }
+});

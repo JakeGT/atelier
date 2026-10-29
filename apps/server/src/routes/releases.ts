@@ -12,7 +12,9 @@ export function releaseRoutes(api: Api): void {
     );
 
     route("get", `${PROJECT}/releases/:number/manifest`, "release.read", async (c) => {
-        const release = await store.releases.get(c.get("org").id, c.get("project").id, Number(param(c, "number")));
+        const number = Number(param(c, "number"));
+        if (!Number.isInteger(number) || number < 1) return c.json({ error: "invalid release number" }, 400);
+        const release = await store.releases.get(c.get("org").id, c.get("project").id, number);
         if (!release) return c.json({ error: "not found" }, 404);
         return c.json({ release, documents: await store.releases.manifest(c.get("org").id, release.id) });
     });
@@ -55,20 +57,27 @@ export function releaseRoutes(api: Api): void {
             return c.json({ release }, action === "publish" ? 200 : 201);
         } catch (err) {
             if (err instanceof ReleaseError) {
+                // Recording the failure must not replace it: the person is still told what went wrong.
                 if (err.status === 422 || err.status === 502)
-                    await audit(c, `release.${action}.failed`, `project:${projectId}`, { number, reason: err.message });
+                    await audit(c, `release.${action}.failed`, `project:${projectId}`, { number, reason: err.message }).catch(
+                        (failed: Error) => console.error(`release.${action}.failed for ${projectId} was not recorded: ${failed.message}`),
+                    );
                 // Our side or the host's (not something wrong with the website): the studio's
                 // owners should know it did not go out, and so should whoever runs the platform.
                 if (err.status === 502) {
                     const project = c.get("project");
+                    // Putting an earlier version back goes out the same way, and is said as what it was.
+                    const back = action === "rollback";
                     await notifier.tellStudio(
                         c.get("org").id,
                         {
                             kind: "publish.failed",
-                            title: `${project.name} could not be published`,
-                            body: `${c.get("user").name} tried to publish it and the publishing service failed. The version that was live is still live. Try again in a few minutes.`,
+                            title: back
+                                ? `An earlier version of ${project.name} could not be put back`
+                                : `${project.name} could not be published`,
+                            body: `${c.get("user").name} tried to ${back ? "put an earlier version of it back" : "publish it"} and the publishing service failed. The version that was live is still live. Try again in a few minutes.`,
                             link: `/o/${c.get("org").slug}/p/${project.slug}`,
-                            dedupe: `publish:${projectId}:${number}`,
+                            dedupe: `${action}:${projectId}:${number}`,
                         },
                         [c.get("user").id],
                     );
@@ -84,6 +93,8 @@ export function releaseRoutes(api: Api): void {
         }
     };
     // Takes the website offline. Its files and history stay; Publish brings it back.
+    // Not refused for an archived website, or where publishing is switched off: going offline is
+    // the one thing that must stay possible then.
     route("post", `${PROJECT}/unpublish`, "release.publish", stepUp, async (c) => {
         try {
             const release = await releases.unpublish(c.get("org").id, c.get("project").id);

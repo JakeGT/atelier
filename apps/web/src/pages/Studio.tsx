@@ -54,6 +54,15 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
     const a = useMemo(() => orgApi(org.slug), [org.slug]);
     const [projects, setProjects] = useState<Project[] | null>(null);
     const [archived, setArchived] = useState<Project[]>([]);
+    // The websites could not be fetched: that is said, rather than shown as an empty shelf.
+    const [loadFailed, setLoadFailed] = useState(false);
+    // A change that needs a fresh sign-in says so, then goes to get one.
+    const fail = (err: unknown) => {
+        if (err instanceof ReauthRequired) {
+            toast("Please confirm your sign-in, then try that again.", "error");
+            setTimeout(reauthenticate, 1200);
+        } else toast((err as Error).message, "error");
+    };
     const [showArchived, setShowArchived] = useState(false);
     const [name, setName] = useState("");
     const [brief, setBrief] = useState("");
@@ -115,7 +124,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             setSaving(null);
             await loadTemplates();
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         } finally {
             setBusy(false);
         }
@@ -127,7 +136,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             toast(`“${t.name}” was removed. Websites already made from it are not affected.`);
             await loadTemplates();
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         }
     }
     const [deleting, setDeleting] = useState<Project | null>(null);
@@ -141,8 +150,11 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             const [live, gone] = await Promise.all([a.listProjects(), a.listProjects(true)]);
             setProjects([...live].reverse());
             setArchived([...gone].reverse());
+            setLoadFailed(false);
         } catch (err) {
-            setProjects([]);
+            // Keep what is already shown; with nothing to show yet, say that it did not load.
+            setProjects((had) => had ?? []);
+            setLoadFailed(true);
             toast((err as Error).message, "error");
         }
     }, [a, toast]);
@@ -161,16 +173,24 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
         setBusy(true);
         try {
             const project = await a.createProject(name.trim(), template, askLevel);
-            if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
+            // The website exists now. If the description cannot be kept (storage full or switched
+            // off), still open it: the description can be typed again there.
+            try {
+                if (brief.trim()) sessionStorage.setItem(FIRST_PROMPT_KEY, JSON.stringify({ projectId: project.id, prompt: brief.trim() }));
+            } catch {}
             navigate(`/o/${org.slug}/p/${project.slug}`);
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
             setBusy(false);
         }
     }
 
     const onBriefKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void create();
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            // Otherwise some browsers also put a new line into the description.
+            e.preventDefault();
+            void create();
+        }
     };
 
     async function restore(p: Project) {
@@ -179,7 +199,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             toast(`${p.name} is back on the shelf.`);
             await load();
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         }
     }
 
@@ -203,7 +223,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
             toast(`${p.name} is archived. You can restore it from the list below.`);
             await load();
         } catch (err) {
-            toast((err as Error).message, "error");
+            fail(err);
         }
     }
 
@@ -396,6 +416,14 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                 <div key={i} className="card card-ghost" />
                             ))}
                         </div>
+                    ) : projects.length === 0 && loadFailed ? (
+                        <div className="shelf-empty" role="alert" style={{ cursor: "default" }}>
+                            <span className="display">Your websites could not be loaded.</span>
+                            <span className="muted">Nothing was changed. They are still there.</span>
+                            <button type="button" className="btn" onClick={() => void load()}>
+                                Try again
+                            </button>
+                        </div>
                     ) : projects.length === 0 ? (
                         <button type="button" className="shelf-empty" onClick={() => nameRef.current?.focus()} disabled={!mayManage}>
                             <Plus />
@@ -482,6 +510,7 @@ export function Studio({ session, org, orgs, onOrgsChanged, theme, onToggleTheme
                                             className="row-main"
                                             href={`/o/${org.slug}/p/${p.slug}`}
                                             onClick={(e) => {
+                                                if (e.metaKey || e.ctrlKey || e.shiftKey) return;
                                                 e.preventDefault();
                                                 navigate(`/o/${org.slug}/p/${p.slug}`);
                                             }}
@@ -633,7 +662,8 @@ function CardMenu({
                     <button type="button" role="menuitem" onClick={run(() => window.open(href, "_blank", "noopener"))}>
                         <ArrowUpRight /> Open the editor in a new tab
                     </button>
-                    {project.productionRef && (
+                    {/* Only a web address is ever offered as a link. */}
+                    {project.productionRef && /^https?:\/\//i.test(project.productionRef) && (
                         <a role="menuitem" href={project.productionRef} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
                             <Globe /> Visit the live website
                         </a>
